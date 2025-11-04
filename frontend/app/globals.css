@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-100 text-slate-900;
+}
+
+.canvas-grid {
+  background-color: #fdfdff;
+  background-image:
+    radial-gradient(#dfe3ff 1px, transparent 0),
+    radial-gradient(#dfe3ff 1px, transparent 0);
+  background-position: 0 0, 12px 12px;
+  background-size: 24px 24px;
+}
+
+.react-flow__node.canvas-node {
+  transition: transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+.react-flow__node.canvas-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 45px -36px rgba(64, 84, 172, 0.55);
+}
+
+.react-flow__node.animate-canvas-node {
+  animation: canvas-node-pop 0.45s ease forwards;
+}
+
+@keyframes canvas-node-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.react-flow__edge.animate-canvas-edge {
+  opacity: 0;
+  animation: canvas-edge-fade 0.4s ease forwards;
+}
+
+@keyframes canvas-edge-fade {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}

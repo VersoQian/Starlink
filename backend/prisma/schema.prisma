@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String          @id @default(uuid())
+  email     String          @unique
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  knowledgeBases KnowledgeBase[]
+}
+
+model KnowledgeBase {
+  id                String        @id @default(uuid())
+  name              String
+  aiChunkingEnabled Boolean       @default(true)
+  status            KbStatus      @default(draft)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  publishedAt       DateTime?
+  owner             User?         @relation(fields: [ownerId], references: [id])
+  ownerId           String?
+  seeds             Seed[]
+  documents         Document[]
+  tasks             ImportTask[]
+}
+
+model Seed {
+  id        String   @id @default(uuid())
+  text      String
+  createdAt DateTime @default(now())
+  kb        KnowledgeBase @relation(fields: [kbId], references: [id])
+  kbId      String
+}
+
+model Document {
+  id        String   @id @default(uuid())
+  title     String
+  path      String
+  mime      String
+  size      Int
+  sourceType DocumentSourceType
+  createdAt DateTime @default(now())
+  kb        KnowledgeBase @relation(fields: [kbId], references: [id])
+  kbId      String
+}
+
+model ImportTask {
+  id        String          @id @default(uuid())
+  type      ImportTaskType
+  payload   Json
+  status    ImportStatus    @default(pending)
+  error     String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  kb        KnowledgeBase   @relation(fields: [kbId], references: [id])
+  kbId      String
+}
+
+model Usage {
+  id         String  @id @default(uuid())
+  usedTokens BigInt  @default(0)
+  limitTokens BigInt @default(100000000)
+}
+
+enum KbStatus {
+  draft
+  processing
+  ready
+}
+
+enum ImportTaskType {
+  seed
+  file
+  url
+}
+
+enum ImportStatus {
+  pending
+  processing
+  succeeded
+  failed
+}
+
+enum DocumentSourceType {
+  file
+  url
+}

@@ -1,0 +1,46 @@
+{
+  "pages": {
+    "/(app)/workspace/[workspaceId]/knowledge/[entryId]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(app)/workspace/[workspaceId]/knowledge/[entryId]/page.js"
+    ],
+    "/(app)/workspace/[workspaceId]/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(app)/workspace/[workspaceId]/layout.js"
+    ],
+    "/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/layout.css",
+      "static/chunks/app/layout.js"
+    ],
+    "/(app)/workspace/[workspaceId]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/(app)/workspace/[workspaceId]/page.css",
+      "static/chunks/app/(app)/workspace/[workspaceId]/page.js"
+    ],
+    "/(app)/workspace/[workspaceId]/insights/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(app)/workspace/[workspaceId]/insights/page.js"
+    ],
+    "/(marketing)/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(marketing)/page.js"
+    ],
+    "/(app)/workspace/[workspaceId]/knowledge/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(app)/workspace/[workspaceId]/knowledge/page.js"
+    ],
+    "/(app)/workspace/[workspaceId]/cultural-tools/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(app)/workspace/[workspaceId]/cultural-tools/page.js"
+    ]
+  }
+}
