@@ -1,5 +1,5 @@
 import { PubSub } from 'graphql-subscriptions';
-import type { CanvasGraph, CanvasNode, ConversationEvent, ConversationMetadata } from '@branching-chat/shared';
+import type { CanvasEdge, CanvasGraph, CanvasNode, ConversationEvent, ConversationMetadata } from '@branching-chat/shared';
 export type ConversationStoreDeps = {
     pubSub: PubSub;
 };
@@ -24,6 +24,12 @@ export declare class ConversationStore {
         };
         data: unknown;
     }): CanvasNode;
+    connectNodes(workspaceId: string, input: {
+        id?: string;
+        source: string;
+        target: string;
+        label?: string | null;
+    }): CanvasEdge;
     getEventIterator(): import("graphql-subscriptions/dist/pubsub-async-iterable-iterator.js").PubSubAsyncIterableIterator<{
         conversationProgress: ConversationEvent;
     }>;

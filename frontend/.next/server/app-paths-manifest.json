@@ -1,8 +1,4 @@
 {
-  "/api/timeline/[taskId]/route": "app/api/timeline/[taskId]/route.js",
-  "/(app)/workspace/[workspaceId]/page": "app/(app)/workspace/[workspaceId]/page.js",
-  "/(app)/workspace/[workspaceId]/insights/page": "app/(app)/workspace/[workspaceId]/insights/page.js",
-  "/(app)/workspace/[workspaceId]/knowledge/[entryId]/page": "app/(app)/workspace/[workspaceId]/knowledge/[entryId]/page.js",
-  "/(app)/workspace/[workspaceId]/cultural-tools/page": "app/(app)/workspace/[workspaceId]/cultural-tools/page.js",
-  "/(app)/workspace/[workspaceId]/knowledge/page": "app/(app)/workspace/[workspaceId]/knowledge/page.js"
+  "/api/file-translation/route": "app/api/file-translation/route.js",
+  "/(app)/workspace/[workspaceId]/cultural-tools/page": "app/(app)/workspace/[workspaceId]/cultural-tools/page.js"
 }

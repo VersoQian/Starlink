@@ -60,6 +60,13 @@ export const typeDefs = gql `
     data: JSON!
   }
 
+  input EdgeInput {
+    id: ID
+    source: ID!
+    target: ID!
+    label: String
+  }
+
   type Query {
     workspaceGraph(workspaceId: ID!): CanvasGraph!
     conversation(id: ID!): StartConversationPayload
@@ -68,6 +75,7 @@ export const typeDefs = gql `
   type Mutation {
     startConversation(workspaceId: ID!, question: String!): StartConversationPayload!
     addNode(workspaceId: ID!, input: NodeInput!): CanvasNode!
+    connectNodes(workspaceId: ID!, input: EdgeInput!): CanvasEdge!
   }
 
   type Subscription {

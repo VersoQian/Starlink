@@ -1,8 +1,6 @@
 'use client'
 
-import { Fragment } from 'react'
 import type { InsightLog, KnowledgeEntry } from '@/types/knowledge'
-import clsx from 'clsx'
 
 type KnowledgeEntryDetailProps = {
   entry: KnowledgeEntry | null

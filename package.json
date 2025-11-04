@@ -9,11 +9,12 @@
   "scripts": {
     "dev:frontend": "npm run dev -w frontend",
     "dev:server": "pnpm --filter @branching-chat/server dev",
-    "dev:agent": "pnpm --filter @branching-chat/agent-runtime dev",
     "build:frontend": "npm run build -w frontend",
     "build:server": "pnpm --filter @branching-chat/server build",
-    "build:agent": "pnpm --filter @branching-chat/agent-runtime build",
     "test:e2e": "npm run test:e2e -w frontend",
     "test:e2e:headed": "npm run test:e2e:headed -w frontend"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.78.0"
   }
 }

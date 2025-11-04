@@ -1,7 +1,7 @@
 'use server'
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { getSupabaseClientConfig } from '../../../config/keys.js'
+import { getSupabaseClientConfig } from '../../../../config/keys.js'
 
 let cachedClient: SupabaseClient | null | undefined
 

@@ -5,18 +5,20 @@ The codebase is now composed of:
 
 - **frontend/** – Next.js App Router app，渲染多面板画布 UI 并对接 GraphQL 服务。
 - **packages/shared/** – 共享的 Zod Schema & TypeScript 类型，约束画布节点、会话事件等契约。
-- **packages/agent-runtime/** – LangGraph/LangChain 驱动的多维画布推理流水线，负责“对话即画布”的节点生成。
-- **packages/server/** – Express + Apollo Server GraphQL 网关，整合 Agent Runtime、发布 Subscription 事件，为前端提供统一入口。
+- **packages/server/** – Express + Apollo Server GraphQL 网关，整合 Dify 工作流、发布 Subscription 事件，为前端提供统一入口。
+- **config/** – 环境变量读取工具（Supabase、Dify、第三方服务）。
 - **docs/** – 额外的架构说明 (`docs/frontend-architecture.md`)。
 
 Key features:
 
 - 拖拽节点到 React Flow 画布并实时持久化
-- GraphQL `workspaceGraph` 查询 + 订阅流，驱动画布逐步展开的交互体验
-- Agent Runtime 将对话拆分为节点、维度、行动项等多种画布结构
+- GraphQL `workspaceGraph` 查询 + Subscription 流式行程，驱动画布逐步展开的交互体验
+- Dify Workflow 将提问拆解为节点、维度、行动项等多种画布结构
 - Playwright 端到端测试覆盖核心交互（拖拽、面板切换、错误重试）
 
 Both services can be developed independently or through npm workspaces.
+
+For contributor workflow and coding standards, see [`AGENTS.md`](AGENTS.md).
 
 ## Prerequisites
 
@@ -80,7 +82,6 @@ npm run test:e2e:headed
 .
 ├── frontend/                      # Next.js canvas client
 ├── packages/
-│   ├── agent-runtime/             # LangGraph/LangChain pipelines
 │   ├── server/                    # Express + Apollo GraphQL 网关
 │   └── shared/                    # Zod schema / TS types
 ├── docs/                          # Design documents

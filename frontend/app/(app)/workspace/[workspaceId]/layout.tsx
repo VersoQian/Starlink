@@ -20,38 +20,42 @@ export default function WorkspaceLayout({ children, params }: WorkspaceLayoutPro
   const pathname = usePathname()
   const basePath = `/workspace/${params.workspaceId}`
 
-  const navItems = [
-    {
-      key: 'canvas',
-      label: '多维画布',
-      description: '整合资料、AI 与协作者，共创可溯源的知识地图。',
-      href: basePath
-    },
-    {
-      key: 'knowledge',
-      label: '知识库',
-      description: '上传与导入资料，自动分析并同步到画布引用。',
-      href: `${basePath}/knowledge`
-    },
-    {
-      key: 'cultural-tools',
-      label: '跨文化助手',
-      description: '语言转换、文化洞察与报告撰写工具集成在此。',
-      href: `${basePath}/cultural-tools`
-    },
-    {
-      key: 'templates',
-      label: '模板库',
-      description: '精选分支画布模板与行业范式，敬请期待。',
-      href: null
-    },
-    {
-      key: 'insights',
-      label: '数据洞察',
-      description: '上传文件、可视化表格并生成 AI 洞察。',
-      href: `${basePath}/insights`
-    }
-  ] as const
+  const navItems = useMemo(
+    () =>
+      [
+        {
+          key: 'canvas',
+          label: '多维画布',
+          description: '整合资料、AI 与协作者，共创可溯源的知识地图。',
+          href: basePath
+        },
+        {
+          key: 'knowledge',
+          label: '知识库',
+          description: '上传与导入资料，自动分析并同步到画布引用。',
+          href: `${basePath}/knowledge`
+        },
+        {
+          key: 'cultural-tools',
+          label: '跨文化助手',
+          description: '语言转换、文化洞察与报告撰写工具集成在此。',
+          href: `${basePath}/cultural-tools`
+        },
+        {
+          key: 'templates',
+          label: '模板库',
+          description: '精选分支画布模板与行业范式，敬请期待。',
+          href: null
+        },
+        {
+          key: 'insights',
+          label: '数据洞察',
+          description: '上传文件、可视化表格并生成 AI 洞察。',
+          href: `${basePath}/insights`
+        }
+      ] as const,
+    [basePath]
+  )
 
   const activeNav = useMemo(() => {
     return (

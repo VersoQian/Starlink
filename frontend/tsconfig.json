@@ -23,6 +23,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": [
+        "./src/*",
         "./*"
       ],
       "@branching-chat/ui": ["../packages/ui/dist/index"],

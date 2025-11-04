@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { KnowledgeEntryDetail } from '@/components/knowledge/entry-detail'
 import { knowledgeEntries, insightHistory } from '@/components/knowledge/mock-data'
-import type { InsightLog, KnowledgeEntry } from '@/types/knowledge'
+import type { InsightLog } from '@/types/knowledge'
 
 type KnowledgeDetailPageProps = {
   params: {

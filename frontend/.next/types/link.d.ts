@@ -32,13 +32,14 @@ declare namespace __next_route_internal_types__ {
     | `/dashboard`
     | `/`
     | `/api/analyze`
+    | `/api/file-translation`
     | `/api/insights`
   type DynamicRoutes<T extends string = string> = 
     | `/workspace/${SafeSlug<T>}`
+    | `/workspace/${SafeSlug<T>}/cultural-tools`
     | `/workspace/${SafeSlug<T>}/insights`
     | `/workspace/${SafeSlug<T>}/knowledge`
     | `/workspace/${SafeSlug<T>}/knowledge/${SafeSlug<T>}`
-    | `/workspace/${SafeSlug<T>}/cultural-tools`
     | `/api/timeline/${SafeSlug<T>}`
 
   type RouteImpl<T> = 

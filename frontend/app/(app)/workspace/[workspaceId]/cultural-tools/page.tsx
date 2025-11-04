@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 
 type ToolTag = 'language' | 'dialogue' | 'reports'
@@ -136,8 +136,140 @@ export default function CulturalToolsPage() {
   const [inputText, setInputText] = useState('')
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [selectedExport, setSelectedExport] = useState<string>('pdf')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [targetLanguage, setTargetLanguage] = useState('英语')
+  const [translationResult, setTranslationResult] = useState('')
+  const [translationUsage, setTranslationUsage] = useState<number | null>(null)
+  const [translationError, setTranslationError] = useState<string | null>(null)
+  const [isTranslating, setIsTranslating] = useState(false)
 
   const activeTool = useMemo(() => toolDefinitions[activeTag], [activeTag])
+  const translationPreview =
+    activeTag === 'language'
+      ? isTranslating
+        ? 'AI 正在翻译中，请稍候……'
+        : translationResult || activeTool.placeholders.output
+      : activeTool.placeholders.output
+
+  useEffect(() => {
+    if (activeTag !== 'language') {
+      setIsTranslating(false)
+      setTranslationError(null)
+    }
+  }, [activeTag])
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      setSelectedFile(null)
+      return
+    }
+
+    const MAX_SIZE = 15 * 1024 * 1024
+    if (file.size > MAX_SIZE) {
+      setTranslationError('文件超过 15MB 上限，请压缩或拆分后再试。')
+      setSelectedFile(null)
+      event.target.value = ''
+      return
+    }
+
+    setTranslationError(null)
+    setSelectedFile(file)
+    setTranslationResult('')
+    setTranslationUsage(null)
+  }
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null)
+    setTranslationResult('')
+    setTranslationUsage(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleExecute = async () => {
+    if (activeTag !== 'language') {
+      return
+    }
+
+    if (!selectedFile) {
+      setTranslationError('请先上传需要翻译的文件。')
+      return
+    }
+
+    const trimmedTarget = targetLanguage.trim()
+    if (!trimmedTarget) {
+      setTranslationError('请填写目标语言。')
+      return
+    }
+
+    setIsTranslating(true)
+    setTranslationError(null)
+    setTranslationResult('')
+    setTranslationUsage(null)
+
+    try {
+      const form = new FormData()
+      form.append('file', selectedFile)
+      form.append('targetLanguage', trimmedTarget)
+      if (inputText.trim()) {
+        form.append('instructions', inputText.trim())
+      }
+      if (selectedPreset) {
+        form.append('preset', selectedPreset)
+      }
+
+      const response = await fetch('/api/file-translation', {
+        method: 'POST',
+        body: form
+      })
+
+      if (!response.ok) {
+        const detailText = await response.text()
+        let message = detailText
+        try {
+          const parsed = JSON.parse(detailText)
+          if (parsed && typeof parsed.message === 'string') {
+            message = parsed.message
+          }
+        } catch {
+          // ignore parsing failure
+        }
+        throw new Error(message || '文件翻译失败，请稍后重试。')
+      }
+
+      const data = (await response.json()) as {
+        translation?: string
+        usage?: { total_tokens?: number }
+      }
+
+      const resolvedTranslation =
+        typeof data.translation === 'string' && data.translation.trim().length > 0
+          ? data.translation.trim()
+          : '翻译完成，但未返回可显示的内容。'
+
+      setTranslationResult(resolvedTranslation)
+      setTranslationUsage(
+        typeof data.usage?.total_tokens === 'number' ? data.usage.total_tokens : null
+      )
+    } catch (error) {
+      setTranslationError(error instanceof Error ? error.message : '文件翻译失败，请重试。')
+    } finally {
+      setIsTranslating(false)
+    }
+  }
+
+  const formatFileSize = (size: number) => {
+    if (size >= 1024 * 1024) {
+      return `${(size / (1024 * 1024)).toFixed(1)} MB`
+    }
+    if (size >= 1024) {
+      return `${(size / 1024).toFixed(1)} KB`
+    }
+    return `${size} B`
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-8 bg-[#F4F5FF] px-8 py-6 text-slate-900">
@@ -228,15 +360,76 @@ export default function CulturalToolsPage() {
               className="mt-5 h-44 w-full rounded-2xl border border-[#D6DAFF] bg-[#FBFBFF] px-4 py-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-[#6366F1] focus:outline-none"
             />
 
+            {activeTag === 'language' && (
+              <div className="mt-4 space-y-3 rounded-2xl border border-dashed border-[#C7D2FE] bg-[#F8F9FF] px-4 py-4 text-sm text-slate-600">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">
+                      {selectedFile ? selectedFile.name : '尚未选择文件'}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {selectedFile ? formatFileSize(selectedFile.size) : '支持 PDF / DOCX / Markdown / TXT'}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="rounded-full border border-[#C6CBFF] px-4 py-2 text-xs font-semibold text-[#6366F1] transition hover:bg-[#EEF0FF]"
+                    >
+                      选择文件
+                    </button>
+                    {selectedFile && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveFile}
+                        className="rounded-full border border-[#E3E6FF] px-4 py-2 text-xs text-slate-500 transition hover:bg-[#F1F2FF]"
+                      >
+                        移除
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.md,.txt,.rtf,.markdown,.html,.ppt,.pptx,.xls,.xlsx,.csv"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
+                  目标语言
+                  <input
+                    value={targetLanguage}
+                    onChange={(event) => setTargetLanguage(event.target.value)}
+                    placeholder="示例：英文、日文、阿拉伯语"
+                    className="rounded-xl border border-[#D6DAFF] bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-[#6366F1] focus:outline-none"
+                  />
+                </label>
+              </div>
+            )}
+
             <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-              <button className="rounded-full border border-[#C6CBFF] px-4 py-2 text-[#6366F1] transition hover:bg-[#EEF0FF]">
-                {activeTool.cta}
+              <button
+                type="button"
+                onClick={handleExecute}
+                disabled={activeTag === 'language' && isTranslating}
+                className={clsx(
+                  'rounded-full border border-[#C6CBFF] px-4 py-2 text-[#6366F1] transition',
+                  activeTag === 'language' && isTranslating ? 'cursor-not-allowed bg-[#EEF0FF] opacity-70' : 'hover:bg-[#EEF0FF]'
+                )}
+              >
+                {activeTag === 'language' && isTranslating ? '正在执行…' : activeTool.cta}
               </button>
               <button className="rounded-full border border-[#E3E6FF] px-4 py-2 hover:bg-[#F6F7FF]">
                 保存为工作流
               </button>
               <span>{selectedPreset ? `已选策略：${selectedPreset}` : '可从上方选择策略模板。'}</span>
             </div>
+
+            {translationError && activeTag === 'language' && (
+              <p className="mt-2 text-xs text-rose-500">{translationError}</p>
+            )}
           </div>
 
           <div className="rounded-3xl border border-[#E4E7FF] bg-white px-6 py-6 shadow-sm">
@@ -327,9 +520,16 @@ export default function CulturalToolsPage() {
           <p className="mt-2 text-xs text-slate-500">
             运行后将在此显示分段结果，可按段落进行编辑、标记与版本对比。
           </p>
-          <div className="mt-4 h-56 rounded-2xl border border-[#D6DAFF] bg-[#FBFBFF] px-4 py-3 text-xs text-slate-500">
-            {activeTool.placeholders.output}
+          <div className="mt-4 h-56 overflow-y-auto rounded-2xl border border-[#D6DAFF] bg-[#FBFBFF] px-4 py-3 text-xs text-slate-500">
+            {activeTag === 'language' ? (
+              <pre className="whitespace-pre-wrap break-words text-slate-600">{translationPreview}</pre>
+            ) : (
+              activeTool.placeholders.output
+            )}
           </div>
+          {activeTag === 'language' && translationUsage !== null && (
+            <p className="mt-2 text-[11px] text-slate-400">Token 消耗：{translationUsage}</p>
+          )}
           <div className="mt-3 flex gap-2 text-xs text-slate-500">
             <button className="rounded-full border border-[#E3E6FF] px-3 py-1 hover:bg-[#F6F7FF]">
               对比原文

@@ -7,9 +7,9 @@
 
 ## 仓库结构概览
 - `frontend/` – Next.js (App Router) 画布前端，含 React Flow 画布、AI 助手、文档抽屉等模块。
-- `packages/server/` – Express + Apollo Server GraphQL 网关，负责汇总画布数据、触发 AI 推理并通过 Subscription 推送增量。
-- `packages/agent-runtime/` – LangChain/LangGraph Agent Runtime，实现问题拆解、节点生成、知识补全等流水线。
+- `packages/server/` – Express + Apollo Server GraphQL 网关，负责汇总画布数据、触发 Dify 工作流并通过 Subscription 推送增量。
 - `packages/shared/` – 共享的 Zod Schema 与 TypeScript 类型，统一节点/事件的契约。
+- `config/` – 环境变量读取工具（Supabase、Dify、兼容旧外部服务）。
 - `backend/` – 传统 REST/GraphQL 组合的知识库与 LangChain 服务，前端 `/api` 路由会转发到此服务。
 - `docs/` – 架构设计文档（如 `frontend-architecture.md`）。
 - `biz-canvas-agents/`、`dialogs/` – 辅助材料或实验性 Agent 配置（暂未纳入主流程）。
@@ -25,15 +25,14 @@
 - **GraphQL Gateway (`packages/server/`)**
   - 技术栈：Express + Apollo Server + graphql-ws。
   - `src/index.ts` 启动 HTTP 与 WS 服务，挂载 `/graphql`。
-  - Resolver 使用 `ConversationStore` 将对话上下文（workspace、question、user）与画布数据绑定，并触发 `runCanvasPipeline`。
+  - Resolver 使用 `ConversationStore` 将对话上下文（workspace、question、user）与画布数据绑定，并通过 `DifyServerService` 调用 Dify Workflow 获取摘要，再按 Blueprint 生成节点与连线。
   - Subscription 通过 `graphql-subscriptions` 的 `PubSub` 推送 `conversationProgress` 事件（初始画布、增量更新、状态变更）。
 
-- **Agent Runtime (`packages/agent-runtime/`)**
-  - LangGraph/LangChain 驱动的流水线，输入 `workspaceId`、`question`、`userId`。
-  - `runCanvasPipeline` 按阶段生成：根任务节点 → 分支问题 → 分析维度 → 行动计划 → 结合知识库补充引用节点。
-  - `tools/knowledge-base.ts` 定义知识检索接口，默认使用 `MockKnowledgeBaseClient`，后续可接入真实 KB 服务。
-  - `agent/multi-tool-agent.ts` 暴露 `createStarlinkAgentExecutor` / `runStarlinkAgentTask`，基于 LangChain `AgentExecutor` + 通义千问或 DeepSeek 模型，将知识检索、画布巡检、节点建议等工具组合成多工具 Agent。
-  - 结果返回 `CanvasExecutionResult`，包含整图与逐步增量，供 Subscription 播放。
+- **Dify Workflow (`frontend/src`, `packages/server/src/services/dify-service.ts`)**
+  - 统一的环境配置定义在 `frontend/src/config/dify.ts` 与 `config/keys.js`，可声明多个逻辑工作流 ID、基础 URL、API Key。
+  - 前端：`DifyWorkflowService` 与 `/api/dify` Route Handler 封装 blocking/streaming 调用，`ContentGenerationToolbar` 等组件通过流事件实时更新 UI。
+  - 服务端：`DifyServerService` 提供阻塞调用与摘要抽取，用于 GraphQL 画布生成或其它后端自动化任务。
+  - `/api/analyze`、`/api/insights` 等旧接口已经迁移到 Dify 工作流，返回的节点/摘要结构保持兼容。
 
 - **共享类型 (`packages/shared/`)**
   - 使用 Zod 定义 `CanvasNodeData`、`CanvasGraph`、`ConversationEvent` 等结构，前后端都通过该包保持类型一致。
@@ -55,9 +54,8 @@
 - **安装依赖**：在仓库根目录执行 `pnpm install` 会为所有 workspace 安装依赖。
 - **启动流程**：
   1. `pnpm dev:server` – 启动 GraphQL Gateway (`packages/server`)。
-  2. `pnpm dev:agent` – 若需单独调试 LangChain 流水线。
-  3. `pnpm dev:frontend` – 启动 Next.js 前端，访问 `http://localhost:3000`。
-  4. `pnpm --filter backend dev`（或进入 `backend/` 执行 `pnpm dev`）– 启动 Legacy REST/LangChain 服务，供 `/api` 代理调用。
+  2. `pnpm dev:frontend` – 启动 Next.js 前端，访问 `http://localhost:3000`。
+  3. `pnpm --filter backend dev`（或进入 `backend/` 执行 `pnpm dev`）– 启动 Legacy REST/LangChain 服务，供 `/api` 代理调用（可选，如已完全迁移 Dify 可忽略）。
 - **测试**：
   - 前端：`pnpm test:e2e` 运行 Playwright；`pnpm test:e2e:headed` 进入调试。
   - Agent/Server：目前主要依赖 TypeScript 校验（`pnpm --filter <pkg> lint`）；可按需新增 Vitest/Jest。
@@ -67,15 +65,13 @@
 - `frontend/.env.local`
   - `NEXT_PUBLIC_GRAPHQL_URL`：GraphQL Gateway 入口（默认 `http://localhost:4000/graphql`）。
   - `BACKEND_API_BASE_URL`：Legacy Backend 根地址（默认 `http://localhost:4000`）。
-- `packages/agent-runtime`
-  - `DEEPSEEK_API_KEY`：多工具 Agent 使用 DeepSeek 时必填。
-  - `DEEPSEEK_MODEL` / `DEEPSEEK_TEMPERATURE`：可选，覆盖 DeepSeek 模型与温度。
-  - `DEEPSEEK_API_URL` / `DEEPSEEK_MAX_OUTPUT_TOKENS`：可选，自定义 DeepSeek 接口地址或单次输出上限。
-  - `DASHSCOPE_API_KEY`：启用通义千问时必填（也可使用 `TONGYI_API_KEY` / `QWEN_API_KEY`）。
-  - `TONGYI_MODEL` / `TONGYI_TEMPERATURE`：可选，覆盖默认模型与采样参数。
 - `packages/server`
   - `PORT`：GraphQL 服务端口（默认 4000）。
   - 需要时可通过 `NODE_OPTIONS=--inspect` 等变量辅助调试。
+- `config/keys.js`
+  - `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_KEY`：统一的 Supabase 凭据读取。
+  - `DIFY_API_BASE_URL` / `DIFY_SERVER_API_KEY` / `DIFY_CONTENT_APP_ID` / `DIFY_CONTENT_API_KEY` / `DIFY_DEFAULT_WORKFLOW_ID`：Dify 工作流配置，前后端都会读取。
+  - `GRAPHQL_GATEWAY_URL` / `BACKEND_API_BASE_URL` / `OPENAI_COMPAT_BASE_URL`：兼容旧服务的可选配置。
 - `backend/.env`
   - `DATABASE_URL`：Prisma/PostgreSQL 连接串。
   - `UPLOAD_DIR`：上传目录。
@@ -91,13 +87,15 @@
   - `graph/diff`：后续增量节点/连线。
   - `status`：会话状态更新（`running`/`completed`/`failed`）。
 
-## Agent Pipeline 简述
-- `buildInitialState` 创建根节点：记录问题上下文、引导用户理解画布。
-- `addSubQuestions` 基于模板生成 3 个分支问题节点。
-- `addDimensions` 为每条分支补充分析维度节点（价值、执行、验证）。
-- `addActionPlan` 跟随维度生成行动计划节点。
-- `enrichWithKnowledge` 调用 `KnowledgeBaseClient.search`；若命中知识条目，会将摘要写入根节点同时生成引用节点。
-- Pipeline 支持自定义 `knowledgeClient`，可在真实环境里注入访问知识库的实现。
+## Dify 画布生成流程
+- `DifyServerService.generateSummary`：将提问发送至默认 Dify Workflow，获取结构化或文本摘要，缺省时返回占位提示。
+- `buildGraphWithDify`（`conversation-store.ts` 内部函数）：
+  - 初始化根节点（记录提问人、摘要、指导语）。
+  - 基于 Blueprint 生成 3 个分支问题节点（澄清目标 / 拆分维度 / 识别资源）。
+  - 为每个分支补充分析维度节点（价值主张、执行路径、验证计划）。
+  - 继续生成对应的行动计划节点，形成三级层次。
+  - 每个新增节点与连线都会推送至 `deltas`，供 Subscription 动画播放。
+- `/api/analyze` Route 复用相同 Blueprint，并在前端通过 `CanvasViewport.generateAnalysis` 更新 React Flow 画布。
 
 ## Starlink 品牌化注意事项
 - 当前 npm 包名仍使用 `@branching-chat/*`，后续如需全面更名，可在各 `package.json` 与 import 路径中替换。

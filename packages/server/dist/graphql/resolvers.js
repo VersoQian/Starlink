@@ -36,6 +36,10 @@ export const resolvers = {
         addNode: async (_, args, ctx) => {
             const node = ctx.conversationStore.addNode(args.workspaceId, args.input);
             return node;
+        },
+        connectNodes: async (_, args, ctx) => {
+            const edge = ctx.conversationStore.connectNodes(args.workspaceId, args.input);
+            return edge;
         }
     },
     Subscription: {

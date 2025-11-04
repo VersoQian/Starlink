@@ -256,6 +256,20 @@ export declare const resolvers: {
                 description?: string | undefined;
             };
         }>;
+        connectNodes: (_: unknown, args: {
+            workspaceId: string;
+            input: {
+                id?: string;
+                source: string;
+                target: string;
+                label?: string | null;
+            };
+        }, ctx: GraphQLContext) => Promise<{
+            source: string;
+            id: string;
+            target: string;
+            label?: string | null | undefined;
+        }>;
     };
     Subscription: {
         conversationProgress: {
