@@ -1,3 +1,11 @@
+import {
+  DifyRequestError,
+  type DifyPriority,
+  type DifyRetryConfig,
+  type DifyWorkflowMode
+} from '@branching-chat/shared'
+import { createAuditLogger } from '@branching-chat/shared'
+
 const DEFAULT_BASE_URL = (process.env.DIFY_API_BASE_URL ?? 'https://api.dify.ai/v1').replace(/\/$/, '')
 const DEFAULT_WORKFLOW_ID = process.env.DIFY_DEFAULT_WORKFLOW_ID ?? process.env.DIFY_CONTENT_APP_ID ?? ''
 const DEFAULT_API_KEY =
@@ -10,8 +18,11 @@ type RunWorkflowOptions = {
   workflowId?: string
   inputs: Record<string, unknown>
   user?: string
-  responseMode?: 'blocking' | 'streaming'
+  responseMode?: DifyWorkflowMode
   signal?: AbortSignal
+  priority?: DifyPriority
+  metricsTag?: string
+  retry?: DifyRetryConfig
 }
 
 type BlockingResult = {
@@ -20,6 +31,8 @@ type BlockingResult = {
   data?: unknown
   [key: string]: unknown
 }
+
+const auditLogger = createAuditLogger('packages/server:dify-service')
 
 export class DifyServerService {
   constructor(
@@ -41,34 +54,59 @@ export class DifyServerService {
       throw new Error('Dify workflow is not configured on the server')
     }
 
+    const attempts = Math.max(options.retry?.attempts ?? 1, 1)
     const responseMode = options.responseMode ?? 'blocking'
-    const response = await fetch(`${this.resolveBaseUrl()}/workflows/run`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        workflow_id: workflowId,
-        response_mode: responseMode,
-        user: options.user ?? 'server',
-        inputs: options.inputs
-      }),
-      signal: options.signal
-    })
+    let lastError: unknown
 
-    if (!response.ok) {
-      const detail = await safeReadText(response)
-      throw new Error(
-        `Dify request failed (${response.status} ${response.statusText}): ${detail ?? 'no message'}`
-      )
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const response = await fetch(`${this.resolveBaseUrl()}/workflows/run`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            workflow_id: workflowId,
+            response_mode: responseMode,
+            user: options.user ?? 'server',
+            inputs: options.inputs,
+            metadata: buildMetadata(options.priority, options.metricsTag)
+          }),
+          signal: options.signal
+        })
+
+        if (!response.ok) {
+          const detail = await safeReadText(response)
+          throw new DifyRequestError(
+            response.status,
+            response.statusText,
+            detail ?? undefined,
+            response.headers.get('x-request-id') ?? undefined
+          )
+        }
+
+        if (responseMode === 'streaming') {
+          return response
+        }
+
+        return (await response.json()) as BlockingResult
+      } catch (error) {
+        lastError = error
+        if (!shouldRetry(error) || attempt === attempts) {
+          auditLogger.error({
+            action: 'dify.runWorkflow',
+            userId: options.user ?? 'server',
+            workflowId,
+            metadata: { attempt }
+          })
+          throw error
+        }
+        await delay(options.retry?.delayMs ?? 1_000)
+      }
     }
 
-    if (responseMode === 'streaming') {
-      return response
-    }
-
-    return (await response.json()) as BlockingResult
+    throw lastError ?? new Error('Failed to execute Dify workflow')
   }
 
   async generateSummary(question: string, user?: string): Promise<string> {
@@ -92,7 +130,11 @@ export class DifyServerService {
 
       return candidates[0] ?? `Dify 未返回内容，请检查工作流设置。`
     } catch (error) {
-      console.warn('[dify-server] workflow failed, fallback to placeholder', error)
+      auditLogger.error({
+        action: 'dify.generateSummary',
+        userId: user ?? 'server',
+        metadata: { question }
+      })
       return `Dify 工作流执行失败：${error instanceof Error ? error.message : String(error)}`
     }
   }
@@ -116,4 +158,31 @@ async function safeReadText(response: Response) {
   } catch {
     return null
   }
+}
+
+function buildMetadata(priority?: DifyPriority, metricsTag?: string) {
+  const metadata: Record<string, string> = {}
+  if (priority) metadata.priority = priority
+  if (metricsTag) metadata.metricsTag = metricsTag
+  return Object.keys(metadata).length > 0 ? metadata : undefined
+}
+
+function shouldRetry(error: unknown) {
+  if (error instanceof DifyRequestError) {
+    return error.status >= 500
+  }
+  if (isAbortError(error)) {
+    return false
+  }
+  return true
+}
+
+async function delay(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { name?: unknown }
+  return typeof candidate.name === 'string' && candidate.name === 'AbortError'
 }

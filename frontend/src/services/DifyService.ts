@@ -1,4 +1,9 @@
-import { getDifyWorkflow } from '../config/dify'
+import {
+  DifyRequestError,
+  type DifyPriority,
+  type DifyRetryConfig
+} from '@branching-chat/shared'
+import { getDifyBaseUrl, getDifyWorkflow } from '../config/dify'
 
 export type ExecuteWorkflowOptions = {
   workflowId: string
@@ -8,6 +13,9 @@ export type ExecuteWorkflowOptions = {
   responseMode?: 'blocking' | 'streaming'
   signal?: AbortSignal
   timeoutMs?: number
+  retry?: DifyRetryConfig
+  priority?: DifyPriority
+  metricsTag?: string
 }
 
 export type DifyBlockingResult = {
@@ -19,6 +27,7 @@ export type DifyBlockingResult = {
 }
 
 const DEFAULT_TIMEOUT = 60_000
+const DEFAULT_RETRY_DELAY = 1_000
 
 export class DifyService {
   constructor(private readonly fetchImpl: typeof fetch = fetch) {}
@@ -27,42 +36,58 @@ export class DifyService {
     const workflow = getDifyWorkflow(options.workflowId)
     const responseMode = options.responseMode ?? workflow.mode
     const controller = new AbortController()
-
-    const timeout = setTimeout(() => {
-      controller.abort()
-    }, options.timeoutMs ?? DEFAULT_TIMEOUT)
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT)
+    const attempts = Math.max(options.retry?.attempts ?? 1, 1)
+    const priority = options.priority ?? workflow.defaultPriority
+    const metricsTag = options.metricsTag ?? workflow.metricsTag
 
     try {
-      const baseUrl = removeTrailingSlash(workflow.baseUrl ?? '')
-      const response = await this.fetchImpl(`${baseUrl}/workflows/run`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${workflow.apiKey}`,
-          'x-app-id': workflow.appId
-        },
-        body: JSON.stringify({
-          workflow_id: workflow.appId,
-          response_mode: responseMode,
-          user: options.user,
-          inputs: options.inputs,
-          ...options.extra
-        }),
-        signal: mergeSignals(options.signal, controller.signal)
-      })
+      let lastError: unknown
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+          const response = await this.fetchImpl(`${resolveBaseUrl(workflow.baseUrl)}/workflows/run`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${workflow.apiKey}`,
+              'x-app-id': workflow.appId
+            },
+            body: JSON.stringify({
+              workflow_id: workflow.appId,
+              response_mode: responseMode,
+              user: options.user,
+              inputs: options.inputs,
+              metadata: buildMetadata(priority, metricsTag),
+              ...options.extra
+            }),
+            signal: mergeSignals(options.signal, controller.signal)
+          })
 
-      if (!response.ok) {
-        const detail = await safeReadText(response)
-        throw new Error(
-          `Dify request failed (${response.status} ${response.statusText}): ${detail ?? 'no body'}`
-        )
+          if (!response.ok) {
+            const detail = await readErrorDetail(response)
+            throw new DifyRequestError(
+              response.status,
+              response.statusText,
+              detail,
+              response.headers.get('x-request-id') ?? undefined
+            )
+          }
+
+          if (responseMode === 'streaming') {
+            return response
+          }
+
+          return (await response.json()) as DifyBlockingResult
+        } catch (error) {
+          lastError = error
+          if (!shouldRetry(error) || attempt === attempts) {
+            throw error
+          }
+          await delay(options.retry?.delayMs ?? DEFAULT_RETRY_DELAY)
+        }
       }
 
-      if (responseMode === 'streaming') {
-        return response
-      }
-
-      return (await response.json()) as DifyBlockingResult
+      throw lastError ?? new Error('Dify workflow execution failed')
     } finally {
       clearTimeout(timeout)
     }
@@ -95,4 +120,47 @@ async function safeReadText(response: Response) {
 
 function removeTrailingSlash(value: string) {
   return value.endsWith('/') ? value.slice(0, -1) : value
+}
+
+function resolveBaseUrl(baseUrl?: string) {
+  const resolved = baseUrl ?? getDifyBaseUrl()
+  return removeTrailingSlash(resolved)
+}
+
+function buildMetadata(priority?: DifyPriority, metricsTag?: string) {
+  const metadata: Record<string, string> = {}
+  if (priority) metadata.priority = priority
+  if (metricsTag) metadata.metricsTag = metricsTag
+  return Object.keys(metadata).length > 0 ? metadata : undefined
+}
+
+function shouldRetry(error: unknown) {
+  if (error instanceof DifyRequestError) {
+    return error.status >= 500
+  }
+  if (isAbortError(error)) {
+    return false
+  }
+  return true
+}
+
+async function delay(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function readErrorDetail(response: Response) {
+  const raw = await safeReadText(response)
+  if (!raw) return undefined
+  try {
+    const data = JSON.parse(raw) as { error?: { message?: string }; message?: string }
+    return data.error?.message ?? data.message ?? raw
+  } catch {
+    return raw
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { name?: unknown }
+  return typeof candidate.name === 'string' && candidate.name === 'AbortError'
 }
