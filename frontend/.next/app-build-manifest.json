@@ -22,15 +22,11 @@
       "static/chunks/main-app.js",
       "static/chunks/app/(app)/workspace/[workspaceId]/layout.js"
     ],
-    "/(app)/workspace/[workspaceId]/knowledge/page": [
+    "/(app)/workspace/[workspaceId]/comfy/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/(app)/workspace/[workspaceId]/knowledge/page.js"
-    ],
-    "/(app)/workspace/[workspaceId]/cultural-tools/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/(app)/workspace/[workspaceId]/cultural-tools/page.js"
+      "static/css/app/(app)/workspace/[workspaceId]/comfy/page.css",
+      "static/chunks/app/(app)/workspace/[workspaceId]/comfy/page.js"
     ],
     "/(app)/workspace/[workspaceId]/insights/page": [
       "static/chunks/webpack.js",
@@ -46,6 +42,16 @@
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/(app)/workspace/[workspaceId]/translate/page.js"
+    ],
+    "/(app)/workspace/[workspaceId]/knowledge/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(app)/workspace/[workspaceId]/knowledge/page.js"
+    ],
+    "/_not-found/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/_not-found/page.js"
     ]
   }
 }

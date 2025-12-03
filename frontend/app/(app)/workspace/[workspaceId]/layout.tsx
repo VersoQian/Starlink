@@ -64,6 +64,12 @@ export default function WorkspaceLayout({ children, params }: WorkspaceLayoutPro
           label: '数据洞察',
           description: '上传文件、可视化表格并生成 AI 洞察。',
           href: `${basePath}/insights`
+        },
+        {
+          key: 'comfy',
+          label: '智绘·无限商业画布',
+          description: 'MACRA架构驱动的智能画布，AI多Agent协作生成商业模型。',
+          href: `${basePath}/comfy`
         }
       ] as const,
     [basePath]

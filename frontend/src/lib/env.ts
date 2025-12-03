@@ -26,3 +26,4 @@ export function boolFromEnv(key: string, options: EnvOptions = {}): boolean {
   const value = readEnv(key, options).toLowerCase()
   return value === '1' || value === 'true'
 }
+·
