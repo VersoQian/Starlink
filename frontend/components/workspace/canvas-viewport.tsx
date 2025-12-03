@@ -79,7 +79,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
   const setTaskId = useCanvasStore((state) => state.setTaskId)
   const addIterationToStore = useCanvasStore((state) => state.addIteration)
   const { addNode, connectNodes } = useCanvasMutations(workspaceId)
-  const analyzeQuestion = useAnalyzeQuestion()
+  const analyzeQuestion = useAnalyzeQuestion({ endpoint: '/api/ai/analyze' })
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const selectedNodeIdRef = useRef<string | null>(null)
   const mainNodeIdRef = useRef<string | null>(null)
@@ -136,7 +136,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
       const { progressive = true } = options ?? {}
       const targetNodes = mapNodesForState(payload.nodes)
       const targetEdges = mapEdgesForState(payload.edges)
-      const shouldAnimate = progressive && nodesRef.current.length > 0
+      const shouldAnimate = progressive
 
       if (!shouldAnimate) {
         setNodes(targetNodes)

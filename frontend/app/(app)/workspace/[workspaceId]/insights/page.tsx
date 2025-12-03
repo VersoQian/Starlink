@@ -4,13 +4,30 @@ import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import clsx from 'clsx'
 import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell
+} from 'recharts'
+import {
   DataVisualizer,
   type ParsedTable,
   type AnalyzeResponse,
   type AnalyzeRequest
 } from '@branching-chat/ui'
 
-type ChartType = 'bar' | 'line'
+type ChartType = 'bar' | 'line' | 'pie' | 'area'
 
 const MAX_PREVIEW_ROWS = 8
 
@@ -28,7 +45,7 @@ const extractNumericColumns = (table: ParsedTable) => {
   return numericColumns
 }
 
-const chartColors = ['#7F5BFA', '#5B8DEF', '#F89E6B', '#60C6A8']
+const chartColors = ['#7F5BFA', '#5B8DEF', '#F89E6B', '#60C6A8', '#E879F9', '#FB923C']
 
 function SimpleChart({
   table,
@@ -42,77 +59,160 @@ function SimpleChart({
   valueColumn: number
 }) {
   const data = useMemo(() => {
-    return table.rows.slice(0, MAX_PREVIEW_ROWS).map((row) => ({
-      label: row[categoryColumn] ?? `行 ${table.rows.indexOf(row) + 1}`,
-      value: Number(row[valueColumn]) || 0
+    // 饼图最多显示前6行，避免标签重叠
+    const maxRows = chartType === 'pie' ? 6 : MAX_PREVIEW_ROWS
+    return table.rows.slice(0, maxRows).map((row, index) => ({
+      name: row[categoryColumn] ?? `行 ${table.rows.indexOf(row) + 1}`,
+      value: Number(row[valueColumn]) || 0,
+      fill: chartColors[index % chartColors.length]
     }))
-  }, [table, categoryColumn, valueColumn])
+  }, [table, categoryColumn, valueColumn, chartType])
 
   if (data.length === 0) {
     return <p className="text-sm text-slate-400">选择包含数字的列以生成图表。</p>
   }
 
-  const maxValue = Math.max(...data.map((item) => item.value)) || 1
+  const isDataTruncated = chartType === 'pie' && table.rows.length > 6
 
   return (
     <div className="mt-4 rounded-2xl border border-[#D7DBFF] bg-white/90 p-4 shadow-inner">
       <div className="mb-3 flex items-center justify-between">
         <h4 className="text-sm font-semibold text-slate-900">图表预览</h4>
-        <p className="text-xs text-slate-400">展示前 {data.length} 行数据</p>
+        <p className="text-xs text-slate-400">
+          展示前 {data.length} 行数据
+          {isDataTruncated && <span className="ml-1 text-amber-600">（饼图限6行）</span>}
+        </p>
       </div>
-      <div className="h-64">
-        {chartType === 'bar' ? (
-          <div className="flex h-full items-end gap-3">
-            {data.map((item, index) => {
-              const height = (item.value / maxValue) * 100
-              return (
-                <div key={item.label} className="flex w-full flex-col items-center gap-2 text-xs text-slate-500">
-                  <div className="flex h-full w-full flex-col-reverse rounded-lg bg-[#F3F4FF]">
-                    <div
-                      className="rounded-lg"
-                      style={{
-                        height: `${height}%`,
-                        background: chartColors[index % chartColors.length]
-                      }}
-                    />
-                  </div>
-                  <span className="line-clamp-2 text-center text-[11px] tracking-tight">{item.label}</span>
-                  <span className="text-[11px] font-semibold text-slate-600">{item.value}</span>
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          <svg viewBox="0 0 400 220" className="h-full w-full">
-            <polyline
-              fill="none"
-              stroke="#7F5BFA"
-              strokeWidth="3"
-              points={data
-                .map((item, index) => {
-                  const x = (index / Math.max(data.length - 1, 1)) * 380 + 10
-                  const y = 200 - (item.value / maxValue) * 180 + 10
-                  return `${x},${y}`
-                })
-                .join(' ')}
-            />
-            {data.map((item, index) => {
-              const x = (index / Math.max(data.length - 1, 1)) * 380 + 10
-              const y = 200 - (item.value / maxValue) * 180 + 10
-              return (
-                <g key={`${item.label}-${index}`}>
-                  <circle cx={x} cy={y} r={4} fill="#5B8DEF" />
-                  <text x={x} y={y - 10} fontSize={11} textAnchor="middle" fill="#475569">
-                    {item.value}
-                  </text>
-                  <text x={x} y={210} fontSize={10} textAnchor="middle" fill="#94A3B8">
-                    {item.label}
-                  </text>
-                </g>
-              )
-            })}
-          </svg>
-        )}
+      <div className="h-80">
+        <ResponsiveContainer width="100%" height="100%">
+          {chartType === 'bar' && (
+            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E0E2FF" />
+              <XAxis
+                dataKey="name"
+                stroke="#64748b"
+                angle={-45}
+                textAnchor="end"
+                height={80}
+                style={{ fontSize: '11px' }}
+              />
+              <YAxis stroke="#64748b" style={{ fontSize: '11px' }} />
+              <Tooltip
+                contentStyle={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  border: '1px solid #D7DBFF',
+                  borderRadius: '8px',
+                  fontSize: '12px'
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: '12px' }} />
+              <Bar dataKey="value" fill="#7F5BFA" radius={[8, 8, 0, 0]} name="数值">
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          )}
+
+          {chartType === 'line' && (
+            <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E0E2FF" />
+              <XAxis
+                dataKey="name"
+                stroke="#64748b"
+                angle={-45}
+                textAnchor="end"
+                height={80}
+                style={{ fontSize: '11px' }}
+              />
+              <YAxis stroke="#64748b" style={{ fontSize: '11px' }} />
+              <Tooltip
+                contentStyle={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  border: '1px solid #D7DBFF',
+                  borderRadius: '8px',
+                  fontSize: '12px'
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: '12px' }} />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#7F5BFA"
+                strokeWidth={3}
+                dot={{ fill: '#5B8DEF', r: 5 }}
+                activeDot={{ r: 7 }}
+                name="数值"
+              />
+            </LineChart>
+          )}
+
+          {chartType === 'pie' && (
+            <PieChart>
+              <Pie
+                data={data}
+                cx="50%"
+                cy="50%"
+                labelLine
+                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                outerRadius={100}
+                dataKey="value"
+                style={{ fontSize: '11px' }}
+              >
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  border: '1px solid #D7DBFF',
+                  borderRadius: '8px',
+                  fontSize: '12px'
+                }}
+              />
+            </PieChart>
+          )}
+
+          {chartType === 'area' && (
+            <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              <defs>
+                <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#7F5BFA" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#7F5BFA" stopOpacity={0.1} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E0E2FF" />
+              <XAxis
+                dataKey="name"
+                stroke="#64748b"
+                angle={-45}
+                textAnchor="end"
+                height={80}
+                style={{ fontSize: '11px' }}
+              />
+              <YAxis stroke="#64748b" style={{ fontSize: '11px' }} />
+              <Tooltip
+                contentStyle={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  border: '1px solid #D7DBFF',
+                  borderRadius: '8px',
+                  fontSize: '12px'
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: '12px' }} />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke="#7F5BFA"
+                strokeWidth={2}
+                fillOpacity={1}
+                fill="url(#colorValue)"
+                name="数值"
+              />
+            </AreaChart>
+          )}
+        </ResponsiveContainer>
       </div>
     </div>
   )
@@ -151,8 +251,8 @@ export default function InsightsPage({ params }: { params: { workspaceId: string
     <div className="flex h-full min-h-[calc(100vh-80px)] overflow-hidden bg-[#F4F5FF]/60">
       <div className="flex flex-1 flex-col overflow-hidden">
         <DataVisualizer
-          title="上传数据生成可视化"
-          description="支持 CSV 粘贴或上传，解析后可选择 chart 类型并导出。"
+          title="数据可视化工作台"
+          description="支持 Excel (.xlsx, .xls) 和 CSV 上传，或直接粘贴数据。解析后可生成柱状图、折线图、饼图、面积图，并导出为 Markdown。"
           onDataExtracted={(table) => {
             setParsedTable(table)
             setInsightText('')
@@ -174,6 +274,8 @@ export default function InsightsPage({ params }: { params: { workspaceId: string
                 >
                   <option value="bar">柱状图</option>
                   <option value="line">折线图</option>
+                  <option value="pie">饼图</option>
+                  <option value="area">面积图</option>
                 </select>
               </label>
               <label className="flex items-center gap-2 text-xs text-slate-500">
@@ -281,11 +383,15 @@ export default function InsightsPage({ params }: { params: { workspaceId: string
           </div>
 
           <div className="rounded-2xl border border-dashed border-[#C7D2FE] bg-[#F8F9FF] p-4 text-xs text-slate-500">
-            <p className="font-semibold text-slate-700">操作提示</p>
+            <p className="font-semibold text-slate-700">📊 使用指南</p>
             <ul className="mt-2 space-y-1">
-              <li>• 上传 CSV 后可即时预览表格与图表。</li>
-              <li>• 导出的 Markdown 可直接发布到社群或画布。</li>
-              <li>• 调整分类/数值列即可切换图表维度。</li>
+              <li>• 支持 <span className="font-medium text-slate-700">Excel (.xlsx, .xls)</span> 和 CSV 文件上传</li>
+              <li>• 文件大小限制：<span className="font-medium text-slate-700">5MB</span></li>
+              <li>• 点击"<span className="font-medium text-slate-700">加载示例数据</span>"快速体验</li>
+              <li>• 柱状图/折线图/面积图最多显示 <span className="font-medium text-slate-700">8 行</span></li>
+              <li>• 饼图最多显示 <span className="font-medium text-slate-700">6 行</span>（避免标签重叠）</li>
+              <li>• 可切换图表类型、调整分类/数值列</li>
+              <li>• 导出的 Markdown 可直接发布到社群</li>
             </ul>
           </div>
         </div>

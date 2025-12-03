@@ -31,15 +31,22 @@ declare namespace __next_route_internal_types__ {
   type StaticRoutes = 
     | `/dashboard`
     | `/`
-    | `/api/analyze`
+    | `/api/ai/analyze`
+    | `/api/cultural/reports`
+    | `/api/cultural/simulations`
+    | `/api/deep-research`
     | `/api/file-translation`
     | `/api/insights`
+    | `/api/translate`
+    | `/api/translate/convert`
   type DynamicRoutes<T extends string = string> = 
     | `/workspace/${SafeSlug<T>}`
     | `/workspace/${SafeSlug<T>}/cultural-tools`
+    | `/workspace/${SafeSlug<T>}/deep-research`
     | `/workspace/${SafeSlug<T>}/insights`
     | `/workspace/${SafeSlug<T>}/knowledge`
     | `/workspace/${SafeSlug<T>}/knowledge/${SafeSlug<T>}`
+    | `/workspace/${SafeSlug<T>}/translate`
     | `/api/timeline/${SafeSlug<T>}`
 
   type RouteImpl<T> = 

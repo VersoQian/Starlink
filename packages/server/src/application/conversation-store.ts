@@ -8,7 +8,7 @@ import type {
   ConversationMetadata
 } from '@branching-chat/shared'
 import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@branching-chat/shared'
-import { DifyServerService } from '../services/dify-service.js'
+
 
 export type ConversationStoreDeps = {
   pubSub: PubSub
@@ -22,55 +22,10 @@ type ConversationRecord = {
 const EVENT_TOPIC = 'conversation-progress'
 const ROOT_POSITION = { x: 160, y: 160 }
 
-const SUB_QUESTION_BLUEPRINTS = [
-  {
-    title: '澄清目标与边界',
-    bullets: ['关键目标是什么？', '价值指标如何衡量？', '重要限制或约束有哪些？']
-  },
-  {
-    title: '拆分关键维度',
-    bullets: ['涉及哪些参与方？', '目前有哪些已知信息？', '潜在的未知或风险点？']
-  },
-  {
-    title: '识别资源与数据',
-    bullets: ['有哪些可直接利用的资料？', '需要补充的调研是什么？', '数据同步与责任人是谁？']
-  }
-]
 
-const DIMENSION_BLUEPRINTS = [
-  {
-    title: '价值主张与用户场景',
-    bullets: ['目标用户痛点', '拟提供的价值组合', '成功衡量指标'],
-    subCategory: 'value_proposition'
-  },
-  {
-    title: '路径与执行机制',
-    bullets: ['关键活动/步骤', '所需协同角色', '可能的阻塞点'],
-    subCategory: 'channels'
-  },
-  {
-    title: '数据与验证计划',
-    bullets: ['需要验证的假设', '优先采集的数据', '验证时间线'],
-    subCategory: 'key_resources'
-  }
-]
+import { LLMService } from '../services/llm-service.js'
 
-const ACTION_BLUEPRINTS = [
-  {
-    title: '补齐事实基础',
-    bullets: ['梳理现有资料并标记可信度', '盘点关键假设是否成立', '收集团队已有结论']
-  },
-  {
-    title: '设计验证活动',
-    bullets: ['列出必须访谈或调研的对象', '设置观察指标与成功阈值', '准备复盘时间点']
-  },
-  {
-    title: '建立复用模板',
-    bullets: ['沉淀模板/清单供未来复用', '明确后续责任人和协作路径', '安排下一次 Branching 对话']
-  }
-]
-
-const difyService = new DifyServerService()
+const llmService = new LLMService()
 
 type GraphDelta = {
   nodes?: CanvasNode[]
@@ -101,7 +56,7 @@ export class ConversationStore {
       latestQuestion: question
     }
 
-    const execution = await buildGraphWithDify({ workspaceId, userId, question })
+    const execution = await buildGraphWithLLM({ workspaceId, userId, question })
     const record: ConversationRecord = {
       metadata,
       graph: execution.graph
@@ -261,11 +216,12 @@ type BuildGraphContext = {
   question: string
 }
 
-async function buildGraphWithDify(context: BuildGraphContext): Promise<{
+async function buildGraphWithLLM(context: BuildGraphContext): Promise<{
   graph: CanvasGraph
   deltas: GraphDelta[]
 }> {
-  const summary = await difyService.generateSummary(context.question, context.userId)
+  // Use the LLMService to get structured JSON
+  const data = await llmService.generateGraphData(context.question, context.userId)
 
   const nodes: CanvasNode[] = []
   const edges: CanvasEdge[] = []
@@ -290,8 +246,8 @@ async function buildGraphWithDify(context: BuildGraphContext): Promise<{
       type: 'note',
       title: '多维画布任务',
       subtitle: `提问人：${context.userId || 'anonymous'}`,
-      content: summary,
-      footerText: 'Dify 工作流生成摘要 · 节点会随着推理逐步出现',
+      content: data.summary,
+      footerText: 'AI 助手生成摘要 · 节点会随着推理逐步出现',
       variant: 'primary'
     }
   }
@@ -301,88 +257,101 @@ async function buildGraphWithDify(context: BuildGraphContext): Promise<{
   const branchSpacing = 320
   const levelSpacing = 220
 
-  const branchNodes = SUB_QUESTION_BLUEPRINTS.map((blueprint, index) => {
-    const node: CanvasNode = {
-      id: `branch-${nanoid(8)}`,
-      type: 'note',
-      position: {
-        x: ROOT_POSITION.x + branchSpacing * (index + 1),
+  // Dynamic branch generation
+  if (data.branches && Array.isArray(data.branches)) {
+    data.branches.forEach((branchData, branchIndex) => {
+      const branchId = `branch-${nanoid(8)}`
+      const branchPosition = {
+        x: ROOT_POSITION.x + branchSpacing * (branchIndex + 1),
         y: ROOT_POSITION.y
-      },
-      data: {
-        type: 'note',
-        title: `分支 ${index + 1} · ${blueprint.title}`,
-        content: `围绕「${context.question}」聚焦这一分支，并记录讨论要点。`,
-        bullets: blueprint.bullets,
-        variant: 'timeline-step'
       }
-    }
 
-    const edge: CanvasEdge = {
-      id: `${rootNode.id}->${node.id}`,
-      source: rootNode.id,
-      target: node.id,
-      label: `主题 ${index + 1}`
-    }
-
-    addNode(node, edge)
-    return node
-  })
-
-  branchNodes.forEach((branch, index) => {
-    const dimensionBlueprint = DIMENSION_BLUEPRINTS[index % DIMENSION_BLUEPRINTS.length]
-    const dimensionNode: CanvasNode = {
-      id: `dimension-${nanoid(8)}`,
-      type: 'note',
-      position: {
-        x: branch.position.x,
-        y: branch.position.y + levelSpacing
-      },
-      data: {
+      const branchNode: CanvasNode = {
+        id: branchId,
         type: 'note',
-        title: dimensionBlueprint.title,
-        content: `从该维度拆解「${context.question}」。`,
-        bullets: dimensionBlueprint.bullets,
-        variant: 'timeline-dimension',
-        subCategory: dimensionBlueprint.subCategory
+        position: branchPosition,
+        data: {
+          type: 'note',
+          title: branchData.title,
+          content: branchData.content,
+          variant: 'timeline-step'
+        }
       }
-    }
 
-    const dimensionEdge: CanvasEdge = {
-      id: `${branch.id}->${dimensionNode.id}`,
-      source: branch.id,
-      target: dimensionNode.id,
-      label: '分析维度'
-    }
-
-    addNode(dimensionNode, dimensionEdge)
-
-    const actionBlueprint = ACTION_BLUEPRINTS[index % ACTION_BLUEPRINTS.length]
-    const actionNode: CanvasNode = {
-      id: `action-${nanoid(8)}`,
-      type: 'note',
-      position: {
-        x: dimensionNode.position.x,
-        y: dimensionNode.position.y + levelSpacing
-      },
-      data: {
-        type: 'note',
-        title: actionBlueprint.title,
-        bullets: actionBlueprint.bullets,
-        variant: 'timeline-action',
-        content: '完成后请在节点评论里更新进展。'
+      const branchEdge: CanvasEdge = {
+        id: `${rootNode.id}->${branchNode.id}`,
+        source: rootNode.id,
+        target: branchNode.id,
+        label: `分支 ${branchIndex + 1}`
       }
-    }
 
-    const actionEdge: CanvasEdge = {
-      id: `${dimensionNode.id}->${actionNode.id}`,
-      source: dimensionNode.id,
-      target: actionNode.id,
-      label: '行动计划'
-    }
+      addNode(branchNode, branchEdge)
 
-    addNode(actionNode, actionEdge)
-  })
+      // Dynamic dimension generation
+      if (branchData.dimensions && Array.isArray(branchData.dimensions)) {
+        branchData.dimensions.forEach((dimData, dimIndex) => {
+          const dimId = `dimension-${nanoid(8)}`
+          const dimPosition = {
+            x: branchPosition.x,
+            y: branchPosition.y + levelSpacing * (dimIndex + 1)
+          }
+
+          const dimNode: CanvasNode = {
+            id: dimId,
+            type: 'note',
+            position: dimPosition,
+            data: {
+              type: 'note',
+              title: dimData.title,
+              content: dimData.content,
+              variant: 'timeline-dimension'
+            }
+          }
+
+          const dimEdge: CanvasEdge = {
+            id: `${branchId}->${dimId}`,
+            source: branchId,
+            target: dimId,
+            label: '分析维度'
+          }
+
+          addNode(dimNode, dimEdge)
+
+          // Dynamic action generation (if present in JSON)
+          if (dimData.actions && Array.isArray(dimData.actions)) {
+            dimData.actions.forEach((actionData, actionIndex) => {
+              const actionId = `action-${nanoid(8)}`
+              const actionPosition = {
+                x: dimPosition.x,
+                y: dimPosition.y + levelSpacing * (actionIndex + 1)
+              }
+
+              const actionNode: CanvasNode = {
+                id: actionId,
+                type: 'note',
+                position: actionPosition,
+                data: {
+                  type: 'note',
+                  title: actionData.title,
+                  content: actionData.content,
+                  variant: 'timeline-action'
+                }
+              }
+
+              const actionEdge: CanvasEdge = {
+                id: `${dimId}->${actionId}`,
+                source: dimId,
+                target: actionId,
+                label: '行动计划'
+              }
+
+              addNode(actionNode, actionEdge)
+            })
+          }
+        })
+      }
+    })
+  }
 
   const graph: CanvasGraph = {
     workspaceId: context.workspaceId,

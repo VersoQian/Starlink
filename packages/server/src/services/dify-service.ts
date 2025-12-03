@@ -41,7 +41,7 @@ export class DifyServerService {
       workflowId?: string
       apiKey?: string
     } = {}
-  ) {}
+  ) { }
 
   isConfigured(): boolean {
     return Boolean(this.resolveApiKey() && this.resolveWorkflowId())

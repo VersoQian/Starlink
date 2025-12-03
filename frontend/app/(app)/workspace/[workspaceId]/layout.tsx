@@ -38,8 +38,20 @@ export default function WorkspaceLayout({ children, params }: WorkspaceLayoutPro
         {
           key: 'cultural-tools',
           label: '跨文化助手',
-          description: '语言转换、文化洞察与报告撰写工具集成在此。',
+          description: '语言转换、文化洞察与���告撰写工具集成在此。',
           href: `${basePath}/cultural-tools`
+        },
+        {
+          key: 'translate',
+          label: '快速翻译',
+          description: '工作区内的轻量文本翻译。',
+          href: `${basePath}/translate`
+        },
+        {
+          key: 'deep-research',
+          label: '深度研究',
+          description: 'AI驱动的智能研究分析，多源信息整合与专业洞察。',
+          href: `${basePath}/deep-research`
         },
         {
           key: 'templates',

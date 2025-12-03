@@ -83,7 +83,16 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
           />
         </div>
       )}
-      {isAssistantOpen && <AssistantPanel />}
+      {isAssistantOpen && (
+        <AssistantPanel
+          onAnalyze={async (question) => {
+            if (!canvasRef.current) {
+              throw new Error('画布尚未初始化')
+            }
+            await canvasRef.current.generateAnalysis(question)
+          }}
+        />
+      )}
       <DocumentDrawer open={documentDrawerOpen} onClose={() => setDocumentDrawerOpen(false)} />
       <AnalysisModal
         open={analysisOpen}

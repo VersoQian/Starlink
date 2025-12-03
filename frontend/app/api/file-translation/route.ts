@@ -67,8 +67,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const uploaded = await uploadFileToDify({ file, apiKey })
+    const uploaded = await uploadFileToDify({ file, apiKey, userId })
     const fileId = resolveFileId(uploaded)
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[file-translation] upload response', { uploaded, fileId })
+    }
 
     if (!fileId) {
       return NextResponse.json(
@@ -110,13 +114,16 @@ export async function POST(request: Request) {
 
 async function uploadFileToDify({
   file,
-  apiKey
+  apiKey,
+  userId
 }: {
   file: File
   apiKey: string
+  userId: string
 }): Promise<DifyFileUploadResponse> {
   const form = new FormData()
   form.append('file', file, file.name)
+  form.append('user', userId)
 
   const response = await fetch(`${stripTrailingSlash(DEFAULT_BASE_URL)}/files/upload`, {
     method: 'POST',
@@ -165,26 +172,31 @@ async function runFileTranslationWorkflow({
     headers['x-app-id'] = appId
   }
 
+  const filePayload = {
+    transfer_method: 'local_file',
+    upload_file_id: fileId,
+    type: 'document',
+    name: fileName
+  }
+
   const payload: Record<string, unknown> = {
-    response_mode: 'blocking',
+    response_mode: 'streaming',
     user: userId,
     inputs: {
       target_language: targetLanguage,
       instructions: instructions || undefined,
       preset: preset || undefined,
-      text: [
-        {
-          type: 'file',
-          file_id: fileId,
-          name: fileName
-        }
-      ]
+      // Dify workflow may name the file variable either `File` (single file)
+      // or `text` (array of files); provide both forms to stay compatible.
+      File: filePayload,
+      text: [filePayload]
     },
     files: [
       {
-        file_id: fileId,
-        name: fileName,
-        type: 'document'
+        transfer_method: 'local_file',
+        upload_file_id: fileId,
+        type: 'document',
+        name: fileName
       }
     ]
   }
@@ -208,7 +220,66 @@ async function runFileTranslationWorkflow({
     )
   }
 
-  return (await response.json()) as DifyWorkflowResult
+  // 处理流式响应
+  if (!response.body) {
+    throw new Error('响应体为空')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let accumulatedText = ''
+  let usage: { total_tokens?: number } | undefined
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      const lines = chunk.split('\n')
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6)
+          if (data === '[DONE]') continue
+
+          try {
+            const parsed = JSON.parse(data)
+
+            // 累积文本内容
+            if (parsed.answer) {
+              accumulatedText += parsed.answer
+            }
+
+            // 提取token使用情况
+            if (parsed.usage) {
+              usage = parsed.usage
+            }
+
+            // 处理不同格式的响应
+            if (parsed.data) {
+              if (typeof parsed.data === 'string') {
+                accumulatedText += parsed.data
+              } else if (parsed.data.text) {
+                accumulatedText += parsed.data.text
+              }
+            }
+
+          } catch (e) {
+            // 忽略解析错误，继续处理下一行
+            continue
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return {
+    answer: accumulatedText || 'Dify 未返回翻译内容，请检查工作流节点配置。',
+    usage
+  } as DifyWorkflowResult
 }
 
 function extractTranslation(result: DifyWorkflowResult): string {
@@ -227,6 +298,18 @@ function extractTranslation(result: DifyWorkflowResult): string {
         output?.text
       ]
       candidates.push(...values)
+    }
+  } else if (result.outputs && typeof result.outputs === 'object') {
+    const outputsRecord = result.outputs as Record<string, unknown>
+    for (const value of Object.values(outputsRecord)) {
+      if (typeof value === 'string') {
+        candidates.push(value)
+        continue
+      }
+      if (value && typeof value === 'object') {
+        const nested = value as Record<string, unknown>
+        candidates.push(nested.translation, nested.translated_text, nested.answer, nested.text)
+      }
     }
   }
 
@@ -248,12 +331,32 @@ function extractTranslation(result: DifyWorkflowResult): string {
       }
     }
   } else if (data && typeof data === 'object') {
-    const maybeText =
-      (data as Record<string, unknown>).translation ??
-      (data as Record<string, unknown>).text ??
-      (data as Record<string, unknown>).answer
+    const record = data as Record<string, unknown>
+    const maybeText = record.translation ?? record.text ?? record.answer
     if (typeof maybeText === 'string') {
       candidates.push(maybeText)
+    }
+    const outputs = record.outputs
+    if (outputs && typeof outputs === 'object') {
+      if (Array.isArray(outputs)) {
+        for (const item of outputs) {
+          if (typeof item === 'string') {
+            candidates.push(item)
+          } else if (item && typeof item === 'object') {
+            const nested = item as Record<string, unknown>
+            candidates.push(nested.translation, nested.translated_text, nested.answer, nested.text)
+          }
+        }
+      } else {
+        for (const value of Object.values(outputs as Record<string, unknown>)) {
+          if (typeof value === 'string') {
+            candidates.push(value)
+          } else if (value && typeof value === 'object') {
+            const nested = value as Record<string, unknown>
+            candidates.push(nested.translation, nested.translated_text, nested.answer, nested.text)
+          }
+        }
+      }
     }
   }
 

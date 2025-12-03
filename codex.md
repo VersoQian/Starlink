@@ -13,7 +13,6 @@
 - `backend/` – 传统 REST/GraphQL 组合的知识库与 LangChain 服务，前端 `/api` 路由会转发到此服务。
 - `docs/` – 架构设计文档（如 `frontend-architecture.md`）。
 - `biz-canvas-agents/`、`dialogs/` – 辅助材料或实验性 Agent 配置（暂未纳入主流程）。
-
 ## 核心服务说明
 - **Frontend (`frontend/`)**
   - 技术栈：Next.js App Router、React Flow、TanStack Query、Zustand、Tailwind。
@@ -109,5 +108,3 @@
 - **前端数据统一**：理顺 `/api` 代理与 GraphQL 双轨逻辑，逐步将 LangChain 调用迁移至 GraphQL Gateway，降低耦合。
 
 ---
-
-如需进一步使用 Starlink 名称，可参考本 Codex 对仓库现状、服务拓扑与命名调整的建议进行迭代。

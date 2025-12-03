@@ -1,73 +1,64 @@
-import { type DifyPriority, type DifyRateLimitRule, type DifyWorkflowConfig } from '@branching-chat/shared'
 import { readEnv } from '../lib/env'
 
-export type DifyWorkflowRuntimeConfig = DifyWorkflowConfig & {
-  metricsTag?: string
-  fallback?: NonNullable<DifyWorkflowConfig['fallback']> & {
-    /**
-     * 当回退目标不可用时的兜底提示。
-     */
-    message?: string
-  }
-  rateLimit?: DifyRateLimitRule[]
-  defaultPriority?: DifyPriority
+export type DifyWorkflowMode = 'blocking' | 'streaming'
+
+export type DifyWorkflowConfig = {
+  /**
+   * 逻辑工作流 ID，用于前端引用。
+   */
+  id: string
+  /**
+   * Dify 应用 ID（App ID）。
+   */
+  appId: string
+  /**
+   * 对应的 API Key。
+   */
+  apiKey: string
+  /**
+   * 请求模式：阻塞或流式。
+   */
+  mode: DifyWorkflowMode
+  /**
+   * 可选的自定义 Base URL，默认使用全局配置。
+   */
+  baseUrl?: string
+  /**
+   * 额外描述信息，方便 UI 提示。
+   */
+  description?: string
 }
 
 const DEFAULT_BASE_URL = readEnv('DIFY_API_BASE_URL', {
   defaultValue: 'https://api.dify.ai/v1'
 })
 
-const WORKFLOW_CONFIGS: DifyWorkflowRuntimeConfig[] = [
+const WORKFLOW_CONFIGS: DifyWorkflowConfig[] = [
   {
     id: 'content-generation',
-    appId: readEnv('DIFY_CONTENT_APP_ID'),
-    apiKey: readEnv('DIFY_CONTENT_API_KEY'),
-    mode: 'streaming',
+    appId: readEnv('DIFY_CONTENT_GENERATION_APP_ID'),
+    apiKey: readEnv('DIFY_CONTENT_GENERATION_API_KEY'),
+    mode: 'streaming' as DifyWorkflowMode,
     baseUrl: DEFAULT_BASE_URL,
-    description: '课程内容生成与润色',
-    tags: ['authoring', 'async'],
-    defaultPriority: 'normal',
-    metricsTag: 'workflow.content-generation',
-    rateLimit: [
-      { identifier: 'user', intervalMs: 60_000, limit: 8 },
-      { identifier: 'tenant', intervalMs: 3_600_000, limit: 500 }
-    ],
-    quota: { daily: 1_000 },
-    metadata: { owner: 'curriculum' }
-  },
-  {
-    id: 'lesson-outline',
-    appId: readEnv('DIFY_OUTLINE_APP_ID'),
-    apiKey: readEnv('DIFY_OUTLINE_API_KEY'),
-    mode: 'blocking',
-    baseUrl: DEFAULT_BASE_URL,
-    description: '生成课程大纲建议',
-    tags: ['planning'],
-    defaultPriority: 'high',
-    metricsTag: 'workflow.lesson-outline',
-    rateLimit: [
-      { identifier: 'user', intervalMs: 300_000, limit: 3 },
-      { identifier: 'workflow', intervalMs: 60_000, limit: 10 }
-    ],
-    fallback: {
-      workflowId: 'content-generation',
-      message: '工作流暂不可用，已切换至内容生成工作流。'
-    }
+    description: '通用内容生成，支持各种文本创作任务'
   },
   {
     id: 'file-translation',
     appId: readEnv('DIFY_FILE_TRANSLATION_APP_ID'),
     apiKey: readEnv('DIFY_FILE_TRANSLATION_API_KEY'),
-    mode: 'blocking',
+    mode: 'streaming' as DifyWorkflowMode,
     baseUrl: DEFAULT_BASE_URL,
-    description: '上传文件并生成目标语言译文',
-    tenantId: 'ops',
-    tags: ['translation'],
-    defaultPriority: 'low',
-    metricsTag: 'workflow.file-translation',
-    rateLimit: [{ identifier: 'user', intervalMs: 600_000, limit: 2 }],
-    quota: { daily: 200, monthly: 5_000 }
+    description: '上传文件并生成目标语言译文'
+  },
+  {
+    id: 'deep-research',
+    appId: readEnv('DIFY_DEEP_RESEARCH_APP_ID'),
+    apiKey: readEnv('DIFY_DEEP_RESEARCH_API_KEY'),
+    mode: 'streaming' as DifyWorkflowMode,
+    baseUrl: DEFAULT_BASE_URL,
+    description: '深度研究分析，支持多源信息检索和智能总结'
   }
+
 ].filter((item) => item.appId && item.apiKey)
 
 const WORKFLOW_REGISTRY = new Map<string, DifyWorkflowConfig>(
@@ -78,11 +69,11 @@ export const DEFAULT_DIFY_WORKFLOW_ID =
   readEnv('DIFY_DEFAULT_WORKFLOW_ID', { defaultValue: 'content-generation' }) ||
   (WORKFLOW_CONFIGS[0]?.id ?? '')
 
-export function listDifyWorkflows(): DifyWorkflowRuntimeConfig[] {
+export function listDifyWorkflows(): DifyWorkflowConfig[] {
   return WORKFLOW_CONFIGS
 }
 
-export function getDifyWorkflow(id: string): DifyWorkflowRuntimeConfig {
+export function getDifyWorkflow(id: string): DifyWorkflowConfig {
   const config = WORKFLOW_REGISTRY.get(id)
   if (!config) {
     throw new Error(`Dify workflow "${id}" is not configured`)

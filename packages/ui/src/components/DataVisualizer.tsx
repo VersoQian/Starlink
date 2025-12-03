@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
+import * as XLSX from 'xlsx'
 import type { TimelineNode, TimelineEdge } from '../types.js'
 
 export type ParsedTable = {
@@ -50,6 +51,43 @@ export const parseCsv = (input: string): ParsedTable => {
     headers,
     rows
   }
+}
+
+const parseExcel = (file: File): Promise<ParsedTable> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      try {
+        const data = new Uint8Array(event.target?.result as ArrayBuffer)
+        const workbook = XLSX.read(data, { type: 'array' })
+
+        if (workbook.SheetNames.length === 0) {
+          reject(new Error('Excel文件中没有找到工作表'))
+          return
+        }
+
+        const sheetName = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[sheetName]
+        const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as string[][]
+
+        if (jsonData.length === 0) {
+          reject(new Error('Excel文件为空'))
+          return
+        }
+
+        const headers = (jsonData[0] || []).map((h) => String(h))
+        const rows = jsonData.slice(1).map((row) => row.map((cell) => String(cell)))
+
+        resolve({ headers, rows })
+      } catch (error) {
+        reject(new Error('Excel解析失败，请确保文件格式正确'))
+      }
+    }
+    reader.onerror = () => {
+      reject(new Error('文件读取失败'))
+    }
+    reader.readAsArrayBuffer(file)
+  })
 }
 
 const toMarkdown = ({ headers, rows }: ParsedTable) => {
@@ -107,16 +145,48 @@ export function DataVisualizer({
     }
   }
 
-  const handleFileChange: React.ChangeEventHandler<HTMLInputElement> = (event) => {
+  const handleFileChange: React.ChangeEventHandler<HTMLInputElement> = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const text = typeof reader.result === 'string' ? reader.result : ''
-      setRawInput(text)
-      handleParse(text)
+
+    // 文件大小限制：5MB
+    const MAX_FILE_SIZE = 5 * 1024 * 1024
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`文件过大（${(file.size / 1024 / 1024).toFixed(2)}MB），请上传小于5MB的文件`)
+      event.target.value = ''
+      return
     }
-    reader.readAsText(file, 'utf-8')
+
+    try {
+      // 判断文件类型
+      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.type.includes('spreadsheet')
+
+      if (isExcel) {
+        // Excel文件处理
+        const parsed = await parseExcel(file)
+        setTable(parsed)
+        setError(null)
+        if (onDataExtracted) {
+          onDataExtracted(parsed)
+        }
+        // 更新rawInput显示
+        setRawInput(`[已上传Excel: ${file.name}, ${(file.size / 1024).toFixed(1)}KB]`)
+      } else {
+        // CSV文件处理
+        const reader = new FileReader()
+        reader.onload = () => {
+          const text = typeof reader.result === 'string' ? reader.result : ''
+          setRawInput(text)
+          handleParse(text)
+        }
+        reader.readAsText(file, 'utf-8')
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '文件解析失败')
+    }
+
+    // 清空input，允许重复上传同一文件
+    event.target.value = ''
   }
 
   const handleAnalyzeClick = () => {
@@ -147,8 +217,13 @@ export function DataVisualizer({
             <p className="mt-2 text-sm text-slate-500">{description}</p>
           </div>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[#C7D2FE] bg-[#EEF2FF] px-4 py-2 text-sm text-[#4338CA] transition hover:border-[#A5B4FC] hover:bg-[#E0E7FF]">
-            上传 CSV
-            <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileChange} />
+            上传 CSV/Excel
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              className="hidden"
+              onChange={handleFileChange}
+            />
           </label>
         </div>
 
@@ -162,7 +237,7 @@ export function DataVisualizer({
         {error ? (
           <p className="mt-3 rounded-xl border border-[#F87171] bg-[#FEF2F2] px-3 py-2 text-xs text-[#B91C1C]">{error}</p>
         ) : (
-          <p className="mt-3 text-xs text-slate-400">支持 CSV 上传或粘贴，使用半角逗号分隔列。</p>
+          <p className="mt-3 text-xs text-slate-400">支持 CSV 和 Excel (.xlsx, .xls) 上传或粘贴，使用半角逗号分隔列。</p>
         )}
 
         <div className="mt-4 flex flex-wrap gap-3">
@@ -172,6 +247,17 @@ export function DataVisualizer({
             className="rounded-xl bg-gradient-to-r from-[#7F5BFA] to-[#6350E8] px-4 py-2 text-sm font-medium text-white shadow-md hover:from-[#6F4EE5] hover:to-[#5645D7]"
           >
             解析内容并可视化
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const exampleData = '产品,销量,增长率\n手机,250,15%\n电脑,180,8%\n平板,120,-5%\n耳机,95,22%\n手表,65,30%'
+              setRawInput(exampleData)
+              handleParse(exampleData)
+            }}
+            className="rounded-xl border-2 border-[#7F5BFA] bg-white px-4 py-2 text-sm font-medium text-[#7F5BFA] transition hover:bg-[#F8F9FF]"
+          >
+            加载示例数据
           </button>
           <button
             type="button"
