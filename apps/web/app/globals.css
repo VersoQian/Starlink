@@ -1,0 +1,221 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 6% 97%;
+    --foreground: 222 24% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 24% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 24% 12%;
+    --primary: 220.1 85.1% 50%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 222 20% 92%;
+    --secondary-foreground: 222 24% 12%;
+    --muted: 220 20% 85%;
+    --muted-foreground: 222 24% 35%;
+    --accent: 220 20% 88%;
+    --accent-foreground: 222 24% 18%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 224 25% 88%;
+    --input: 224 25% 88%;
+    --ring: 220.1 85.1% 50%;
+    --radius: 0.5rem;
+
+    --canvas-primary: 220.1 85.1% 50%;
+    --canvas-bg: 240 12.5% 96.9%;
+    --canvas-surface: 0 0% 100%;
+    --canvas-panel: 220 36% 95.1%;
+    --canvas-card: 0 0% 100%;
+    --canvas-border: 223.3 33.3% 89.4%;
+    --canvas-text: 222.2 47.4% 11.2%;
+    --canvas-muted: 215.3 19.3% 34.5%;
+    --canvas-subtle: 215 20.2% 65.1%;
+    --canvas-grid: 232.5 100% 93.7%;
+    --canvas-scroll-track: 228 25% 92.2%;
+    --canvas-scroll-thumb: 217.1 20.4% 79.8%;
+    --canvas-scroll-thumb-hover: 215.2 17% 66.5%;
+  }
+
+  .dark {
+    --background: 220 36% 10%;
+    --foreground: 210 40% 96%;
+    --card: 222 32% 14%;
+    --card-foreground: 210 40% 96%;
+    --popover: 222 32% 14%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 220.1 85.1% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 219 34% 22%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 219 32% 24%;
+    --muted-foreground: 217 20% 75%;
+    --accent: 219 32% 24%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 28% 26%;
+    --input: 220 28% 26%;
+    --ring: 220.1 85.1% 50%;
+
+    --canvas-primary: 220.1 85.1% 50%;
+    --canvas-bg: 220 36% 9.8%;
+    --canvas-surface: 218.8 33.3% 10%;
+    --canvas-panel: 217.2 32.6% 17.5%;
+    --canvas-card: 220.8 31.6% 15.5%;
+    --canvas-border: 220.5 34.6% 21%;
+    --canvas-text: 226.7 52.9% 93.3%;
+    --canvas-muted: 218.9 39.1% 72.9%;
+    --canvas-subtle: 218 16.1% 50%;
+    --canvas-grid: 220.5 34.6% 21%;
+    --canvas-scroll-track: 218.8 33.3% 10%;
+    --canvas-scroll-thumb: 220.5 34.6% 21%;
+    --canvas-scroll-thumb-hover: 219.6 34.6% 30%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+body {
+  background-color: hsl(var(--canvas-bg));
+  color: hsl(var(--canvas-text));
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+.canvas-grid {
+  background-color: hsl(var(--canvas-bg));
+  background-image:
+    linear-gradient(to right, hsl(var(--canvas-grid)) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--canvas-grid)) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ComfyUI风格深色网格 */
+.comfy-canvas {
+  background-color: #1a1a1a;
+  background-image:
+    linear-gradient(#2a2a2a 1px, transparent 1px),
+    linear-gradient(90deg, #2a2a2a 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.react-flow__node.canvas-node {
+  transition: transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+.react-flow__node.canvas-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 45px -36px rgba(64, 84, 172, 0.55);
+}
+
+/* ComfyUI节点样式 */
+.react-flow__node.comfy-node {
+  transition: all 0.2s ease;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.react-flow__node.comfy-node:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  transform: translateY(-1px);
+}
+
+.react-flow__node.comfy-node.executing {
+  box-shadow: 0 0 0 2px #4ade80, 0 8px 24px rgba(74, 222, 128, 0.3);
+}
+
+.react-flow__node.animate-canvas-node {
+  animation: canvas-node-pop 0.45s ease forwards;
+}
+
+@keyframes canvas-node-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.react-flow__edge.animate-canvas-edge {
+  opacity: 0;
+  animation: canvas-edge-fade 0.4s ease forwards;
+}
+
+@keyframes canvas-edge-fade {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 3D Flip Card Animation Classes */
+.transform-style-preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+/* Enhanced flip animation with smooth transitions */
+.flip-container {
+  transition: transform 0.7s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.flip-container:hover {
+  transition: transform 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Custom scrollbar aligned with workspace palette */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--canvas-scroll-track));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--canvas-scroll-thumb));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--canvas-scroll-thumb-hover));
+}

@@ -1,18 +1,20 @@
 {
-  "name": "branching-chat",
+  "name": "starlink",
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "frontend",
+    "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev:frontend": "npm run dev -w frontend",
-    "dev:server": "pnpm --filter @branching-chat/server dev",
-    "build:frontend": "npm run build -w frontend",
-    "build:server": "pnpm --filter @branching-chat/server build",
-    "test:e2e": "npm run test:e2e -w frontend",
-    "test:e2e:headed": "npm run test:e2e:headed -w frontend"
+    "dev": "pnpm --filter @starlink/web dev",
+    "dev:web": "pnpm --filter @starlink/web dev",
+    "dev:server": "pnpm --filter @starlink/server dev",
+    "build": "pnpm --filter @starlink/web build",
+    "build:web": "pnpm --filter @starlink/web build",
+    "build:server": "pnpm --filter @starlink/server build",
+    "test:e2e": "pnpm --filter @starlink/web test:e2e",
+    "test:e2e:headed": "pnpm --filter @starlink/web test:e2e:headed"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.78.0"
