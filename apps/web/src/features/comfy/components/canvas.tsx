@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import ReactFlow, {
   Background,
   Controls,
@@ -19,7 +19,7 @@ import { AgentAvatarNode } from './nodes/agent-avatar-node'
 import { ConflictAlertNode } from './nodes/conflict-alert-node'
 import { InsightNoteNode } from './nodes/insight-note-node'
 import { Button } from '@/shared/components/ui/button'
-import { Play, Plus, Sparkles, Loader2, AlertTriangle, Wand2 } from 'lucide-react'
+import { Play, Plus, Sparkles, Loader2, AlertTriangle, Wand2, X, ChevronRight, Send, History, FileText, Lightbulb } from 'lucide-react'
 
 const nodeTypes = {
   resource: ResourceNode,
@@ -30,6 +30,33 @@ const nodeTypes = {
   'conflict-alert': ConflictAlertNode,
   'insight-note': InsightNoteNode
 }
+
+// 节点配置 (参考参考UI的设计)
+const NODE_PALETTE = [
+  { type: 'cc-bmc-card', label: '商业卡片', icon: '💎', color: '#8b5cf6', description: '核心业务模型卡片' },
+  { type: 'agent-avatar', label: 'AI 顾问', icon: '🤖', color: '#7c3aed', description: '虚拟专家顾问' },
+  { type: 'insight-note', label: '洞察便签', icon: '💡', color: '#a78bfa', description: 'AI 生成的洞察' },
+  { type: 'resource', label: '资源', icon: '📁', color: '#64748b', description: '文档或数据源' }
+]
+
+// 引导步骤
+const TUTORIAL_STEPS = [
+  {
+    title: '欢迎使用智绘·无限商业画布',
+    description: '通过 AI 驱动的画布，快速构建和分析商业模型。',
+    icon: <Sparkles className="w-8 h-8 text-purple-500" />
+  },
+  {
+    title: '描述你的商业想法',
+    description: '在输入框中描述你的想法，AI 将自动生成初始画布结构。',
+    icon: <Wand2 className="w-8 h-8 text-purple-500" />
+  },
+  {
+    title: '编辑和扩展节点',
+    description: '点击节点编辑内容，拖拽连接线建立关系，AI 会持续提供建议。',
+    icon: <Lightbulb className="w-8 h-8 text-purple-500" />
+  }
+]
 
 export function ComfyCanvas() {
   const {
@@ -49,15 +76,45 @@ export function ComfyCanvas() {
   } = useComfyStore()
 
   const [seedInput, setSeedInput] = useState('')
-  const [showSeedInput, setShowSeedInput] = useState(false)
+  const [chatInput, setChatInput] = useState('')
+  const [showTutorial, setShowTutorial] = useState(false)
+  const [tutorialStep, setTutorialStep] = useState(0)
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>>([
+    {
+      role: 'assistant',
+      content: '你好！我是你的商业画布助手。你可以描述你的商业想法，我会帮你生成初始画布结构。',
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    }
+  ])
+
+  // 首次加载时显示引导
+  useEffect(() => {
+    const hasSeenTutorial = localStorage.getItem('comfy_tutorial_seen')
+    if (!hasSeenTutorial && nodes.length === 0) {
+      setShowTutorial(true)
+    }
+  }, [nodes.length])
+
+  const handleCloseTutorial = () => {
+    setShowTutorial(false)
+    localStorage.setItem('comfy_tutorial_seen', 'true')
+  }
+
+  const handleNextStep = () => {
+    if (tutorialStep < TUTORIAL_STEPS.length - 1) {
+      setTutorialStep(tutorialStep + 1)
+    } else {
+      handleCloseTutorial()
+    }
+  }
 
   const addNode = useCallback((type: string) => {
     const newNode: Node = {
       id: `${type}-${Date.now()}`,
       type,
       position: {
-        x: Math.random() * 400 + 100,
-        y: Math.random() * 400 + 100
+        x: Math.random() * 400 + 300,
+        y: Math.random() * 400 + 200
       },
       data: { label: `${type} node` }
     }
@@ -67,188 +124,338 @@ export function ComfyCanvas() {
   const handleSeedGeneration = useCallback(async () => {
     if (!seedInput.trim() || isOrchestratorProcessing) return
 
+    const userMessage = {
+      role: 'user' as const,
+      content: seedInput,
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    }
+    setChatMessages(prev => [...prev, userMessage])
+
     try {
       await callOrchestrator(seedInput, 'seed')
+
+      const assistantMessage = {
+        role: 'assistant' as const,
+        content: `已为你生成基于"${seedInput}"的初始画布结构。你可以点击节点进行编辑，或继续提问来完善画布。`,
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+      setChatMessages(prev => [...prev, assistantMessage])
       setSeedInput('')
-      setShowSeedInput(false)
     } catch (error) {
       console.error('种子生成失败:', error)
-      alert('AI 生成失败，请稍后再试')
+      const errorMessage = {
+        role: 'assistant' as const,
+        content: '抱歉，AI 生成失败，请稍后再试。',
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+      setChatMessages(prev => [...prev, errorMessage])
     }
   }, [seedInput, isOrchestratorProcessing, callOrchestrator])
+
+  const handleSendChat = useCallback(async () => {
+    if (!chatInput.trim() || isOrchestratorProcessing) return
+
+    const userMessage = {
+      role: 'user' as const,
+      content: chatInput,
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    }
+    setChatMessages(prev => [...prev, userMessage])
+
+    try {
+      await callOrchestrator(chatInput, 'general')
+
+      const assistantMessage = {
+        role: 'assistant' as const,
+        content: '已根据你的问题更新画布。',
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+      setChatMessages(prev => [...prev, assistantMessage])
+      setChatInput('')
+    } catch (error) {
+      console.error('对话失败:', error)
+    }
+  }, [chatInput, isOrchestratorProcessing, callOrchestrator])
 
   const handleRunCritic = useCallback(async () => {
     try {
       await callCritic()
+      const message = {
+        role: 'assistant' as const,
+        content: '已完成冲突检测。如果发现冲突，会在画布上标记。',
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+      setChatMessages(prev => [...prev, message])
     } catch (error) {
       console.error('冲突检测失败:', error)
     }
   }, [callCritic])
 
   return (
-    <div className="h-screen w-screen relative bg-gray-50">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        nodeTypes={nodeTypes}
-        defaultEdgeOptions={{
-          type: 'smoothstep',
-          animated: false,
-          style: { stroke: '#94a3b8', strokeWidth: 2 }
-        }}
-        className="comfy-canvas"
-        fitView
-      >
-        <Background
-          color="#d1d5db"
-          gap={24}
-          size={1}
-          variant={BackgroundVariant.Dots}
-        />
-        <Controls className="bg-white/90 border border-gray-200 shadow-lg" />
-        <MiniMap
-          className="bg-white/90 border border-gray-200 shadow-lg"
-          nodeColor="#3b82f6"
-          maskColor="rgba(0, 0, 0, 0.05)"
-        />
-      </ReactFlow>
-
-      {/* 现代化工具栏 */}
-      <div className="absolute top-6 left-6 z-10 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
-        {/* 标题栏 */}
-        <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
-          <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-blue-600" />
-            智能画布
-          </h3>
-          <p className="text-xs text-gray-500 mt-1">MACRA 商业分析系统</p>
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50">
+      {/* 顶部导航栏 */}
+      <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-slate-200 shadow-sm z-20">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-purple-100 text-purple-600">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-slate-800">智绘·无限商业画布</h1>
+            <p className="text-xs text-slate-500">MACRA 商业分析系统</p>
+          </div>
         </div>
+        <div className="flex gap-3 items-center">
+          <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white border border-slate-200 hover:border-purple-300 hover:bg-purple-50 transition-colors text-sm font-medium text-slate-700">
+            <FileText className="w-4 h-4" />
+            导出
+          </button>
+          <button
+            onClick={() => setShowTutorial(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold transition-colors shadow-md"
+          >
+            <Sparkles className="w-4 h-4" />
+            查看引导
+          </button>
+        </div>
+      </header>
 
-        <div className="p-4 space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-          {/* AI 种子生成 */}
-          <div className="space-y-2">
-            <button
-              onClick={() => setShowSeedInput(!showSeedInput)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 text-white hover:from-blue-600 hover:to-indigo-700 transition shadow-md"
-            >
-              <span className="flex items-center gap-2 font-medium">
-                <Wand2 className="w-4 h-4" />
-                AI 生成画布
-              </span>
-              <span className="text-sm">{showSeedInput ? '▲' : '▼'}</span>
-            </button>
-
-            {showSeedInput && (
-              <div className="space-y-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                <textarea
-                  value={seedInput}
-                  onChange={(e) => setSeedInput(e.target.value)}
-                  placeholder="描述你的商业想法..."
-                  className="w-full h-24 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400"
-                  disabled={isOrchestratorProcessing}
-                />
-                <Button
-                  onClick={handleSeedGeneration}
-                  disabled={!seedInput.trim() || isOrchestratorProcessing}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-                  size="sm"
-                >
-                  {isOrchestratorProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      生成中...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 mr-2" />
-                      开始生成
-                    </>
-                  )}
-                </Button>
-              </div>
-            )}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 左侧节点调色板 */}
+        <aside className="w-72 flex flex-col bg-white border-r border-slate-200 shadow-lg z-10">
+          <div className="px-5 py-4 border-b border-slate-200">
+            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">节点调色板</h3>
+            <p className="text-xs text-slate-500 mt-1">拖拽到画布或点击添加</p>
           </div>
 
-          {/* 冲突检测 */}
-          {nodes.length > 3 && (
-            <Button
-              onClick={handleRunCritic}
-              disabled={isCriticProcessing}
-              variant="outline"
-              size="sm"
-              className="w-full border-orange-200 text-orange-700 hover:bg-orange-50"
-            >
-              {isCriticProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  扫描中...
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="w-4 h-4 mr-2" />
-                  冲突检测
-                </>
-              )}
-            </Button>
-          )}
-
-          {/* 分隔线 */}
-          <div className="border-t border-gray-200" />
-
-          {/* 节点类型 */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">添加节点</p>
-
-            <div className="grid grid-cols-2 gap-2">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {NODE_PALETTE.map((node) => (
               <button
-                onClick={() => addNode('cc-bmc-card')}
-                className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition text-center group"
+                key={node.type}
+                onClick={() => addNode(node.type)}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-purple-300 hover:bg-purple-50 transition-all group cursor-pointer"
+                style={{ borderLeftColor: node.color, borderLeftWidth: 3 }}
               >
-                <span className="text-2xl">💎</span>
-                <span className="text-xs font-medium text-gray-700 group-hover:text-blue-700">商业卡片</span>
+                <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-purple-50 text-2xl group-hover:scale-110 transition-transform">
+                  {node.icon}
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-semibold text-slate-800">{node.label}</p>
+                  <p className="text-xs text-slate-500">{node.description}</p>
+                </div>
               </button>
+            ))}
+          </div>
 
-              <button
-                onClick={() => addNode('agent-avatar')}
-                className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-gray-200 hover:border-purple-300 hover:bg-purple-50 transition text-center group"
+          <div className="p-4 border-t border-slate-200 bg-slate-50">
+            <div className="space-y-2">
+              <textarea
+                value={seedInput}
+                onChange={(e) => setSeedInput(e.target.value)}
+                placeholder="描述你的商业想法..."
+                className="w-full h-24 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent placeholder:text-slate-400"
+                disabled={isOrchestratorProcessing}
+              />
+              <Button
+                onClick={handleSeedGeneration}
+                disabled={!seedInput.trim() || isOrchestratorProcessing}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white shadow-md"
               >
-                <span className="text-2xl">🤖</span>
-                <span className="text-xs font-medium text-gray-700 group-hover:text-purple-700">AI 顾问</span>
-              </button>
+                {isOrchestratorProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-4 h-4 mr-2" />
+                    AI 生成画布
+                  </>
+                )}
+              </Button>
+            </div>
 
-              <button
-                onClick={() => addNode('insight-note')}
-                className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-gray-200 hover:border-amber-300 hover:bg-amber-50 transition text-center group"
+            {nodes.length > 3 && (
+              <Button
+                onClick={handleRunCritic}
+                disabled={isCriticProcessing}
+                variant="outline"
+                className="w-full mt-3 border-orange-200 text-orange-700 hover:bg-orange-50"
               >
-                <span className="text-2xl">💡</span>
-                <span className="text-xs font-medium text-gray-700 group-hover:text-amber-700">洞察便签</span>
-              </button>
+                {isCriticProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    扫描中...
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-4 h-4 mr-2" />
+                    冲突检测
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        </aside>
 
+        {/* 中间画布区域 */}
+        <main className="flex-1 relative overflow-hidden bg-slate-50">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            defaultEdgeOptions={{
+              type: 'smoothstep',
+              animated: true,
+              style: { stroke: '#8b5cf6', strokeWidth: 2 }
+            }}
+            className="comfy-canvas"
+            fitView
+          >
+            <Background
+              color="#d1d5db"
+              gap={24}
+              size={1}
+              variant={BackgroundVariant.Dots}
+            />
+            <Controls className="bg-white/90 border border-slate-200 shadow-lg rounded-lg" />
+            <MiniMap
+              className="bg-white/90 border border-slate-200 shadow-lg rounded-lg"
+              nodeColor="#8b5cf6"
+              maskColor="rgba(139, 92, 246, 0.1)"
+            />
+          </ReactFlow>
+
+          {/* 底部提示 */}
+          <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur rounded-lg px-4 py-2 text-xs text-slate-500 border border-slate-200 shadow-md flex items-center gap-2">
+            <Lightbulb className="w-4 h-4" />
+            <span>按住 <kbd className="px-1.5 py-0.5 bg-slate-100 rounded border border-slate-300 font-mono text-slate-700">Space</kbd> 拖动画布 · 滚轮缩放</span>
+          </div>
+        </main>
+
+        {/* 右侧 AI 助手面板 */}
+        <aside className="w-80 flex flex-col bg-white border-l border-slate-200 shadow-lg z-10">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-purple-50 to-white">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-100 to-purple-200 flex items-center justify-center border border-purple-200">
+                <Sparkles className="w-4 h-4 text-purple-600" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-800">星链助手</h3>
+            </div>
+            <button className="p-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 transition-colors">
+              <History className="w-4 h-4 text-slate-400" />
+            </button>
+          </div>
+
+          {/* 对话历史 */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/30">
+            {chatMessages.map((msg, idx) => (
+              <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  msg.role === 'assistant'
+                    ? 'bg-gradient-to-br from-purple-100 to-purple-200 border border-purple-200'
+                    : 'bg-slate-200'
+                }`}>
+                  {msg.role === 'assistant' ? (
+                    <Sparkles className="w-4 h-4 text-purple-600" />
+                  ) : (
+                    <span className="text-slate-600 text-xs font-bold">U</span>
+                  )}
+                </div>
+                <div className={`flex flex-col gap-1 max-w-[85%] ${msg.role === 'user' ? 'items-end' : ''}`}>
+                  <div className={`p-3 rounded-2xl text-sm ${
+                    msg.role === 'assistant'
+                      ? 'bg-white border border-slate-200 text-slate-700 rounded-tl-none shadow-sm'
+                      : 'bg-purple-600 text-white rounded-tr-none shadow-md'
+                  }`}>
+                    {msg.content}
+                  </div>
+                  <span className="text-[10px] text-slate-400 px-1">{msg.timestamp}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* 输入框 */}
+          <div className="p-4 border-t border-slate-200 bg-white">
+            <div className="relative">
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSendChat()}
+                placeholder="询问关于画布或商业模式的问题..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-10 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-slate-400 shadow-inner"
+                disabled={isOrchestratorProcessing}
+              />
               <button
-                onClick={() => addNode('resource')}
-                className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition text-center group"
+                onClick={handleSendChat}
+                disabled={!chatInput.trim() || isOrchestratorProcessing}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg bg-white border border-slate-200 hover:bg-purple-50 hover:border-purple-300 transition-colors disabled:opacity-50"
               >
-                <span className="text-2xl">📁</span>
-                <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900">资源</span>
+                <Send className="w-4 h-4 text-purple-600" />
               </button>
             </div>
           </div>
-
-          {/* 传统工作流 */}
-          <Button
-            onClick={executeWorkflow}
-            disabled={!!executingNodeId}
-            className="w-full bg-green-600 hover:bg-green-700 text-white shadow-sm"
-            size="sm"
-          >
-            <Play className="w-4 h-4 mr-2" />
-            {executingNodeId ? '执行中...' : '运行工作流'}
-          </Button>
-        </div>
+        </aside>
       </div>
+
+      {/* 引导动画弹窗 */}
+      {showTutorial && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-white font-bold text-lg">快速入门引导</h3>
+              <button
+                onClick={handleCloseTutorial}
+                className="text-white/80 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-8 text-center">
+              <div className="mb-4 flex justify-center">
+                {TUTORIAL_STEPS[tutorialStep].icon}
+              </div>
+              <h4 className="text-xl font-bold text-slate-800 mb-2">
+                {TUTORIAL_STEPS[tutorialStep].title}
+              </h4>
+              <p className="text-slate-600 mb-6">
+                {TUTORIAL_STEPS[tutorialStep].description}
+              </p>
+
+              <div className="flex items-center justify-center gap-2 mb-6">
+                {TUTORIAL_STEPS.map((_, idx) => (
+                  <div
+                    key={idx}
+                    className={`h-2 rounded-full transition-all ${
+                      idx === tutorialStep ? 'w-8 bg-purple-600' : 'w-2 bg-slate-300'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCloseTutorial}
+                  className="flex-1 px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors text-slate-700 font-medium"
+                >
+                  跳过
+                </button>
+                <button
+                  onClick={handleNextStep}
+                  className="flex-1 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold transition-colors shadow-md flex items-center justify-center gap-2"
+                >
+                  {tutorialStep < TUTORIAL_STEPS.length - 1 ? '下一步' : '开始使用'}
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
