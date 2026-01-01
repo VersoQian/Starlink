@@ -70,7 +70,16 @@ const ORCHESTRATOR_SYSTEM_PROMPT = `<system_role>
 
 3. **数据溯源**: 凡是涉及法规、数据的结论，必须在 metadata.source 中注明来源（如"基于 NMPA 2024 新规"）。
 
-4. **位置布局**: 核心节点放在 (0,0) 附近，子节点根据语义距离向四周发散。相同维度的节点尽量靠近。
+4. **智能布局策略 (重要)**:
+   - **左侧列** (x: 150): 客户相关维度（客户细分、客户关系、渠道通路）
+   - **中间列** (x: 450): 价值相关维度（价值主张、关键业务、核心资源）
+   - **右侧列** (x: 750): 财务合作维度（收入来源、成本结构、重要合作）
+   - **垂直分层**:
+     * y: 100 - 战略层（客户细分、价值主张、重要合作）
+     * y: 300 - 运营层（客户关系、关键业务、收入来源）
+     * y: 500 - 资源层（渠道通路、核心资源、成本结构）
+   - **洞察便签**: 默认放在右侧区域 (x: 850, y: 250-350)
+   - 同维度多个节点时，向右或向下偏移50px避免重叠
 </interaction_rules>
 
 <九大维度说明>
@@ -166,15 +175,64 @@ export async function POST(request: Request) {
 }
 
 /**
+ * 智能布局算法 - 根据CC-BMC维度计算节点位置
+ *
+ * 布局策略：
+ * - 左侧列（x: 100-300）: 客户相关维度（客户细分、客户关系、渠道通路）
+ * - 中间列（x: 400-600）: 价值相关维度（价值主张、关键业务、核心资源）
+ * - 右侧列（x: 700-900）: 财务合作维度（收入来源、成本结构、重要合作）
+ *
+ * Y轴分三层：
+ * - 上层（y: 100）: 战略层（客户细分、价值主张、重要合作）
+ * - 中层（y: 300）: 运营层（客户关系、关键业务、收入来源）
+ * - 下层（y: 500）: 资源层（渠道通路、核心资源、成本结构）
+ */
+function calculatePositionByDomain(domain: string, index: number = 0): { x: number; y: number } {
+  // 根据维度映射到画布位置
+  const positionMap: Record<string, { x: number; y: number }> = {
+    // 左侧 - 客户相关
+    [CC_BMC_DOMAINS.CUSTOMER_SEGMENTS]: { x: 150, y: 100 },    // 客户细分（战略层）
+    [CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS]: { x: 150, y: 300 }, // 客户关系（运营层）
+    [CC_BMC_DOMAINS.CHANNELS]: { x: 150, y: 500 },             // 渠道通路（资源层）
+
+    // 中间 - 价值相关
+    [CC_BMC_DOMAINS.VALUE_PROPOSITIONS]: { x: 450, y: 100 },   // 价值主张（战略核心）
+    [CC_BMC_DOMAINS.KEY_ACTIVITIES]: { x: 450, y: 300 },       // 关键业务（运营层）
+    [CC_BMC_DOMAINS.KEY_RESOURCES]: { x: 450, y: 500 },        // 核心资源（资源层）
+
+    // 右侧 - 财务合作
+    [CC_BMC_DOMAINS.KEY_PARTNERSHIPS]: { x: 750, y: 100 },     // 重要合作（战略层）
+    [CC_BMC_DOMAINS.REVENUE_STREAMS]: { x: 750, y: 300 },      // 收入来源（运营层）
+    [CC_BMC_DOMAINS.COST_STRUCTURE]: { x: 750, y: 500 }        // 成本结构（资源层）
+  }
+
+  // 获取基础位置
+  const basePosition = positionMap[domain] || { x: 450, y: 300 }
+
+  // 添加轻微偏移避免节点重叠（同维度多个节点时）
+  const offset = index * 50
+
+  return {
+    x: basePosition.x + (offset % 150),
+    y: basePosition.y + Math.floor(offset / 150) * 30
+  }
+}
+
+/**
  * 生成 Fallback 响应（当 LLM 失败时）
  */
 function generateFallbackResponse(userPrompt: string, mode: string): OrchestratorResponse {
   const timestamp = Date.now()
 
   if (mode === 'seed') {
-    // 种子生成模式：创建核心节点 + 3个子节点
+    // 种子生成模式：创建核心节点 + 关键子节点，使用智能布局
+    const corePosition = calculatePositionByDomain(CC_BMC_DOMAINS.VALUE_PROPOSITIONS)
+    const customerPosition = calculatePositionByDomain(CC_BMC_DOMAINS.CUSTOMER_SEGMENTS)
+    const channelPosition = calculatePositionByDomain(CC_BMC_DOMAINS.CHANNELS)
+    const resourcePosition = calculatePositionByDomain(CC_BMC_DOMAINS.KEY_RESOURCES)
+
     return {
-      thought_process: `用户输入了商业想法："${userPrompt}"。我将创建一个核心价值主张节点，并发散出目标客户、渠道通路、核心资源三个维度的节点。`,
+      thought_process: `用户输入了商业想法："${userPrompt}"。我将创建一个核心价值主张节点（中心位置），并按照CC-BMC框架发散出客户细分（左上）、渠道通路（左下）、核心资源（中下）三个维度的节点，形成结构化的商业画布。`,
       canvas_actions: [
         {
           action: 'create_node',
@@ -184,7 +242,7 @@ function generateFallbackResponse(userPrompt: string, mode: string): Orchestrato
             label: '核心价值主张',
             content: `## 商业想法\n\n${userPrompt}\n\n这是您的核心商业想法，我们将围绕它展开分析。`,
             domain: CC_BMC_DOMAINS.VALUE_PROPOSITIONS,
-            position: { x: 400, y: 200 },
+            position: corePosition,
             metadata: {
               agent_signature: AGENT_TYPES.ORCHESTRATOR,
               confidence: 'medium',
@@ -200,7 +258,7 @@ function generateFallbackResponse(userPrompt: string, mode: string): Orchestrato
             label: '目标客户',
             content: `## 待分析\n\n请明确您的目标客户群体：\n- 年龄、地域、职业？\n- 痛点是什么？\n- 支付能力如何？`,
             domain: CC_BMC_DOMAINS.CUSTOMER_SEGMENTS,
-            position: { x: 100, y: 200 },
+            position: customerPosition,
             metadata: {
               agent_signature: AGENT_TYPES.MARKET,
               confidence: 'low'
@@ -215,9 +273,24 @@ function generateFallbackResponse(userPrompt: string, mode: string): Orchestrato
             label: '渠道通路',
             content: `## 待分析\n\n如何触达您的目标客户：\n- 线上还是线下？\n- 直销还是分销？\n- 有哪些关键渠道？`,
             domain: CC_BMC_DOMAINS.CHANNELS,
-            position: { x: 700, y: 200 },
+            position: channelPosition,
             metadata: {
               agent_signature: AGENT_TYPES.MARKET,
+              confidence: 'low'
+            }
+          } as MacraNodeData
+        },
+        {
+          action: 'create_node',
+          data: {
+            id: `resource-${timestamp}`,
+            type: 'cc-bmc-card',
+            label: '核心资源',
+            content: `## 待分析\n\n实现价值主张需要哪些核心资源：\n- 人力资源？\n- 技术资源？\n- 资金需求？`,
+            domain: CC_BMC_DOMAINS.KEY_RESOURCES,
+            position: resourcePosition,
+            metadata: {
+              agent_signature: AGENT_TYPES.PRODUCT,
               confidence: 'low'
             }
           } as MacraNodeData
@@ -241,14 +314,26 @@ function generateFallbackResponse(userPrompt: string, mode: string): Orchestrato
             type: 'default',
             animated: true
           } as MacraEdgeData
+        },
+        {
+          action: 'create_edge',
+          data: {
+            source: `core-${timestamp}`,
+            target: `resource-${timestamp}`,
+            label: '资源需求',
+            type: 'default',
+            animated: true
+          } as MacraEdgeData
         }
       ]
     }
   }
 
-  // 一般模式：创建洞察便签
+  // 一般模式：创建洞察便签，放在画布右侧
+  const insightPosition = { x: 850, y: 250 + Math.floor(Math.random() * 100) }
+
   return {
-    thought_process: `用户提出了问题："${userPrompt}"。我将生成一个洞察便签来回应。`,
+    thought_process: `用户提出了问题："${userPrompt}"。我将生成一个洞察便签（右侧区域）来回应。`,
     canvas_actions: [
       {
         action: 'create_node',
@@ -257,7 +342,7 @@ function generateFallbackResponse(userPrompt: string, mode: string): Orchestrato
           type: 'insight-note',
           label: 'AI 洞察',
           content: `## 关于您的问题\n\n"${userPrompt}"\n\n**分析**: 这是一个很好的问题。建议您进一步明确具体细节，以便我能提供更有针对性的建议。\n\n**建议**: 可以尝试将问题拆解为更小的子问题，逐一分析。`,
-          position: { x: Math.random() * 300 + 200, y: Math.random() * 300 + 200 },
+          position: insightPosition,
           metadata: {
             agent_signature: AGENT_TYPES.ORCHESTRATOR,
             confidence: 'medium'
