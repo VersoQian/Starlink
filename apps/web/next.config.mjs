@@ -14,7 +14,7 @@ const nextConfig = {
   webpack: (config) => {
     config.resolve.alias = {
       ...(config.resolve.alias ?? {}),
-      '@branching-chat/ui': new URL('../packages/ui/dist', import.meta.url).pathname
+      '@starlink/ui': new URL('../../packages/ui/dist', import.meta.url).pathname
     }
     return config
   }

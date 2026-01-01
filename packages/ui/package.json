@@ -16,7 +16,8 @@
   "peerDependencies": {
     "@tanstack/react-query": "^5.0.0",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0"
+    "react-dom": "^18.0.0",
+    "xlsx": "^0.18.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.26",
