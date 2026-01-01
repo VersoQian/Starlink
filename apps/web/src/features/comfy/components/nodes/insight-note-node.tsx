@@ -36,17 +36,17 @@ export function InsightNoteNode({ id, data }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="w-3 h-3 bg-amber-500 border-2 border-white"
+        className="w-3 h-3 bg-purple-500 border-2 border-white shadow-md"
       />
 
-      <Card className="w-96 shadow-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-50 relative overflow-hidden">
+      <Card className="w-96 shadow-xl border-2 border-purple-200 bg-gradient-to-br from-purple-50 via-white to-purple-50 relative overflow-hidden hover:shadow-2xl transition-all duration-300 rounded-2xl">
         {/* 装饰性背景 */}
-        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-amber-200/30 to-transparent rounded-full blur-2xl" />
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-200/30 to-transparent rounded-full blur-2xl" />
 
         <CardHeader className="pb-3 relative z-10">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-2 flex-1">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-amber-400 to-yellow-500 shadow-lg">
+              <div className="p-2 rounded-xl bg-gradient-to-br from-purple-400 to-purple-500 shadow-lg">
                 <Lightbulb className="w-5 h-5 text-white" />
               </div>
 
@@ -55,19 +55,19 @@ export function InsightNoteNode({ id, data }: NodeProps) {
                   type="text"
                   value={editedLabel}
                   onChange={(e) => setEditedLabel(e.target.value)}
-                  className="flex-1 text-sm font-semibold bg-white/80 border border-amber-300 rounded px-2 py-1 text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="flex-1 text-sm font-semibold bg-white/80 border-2 border-purple-200 rounded-lg px-2 py-1.5 text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-300 shadow-sm"
                   placeholder="洞察标题"
                 />
               ) : (
                 <div className="flex-1">
-                  <CardTitle className="text-sm text-amber-900 flex items-center gap-2">
+                  <CardTitle className="text-sm text-purple-900 font-bold flex items-center gap-2">
                     {nodeData?.label || '洞察便签'}
                     {nodeData?.metadata?.agent_signature === 'Orchestrator' && (
-                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <Sparkles className="w-4 h-4 text-purple-500" />
                     )}
                   </CardTitle>
                   {nodeData?.metadata?.agent_signature && (
-                    <p className="text-xs text-amber-600 mt-0.5">
+                    <p className="text-xs text-purple-600 mt-0.5 font-medium">
                       来自 {nodeData.metadata.agent_signature}
                     </p>
                   )}
@@ -79,7 +79,7 @@ export function InsightNoteNode({ id, data }: NodeProps) {
               {!isEditing ? (
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="p-1 rounded hover:bg-amber-100 transition text-amber-700"
+                  className="p-1.5 rounded-lg hover:bg-purple-100 transition-all text-purple-600 hover:shadow-sm"
                   title="编辑"
                 >
                   <Edit3 className="w-4 h-4" />
@@ -88,14 +88,14 @@ export function InsightNoteNode({ id, data }: NodeProps) {
                 <>
                   <button
                     onClick={handleSave}
-                    className="p-1 rounded hover:bg-green-100 transition text-green-600"
+                    className="p-1.5 rounded-lg hover:bg-green-100 transition-all text-green-600 shadow-sm hover:shadow"
                     title="保存"
                   >
                     <Check className="w-4 h-4" />
                   </button>
                   <button
                     onClick={handleCancel}
-                    className="p-1 rounded hover:bg-red-100 transition text-red-600"
+                    className="p-1.5 rounded-lg hover:bg-red-100 transition-all text-red-600 shadow-sm hover:shadow"
                     title="取消"
                   >
                     <X className="w-4 h-4" />
@@ -113,10 +113,10 @@ export function InsightNoteNode({ id, data }: NodeProps) {
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
               placeholder="输入洞察内容（支持 Markdown）..."
-              className="w-full h-40 bg-white/80 border border-amber-300 rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full h-40 bg-white/80 border-2 border-purple-200 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 shadow-inner"
             />
           ) : (
-            <div className="prose prose-sm max-w-none bg-white/70 backdrop-blur-sm rounded-lg p-4 min-h-[100px] max-h-64 overflow-y-auto border border-amber-200 shadow-inner">
+            <div className="prose prose-sm max-w-none bg-white/70 backdrop-blur-sm rounded-xl p-4 min-h-[100px] max-h-64 overflow-y-auto border-2 border-purple-100 shadow-sm">
               <ReactMarkdown>
                 {nodeData?.content || '*这里将展示AI生成的洞察和建议*'}
               </ReactMarkdown>
@@ -126,10 +126,10 @@ export function InsightNoteNode({ id, data }: NodeProps) {
           {/* 置信度指示器 */}
           {nodeData?.metadata?.confidence && (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-amber-700">置信度:</span>
-              <div className="flex-1 h-2 bg-amber-100 rounded-full overflow-hidden">
+              <span className="text-xs text-purple-700 font-semibold">置信度:</span>
+              <div className="flex-1 h-2 bg-purple-100 rounded-full overflow-hidden shadow-inner">
                 <div
-                  className={`h-full bg-gradient-to-r from-amber-400 to-yellow-500 transition-all ${
+                  className={`h-full bg-gradient-to-r from-purple-400 to-purple-500 transition-all rounded-full ${
                     nodeData.metadata.confidence === 'high' ? 'w-full' :
                     nodeData.metadata.confidence === 'medium' ? 'w-2/3' :
                     'w-1/3'
@@ -138,7 +138,7 @@ export function InsightNoteNode({ id, data }: NodeProps) {
               </div>
               <Badge
                 variant={nodeData.metadata.confidence === 'high' ? 'default' : 'secondary'}
-                className="text-xs"
+                className="text-xs bg-purple-100 text-purple-700 border-purple-200"
               >
                 {nodeData.metadata.confidence}
               </Badge>
@@ -147,8 +147,8 @@ export function InsightNoteNode({ id, data }: NodeProps) {
 
           {/* 数据来源 */}
           {nodeData?.metadata?.source && (
-            <div className="bg-white/60 rounded-lg p-2 border border-amber-200">
-              <p className="text-xs text-amber-700">
+            <div className="bg-white/60 rounded-xl p-2.5 border-2 border-purple-100 shadow-sm">
+              <p className="text-xs text-purple-700">
                 <span className="font-semibold">来源: </span>
                 {nodeData.metadata.source}
               </p>
@@ -159,7 +159,7 @@ export function InsightNoteNode({ id, data }: NodeProps) {
           {nodeData?.metadata?.tags && nodeData.metadata.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {nodeData.metadata.tags.map((tag, idx) => (
-                <Badge key={idx} variant="outline" className="text-xs bg-white/60 border-amber-300 text-amber-700">
+                <Badge key={idx} variant="outline" className="text-xs bg-white/60 border-purple-200 text-purple-700 shadow-sm">
                   {tag}
                 </Badge>
               ))}
@@ -171,7 +171,7 @@ export function InsightNoteNode({ id, data }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="w-3 h-3 bg-amber-500 border-2 border-white"
+        className="w-3 h-3 bg-purple-500 border-2 border-white shadow-md"
       />
     </>
   )

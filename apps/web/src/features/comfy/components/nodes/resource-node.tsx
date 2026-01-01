@@ -54,28 +54,28 @@ export function ResourceNode({ id, data }: NodeProps) {
 
   return (
     <>
-      <Card className="w-80 bg-comfy-node border-comfy-nodeBorder shadow-lg comfy-node">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2 text-zinc-100">
-            <FileIcon className="w-4 h-4 text-blue-400" />
-            Resource Node
+      <Card className="w-80 bg-white border-2 border-purple-100 shadow-lg hover:shadow-2xl transition-all duration-300 rounded-2xl overflow-hidden">
+        <CardHeader className="pb-3 bg-gradient-to-br from-purple-50 to-white border-b border-purple-100">
+          <CardTitle className="text-sm flex items-center gap-2 text-slate-800 font-bold">
+            <FileIcon className="w-4 h-4 text-purple-500" />
+            资源节点
             {nodeData?.status === 'done' && (
-              <Badge variant="success" className="ml-auto">Ready</Badge>
+              <Badge variant="success" className="ml-auto bg-green-100 text-green-700 border-green-200">已就绪</Badge>
             )}
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           {!nodeData?.resourceContent ? (
             <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               className={`
-                border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
-                transition-colors
+                border-2 border-dashed rounded-xl p-6 text-center cursor-pointer
+                transition-all duration-200
                 ${isDragging
-                  ? 'border-green-500 bg-green-500/10'
-                  : 'border-zinc-600 bg-zinc-800/50 hover:border-zinc-500'
+                  ? 'border-purple-500 bg-purple-50 shadow-lg scale-105'
+                  : 'border-purple-200 bg-purple-50/30 hover:border-purple-400 hover:bg-purple-50'
                 }
               `}
             >
@@ -87,15 +87,15 @@ export function ResourceNode({ id, data }: NodeProps) {
                 accept="image/*,.pdf,.txt,.md,.doc,.docx"
               />
               <label htmlFor={`file-input-${id}`} className="cursor-pointer">
-                <Upload className="w-8 h-8 mx-auto mb-2 text-zinc-400" />
-                <p className="text-sm text-zinc-400">拖放文件或点击上传</p>
-                <p className="text-xs text-zinc-500 mt-1">支持图片和文档</p>
+                <Upload className="w-8 h-8 mx-auto mb-2 text-purple-400" />
+                <p className="text-sm text-slate-700 font-medium">拖放文件或点击上传</p>
+                <p className="text-xs text-slate-500 mt-1">支持图片和文档</p>
               </label>
             </div>
           ) : (
             <div className="space-y-2">
               {nodeData.resourceType === 'image' && nodeData.resourceContent instanceof File ? (
-                <div className="rounded-lg overflow-hidden border border-zinc-700">
+                <div className="rounded-xl overflow-hidden border-2 border-purple-100 shadow-md">
                   <img
                     src={URL.createObjectURL(nodeData.resourceContent)}
                     alt="Preview"
@@ -103,11 +103,11 @@ export function ResourceNode({ id, data }: NodeProps) {
                   />
                 </div>
               ) : (
-                <div className="flex items-center gap-3 p-3 bg-zinc-800 rounded-lg border border-zinc-700">
-                  <FileIcon className="w-6 h-6 text-blue-400" />
+                <div className="flex items-center gap-3 p-3 bg-purple-50 rounded-xl border-2 border-purple-100 shadow-sm">
+                  <FileIcon className="w-6 h-6 text-purple-500" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-100 truncate">{nodeData.resourceName}</p>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-sm text-slate-800 font-medium truncate">{nodeData.resourceName}</p>
+                    <p className="text-xs text-slate-500">
                       {nodeData.resourceContent instanceof File
                         ? `${(nodeData.resourceContent.size / 1024).toFixed(1)} KB`
                         : 'File'
@@ -118,7 +118,7 @@ export function ResourceNode({ id, data }: NodeProps) {
               )}
               <button
                 onClick={() => updateNodeData(id, { resourceContent: undefined, status: 'idle' })}
-                className="w-full text-xs text-zinc-400 hover:text-zinc-300 py-1"
+                className="w-full text-xs text-slate-500 hover:text-purple-600 py-1.5 rounded-lg hover:bg-purple-50 transition-all font-medium"
               >
                 清除
               </button>
@@ -128,7 +128,7 @@ export function ResourceNode({ id, data }: NodeProps) {
         <Handle
           type="source"
           position={Position.Right}
-          className="w-3 h-3 bg-green-500 border-2 border-zinc-900"
+          className="w-3 h-3 bg-purple-500 border-2 border-white shadow-md"
         />
       </Card>
     </>
