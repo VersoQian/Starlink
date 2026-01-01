@@ -192,7 +192,7 @@ export function ComfyCanvas() {
   }, [callCritic])
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50">
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-white">
       {/* 顶部导航栏 */}
       <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-slate-200 shadow-sm z-20">
         <div className="flex items-center gap-4">
@@ -246,7 +246,7 @@ export function ComfyCanvas() {
             ))}
           </div>
 
-          <div className="p-4 border-t border-slate-200 bg-slate-50">
+          <div className="p-4 border-t border-slate-200 bg-purple-50/30">
             <div className="space-y-2">
               <textarea
                 value={seedInput}
@@ -298,7 +298,7 @@ export function ComfyCanvas() {
         </aside>
 
         {/* 中间画布区域 */}
-        <main className="flex-1 relative overflow-hidden bg-slate-50">
+        <main className="flex-1 relative overflow-hidden bg-white">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -315,9 +315,9 @@ export function ComfyCanvas() {
             fitView
           >
             <Background
-              color="#d1d5db"
-              gap={24}
-              size={1}
+              color="#e9d5ff"
+              gap={32}
+              size={0.8}
               variant={BackgroundVariant.Dots}
             />
             <Controls className="bg-white/90 border border-slate-200 shadow-lg rounded-lg" />
@@ -350,7 +350,7 @@ export function ComfyCanvas() {
           </div>
 
           {/* 对话历史 */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/30">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-purple-50/20">
             {chatMessages.map((msg, idx) => (
               <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
