@@ -25,7 +25,7 @@ import {
   type ParsedTable,
   type AnalyzeResponse,
   type AnalyzeRequest
-} from '@branching-chat/ui'
+} from '@starlink/ui'
 import { useTheme, cn } from '@/lib/theme'
 
 type ChartType = 'bar' | 'line' | 'pie' | 'area'
