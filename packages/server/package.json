@@ -1,5 +1,5 @@
 {
-  "name": "@branching-chat/server",
+  "name": "@starlink/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",
-    "@branching-chat/shared": "workspace:*",
+    "@starlink/shared": "workspace:*",
     "@graphql-tools/schema": "^10.0.13",
     "@supabase/supabase-js": "^2.78.0",
     "cors": "^2.8.5",
