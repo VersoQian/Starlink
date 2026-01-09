@@ -3,8 +3,8 @@ import {
   type DifyPriority,
   type DifyRetryConfig,
   type DifyWorkflowMode
-} from '@branching-chat/shared'
-import { createAuditLogger } from '@branching-chat/shared'
+} from '@starlink/shared'
+import { createAuditLogger } from '@starlink/shared'
 
 const DEFAULT_BASE_URL = (process.env.DIFY_API_BASE_URL ?? 'https://api.dify.ai/v1').replace(/\/$/, '')
 const DEFAULT_WORKFLOW_ID = process.env.DIFY_DEFAULT_WORKFLOW_ID ?? process.env.DIFY_CONTENT_APP_ID ?? ''

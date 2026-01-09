@@ -13,7 +13,7 @@
 - 对于客户端主动取消（`AbortError`）或 4xx 错误不会继续重试。
 
 ## 审计与日志
-- 通过 `@branching-chat/shared` 暴露的 `createAuditLogger` 记录 `runWorkflow` 与 `generateSummary` 行为。
+- 通过 `@starlink/shared` 暴露的 `createAuditLogger` 记录 `runWorkflow` 与 `generateSummary` 行为。
 - 日志字段包含 `userId`、`workflowId`、`attempt` 等元数据，可与前端 `/api/dify` 的审计条目关联。
 - 若需接入集中日志平台，可在此模块替换 `createAuditLogger` 实现，无需修改业务调用者。
 

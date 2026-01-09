@@ -6,10 +6,9 @@ import type {
   CanvasNode,
   ConversationEvent,
   ConversationMetadata
-} from '@branching-chat/shared'
-import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@branching-chat/shared'
-
-
+} from '@starlink/shared'
+import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@starlink/shared'
+import { BusinessLangGraphService, type BusinessStreamUpdate, type GraphDelta } from '../services/business-langgraph.js'
 export type ConversationStoreDeps = {
   pubSub: PubSub
 }
@@ -20,17 +19,7 @@ type ConversationRecord = {
 }
 
 const EVENT_TOPIC = 'conversation-progress'
-const ROOT_POSITION = { x: 160, y: 160 }
-
-
-import { LLMService } from '../services/llm-service.js'
-
-const llmService = new LLMService()
-
-type GraphDelta = {
-  nodes?: CanvasNode[]
-  edges?: CanvasEdge[]
-}
+const businessLangGraphService = new BusinessLangGraphService()
 
 export class ConversationStore {
   private readonly conversations = new Map<string, ConversationRecord>()
@@ -56,48 +45,61 @@ export class ConversationStore {
       latestQuestion: question
     }
 
-    const execution = await buildGraphWithLLM({ workspaceId, userId, question })
     const record: ConversationRecord = {
       metadata,
-      graph: execution.graph
+      graph: {
+        workspaceId,
+        nodes: [],
+        edges: []
+      }
     }
 
     this.conversations.set(id, record)
-    this.workspaceGraphs.set(workspaceId, execution.graph)
+    this.workspaceGraphs.set(workspaceId, record.graph)
 
-    const baseEvent: ConversationEvent = {
-      type: 'graph/appended',
-      conversationId: id,
-      payload: execution.graph
-    }
+    const stream = businessLangGraphService.streamConversation({ workspaceId, userId, question })
+    let initialized = false
 
-    await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: baseEvent })
-
-    for (const delta of execution.deltas) {
-      const deltaEvent: ConversationEvent = {
-        type: 'graph/diff',
-        conversationId: id,
-        payload: {
-          nodes: delta.nodes,
-          edges: delta.edges
+    try {
+      const initResult = await stream.next()
+      if (!initResult.done && initResult.value?.type === 'init') {
+        initialized = true
+        const currentGraph = initResult.value.graph
+        record.graph = currentGraph
+        this.workspaceGraphs.set(workspaceId, currentGraph)
+        const baseEvent: ConversationEvent = {
+          type: 'graph/appended',
+          conversationId: id,
+          payload: currentGraph
         }
+        await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: baseEvent })
       }
-      await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: deltaEvent })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const failedEvent: ConversationEvent = {
+        type: 'status',
+        conversationId: id,
+        status: 'failed',
+        message
+      }
+      await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: failedEvent })
+      record.metadata = {
+        ...record.metadata,
+        status: 'failed',
+        updatedAt: new Date()
+      }
+      return record
     }
 
-    const completeEvent: ConversationEvent = {
-      type: 'status',
-      conversationId: id,
-      status: 'completed'
-    }
-
-    await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: completeEvent })
-
-    record.metadata = {
-      ...record.metadata,
-      status: 'completed',
-      updatedAt: new Date()
-    }
+    setTimeout(() => {
+      void this.runConversationStream({
+        stream,
+        record,
+        workspaceId,
+        conversationId: id,
+        initialized
+      })
+    }, 0)
 
     return record
   }
@@ -208,156 +210,99 @@ export class ConversationStore {
   getEventIterator() {
     return this.pubSub.asyncIterableIterator<{ conversationProgress: ConversationEvent }>(EVENT_TOPIC)
   }
-}
 
-type BuildGraphContext = {
-  workspaceId: string
-  userId: string
-  question: string
-}
+  private async runConversationStream(options: {
+    stream: AsyncGenerator<BusinessStreamUpdate>
+    record: ConversationRecord
+    workspaceId: string
+    conversationId: string
+    initialized: boolean
+  }) {
+    let { stream, record, workspaceId, conversationId, initialized } = options
+    let currentGraph = record.graph
 
-async function buildGraphWithLLM(context: BuildGraphContext): Promise<{
-  graph: CanvasGraph
-  deltas: GraphDelta[]
-}> {
-  // Use the LLMService to get structured JSON
-  const data = await llmService.generateGraphData(context.question, context.userId)
-
-  const nodes: CanvasNode[] = []
-  const edges: CanvasEdge[] = []
-  const deltas: GraphDelta[] = []
-
-  const addNode = (node: CanvasNode, edge?: CanvasEdge) => {
-    nodes.push(node)
-    if (edge) {
-      edges.push(edge)
-    }
-    deltas.push({
-      nodes: [node],
-      edges: edge ? [edge] : undefined
-    })
-  }
-
-  const rootNode: CanvasNode = {
-    id: `root-${nanoid(8)}`,
-    type: 'note',
-    position: { ...ROOT_POSITION },
-    data: {
-      type: 'note',
-      title: '多维画布任务',
-      subtitle: `提问人：${context.userId || 'anonymous'}`,
-      content: data.summary,
-      footerText: 'AI 助手生成摘要 · 节点会随着推理逐步出现',
-      variant: 'primary'
-    }
-  }
-
-  addNode(rootNode)
-
-  const branchSpacing = 320
-  const levelSpacing = 220
-
-  // Dynamic branch generation
-  if (data.branches && Array.isArray(data.branches)) {
-    data.branches.forEach((branchData, branchIndex) => {
-      const branchId = `branch-${nanoid(8)}`
-      const branchPosition = {
-        x: ROOT_POSITION.x + branchSpacing * (branchIndex + 1),
-        y: ROOT_POSITION.y
-      }
-
-      const branchNode: CanvasNode = {
-        id: branchId,
-        type: 'note',
-        position: branchPosition,
-        data: {
-          type: 'note',
-          title: branchData.title,
-          content: branchData.content,
-          variant: 'timeline-step'
-        }
-      }
-
-      const branchEdge: CanvasEdge = {
-        id: `${rootNode.id}->${branchNode.id}`,
-        source: rootNode.id,
-        target: branchNode.id,
-        label: `分支 ${branchIndex + 1}`
-      }
-
-      addNode(branchNode, branchEdge)
-
-      // Dynamic dimension generation
-      if (branchData.dimensions && Array.isArray(branchData.dimensions)) {
-        branchData.dimensions.forEach((dimData, dimIndex) => {
-          const dimId = `dimension-${nanoid(8)}`
-          const dimPosition = {
-            x: branchPosition.x,
-            y: branchPosition.y + levelSpacing * (dimIndex + 1)
-          }
-
-          const dimNode: CanvasNode = {
-            id: dimId,
-            type: 'note',
-            position: dimPosition,
-            data: {
-              type: 'note',
-              title: dimData.title,
-              content: dimData.content,
-              variant: 'timeline-dimension'
+    try {
+      for await (const update of stream) {
+        if (update.type === 'init') {
+          currentGraph = update.graph
+          record.graph = currentGraph
+          this.workspaceGraphs.set(workspaceId, currentGraph)
+          if (!initialized) {
+            initialized = true
+            const appendedEvent: ConversationEvent = {
+              type: 'graph/appended',
+              conversationId,
+              payload: currentGraph
             }
+            await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: appendedEvent })
           }
+          continue
+        }
 
-          const dimEdge: CanvasEdge = {
-            id: `${branchId}->${dimId}`,
-            source: branchId,
-            target: dimId,
-            label: '分析维度'
-          }
+        currentGraph = applyGraphDelta(currentGraph, update.delta)
+        record.graph = currentGraph
+        this.workspaceGraphs.set(workspaceId, currentGraph)
 
-          addNode(dimNode, dimEdge)
+        const event: ConversationEvent = initialized
+          ? {
+              type: 'graph/diff',
+              conversationId,
+              payload: { nodes: update.delta.nodes, edges: update.delta.edges }
+            }
+          : {
+              type: 'graph/appended',
+              conversationId,
+              payload: currentGraph
+            }
 
-          // Dynamic action generation (if present in JSON)
-          if (dimData.actions && Array.isArray(dimData.actions)) {
-            dimData.actions.forEach((actionData, actionIndex) => {
-              const actionId = `action-${nanoid(8)}`
-              const actionPosition = {
-                x: dimPosition.x,
-                y: dimPosition.y + levelSpacing * (actionIndex + 1)
-              }
-
-              const actionNode: CanvasNode = {
-                id: actionId,
-                type: 'note',
-                position: actionPosition,
-                data: {
-                  type: 'note',
-                  title: actionData.title,
-                  content: actionData.content,
-                  variant: 'timeline-action'
-                }
-              }
-
-              const actionEdge: CanvasEdge = {
-                id: `${dimId}->${actionId}`,
-                source: dimId,
-                target: actionId,
-                label: '行动计划'
-              }
-
-              addNode(actionNode, actionEdge)
-            })
-          }
-        })
+        await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: event })
+        initialized = true
       }
-    })
-  }
 
-  const graph: CanvasGraph = {
-    workspaceId: context.workspaceId,
-    nodes,
-    edges
-  }
+      const completeEvent: ConversationEvent = {
+        type: 'status',
+        conversationId,
+        status: 'completed'
+      }
+      await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: completeEvent })
 
-  return { graph, deltas }
+      record.metadata = {
+        ...record.metadata,
+        status: 'completed',
+        updatedAt: new Date()
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const failedEvent: ConversationEvent = {
+        type: 'status',
+        conversationId,
+        status: 'failed',
+        message
+      }
+      await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: failedEvent })
+
+      record.metadata = {
+        ...record.metadata,
+        status: 'failed',
+        updatedAt: new Date()
+      }
+    }
+  }
+}
+
+function applyGraphDelta(graph: CanvasGraph, delta: GraphDelta): CanvasGraph {
+  return {
+    workspaceId: graph.workspaceId,
+    nodes: mergeById(graph.nodes, delta.nodes),
+    edges: mergeById(graph.edges, delta.edges)
+  }
+}
+
+function mergeById<T extends { id: string }>(current: T[], updates?: T[]): T[] {
+  if (!updates || updates.length === 0) return current
+  const merged = new Map(current.map((item) => [item.id, item]))
+  for (const item of updates) {
+    merged.set(item.id, item)
+  }
+  return [...merged.values()]
 }

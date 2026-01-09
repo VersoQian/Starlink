@@ -60,7 +60,7 @@ DIFY_FILE_TRANSLATION_API_KEY=sk-xxx
 
 - `src/services/dify-service.ts`：Node 环境下的 Dify 调用器，自动读取 `DIFY_SERVER_API_KEY` 等配置，并暴露 `generateSummary` / `runWorkflow`。
 - `src/application/conversation-store.ts`：`startConversation` 将调用 `generateSummary`，随后按 Blueprint 生成多层节点（分支 / 维度 / 行动），并通过 GraphQL Subscription 推送。
-- `package.json` 已移除 `@branching-chat/agent-runtime` 依赖，所有智能体逻辑均由 Dify 驱动或回退到模板蓝图。
+- `package.json` 已移除 `@starlink/agent-runtime` 依赖，所有智能体逻辑均由 Dify 驱动或回退到模板蓝图。
 
 ## 5. 添加新工作流
 

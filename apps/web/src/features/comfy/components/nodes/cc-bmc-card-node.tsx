@@ -7,34 +7,43 @@ import { CC_BMC_DOMAINS, type CCBMCDomain, type MacraNodeData } from '@/types/ma
 import { Edit3, Check, X, Info, ChevronDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
-// 紫色主题配色方案 - 柔和协调的渐变色系
-const DOMAIN_COLORS: Record<CCBMCDomain, { main: string; light: string; accent: string; icon: string }> = {
+// 新配色方案 - Tech-Luxe Gradient
+const DOMAIN_COLORS: Record<CCBMCDomain, { main: string; light: string; accent: string; icon: string; gradient: string }> = {
   [CC_BMC_DOMAINS.CUSTOMER_SEGMENTS]: {
-    main: '#8b5cf6', light: '#f5f3ff', accent: '#a78bfa', icon: '👥'
+    main: '#fbbf24', light: '#fef3c7', accent: '#f59e0b', icon: '👥',
+    gradient: 'from-amber-400 to-amber-500'
   },
   [CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS]: {
-    main: '#7c3aed', light: '#f5f3ff', accent: '#8b5cf6', icon: '🤝'
+    main: '#10b981', light: '#d1fae5', accent: '#059669', icon: '🤝',
+    gradient: 'from-emerald-400 to-emerald-500'
   },
   [CC_BMC_DOMAINS.CHANNELS]: {
-    main: '#6366f1', light: '#eef2ff', accent: '#818cf8', icon: '📡'
+    main: '#3b82f6', light: '#dbeafe', accent: '#2563eb', icon: '📡',
+    gradient: 'from-blue-400 to-blue-500'
   },
   [CC_BMC_DOMAINS.VALUE_PROPOSITIONS]: {
-    main: '#9333ea', light: '#faf5ff', accent: '#a855f7', icon: '💎'
+    main: '#f59e0b', light: '#fef3c7', accent: '#d97706', icon: '💎',
+    gradient: 'from-amber-500 to-orange-500'
   },
   [CC_BMC_DOMAINS.REVENUE_STREAMS]: {
-    main: '#7c3aed', light: '#f5f3ff', accent: '#9333ea', icon: '💰'
+    main: '#10b981', light: '#d1fae5', accent: '#059669', icon: '💰',
+    gradient: 'from-emerald-500 to-green-500'
   },
   [CC_BMC_DOMAINS.KEY_ACTIVITIES]: {
-    main: '#8b5cf6', light: '#f5f3ff', accent: '#a78bfa', icon: '⚙️'
+    main: '#6366f1', light: '#e0e7ff', accent: '#4f46e5', icon: '⚙️',
+    gradient: 'from-indigo-400 to-indigo-500'
   },
   [CC_BMC_DOMAINS.KEY_RESOURCES]: {
-    main: '#a855f7', light: '#faf5ff', accent: '#c084fc', icon: '🔑'
+    main: '#8b5cf6', light: '#ede9fe', accent: '#7c3aed', icon: '🔑',
+    gradient: 'from-violet-400 to-violet-500'
   },
   [CC_BMC_DOMAINS.KEY_PARTNERSHIPS]: {
-    main: '#6366f1', light: '#eef2ff', accent: '#818cf8', icon: '🔗'
+    main: '#06b6d4', light: '#cffafe', accent: '#0891b2', icon: '🔗',
+    gradient: 'from-cyan-400 to-cyan-500'
   },
   [CC_BMC_DOMAINS.COST_STRUCTURE]: {
-    main: '#7c3aed', light: '#f5f3ff', accent: '#8b5cf6', icon: '📊'
+    main: '#f472b6', light: '#fce7f3', accent: '#ec4899', icon: '📊',
+    gradient: 'from-pink-400 to-pink-500'
   }
 }
 
@@ -47,6 +56,7 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
   const [editedLabel, setEditedLabel] = useState(nodeData?.label || '')
   const [showMetadata, setShowMetadata] = useState(false)
   const [showDomainSelector, setShowDomainSelector] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
 
   const domain = nodeData?.domain || CC_BMC_DOMAINS.VALUE_PROPOSITIONS
   const colors = DOMAIN_COLORS[domain]
@@ -76,74 +86,96 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
         type="target"
         position={Position.Top}
         style={{
-          background: colors.main,
-          width: 8,
-          height: 8,
-          border: '2px solid white',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          background: `linear-gradient(135deg, ${colors.main}, ${colors.accent})`,
+          width: 10,
+          height: 10,
+          border: '2px solid rgba(255,255,255,0.3)',
+          boxShadow: `0 4px 12px ${colors.main}40`
         }}
       />
 
       <div
-        className="w-[320px] bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition-all duration-300 hover:shadow-2xl hover:scale-[1.02]"
+        className="w-[360px] rounded-3xl overflow-hidden transition-all duration-500 hover:scale-105 relative group"
         style={{
-          borderColor: colors.light,
-          boxShadow: `0 1px 3px rgba(139, 92, 246, 0.1), 0 1px 2px rgba(139, 92, 246, 0.06), 0 0 0 3px ${colors.light}`
+          background: 'rgba(255, 255, 255, 0.03)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          boxShadow: isHovered
+            ? `0 20px 60px -15px ${colors.main}60, 0 0 0 1px ${colors.main}20, inset 0 1px 0 rgba(255,255,255,0.1)`
+            : `0 10px 30px -10px ${colors.main}30, inset 0 1px 0 rgba(255,255,255,0.05)`
         }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
+        {/* 装饰性光晕效果 */}
+        <div
+          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl blur-2xl"
+          style={{
+            background: `radial-gradient(circle at 50% 0%, ${colors.main}20, transparent 70%)`
+          }}
+        />
+
         {/* 顶部栏 */}
         <div
-          className="px-4 py-3 border-b border-purple-100 bg-gradient-to-r"
+          className="relative px-5 py-4 border-b border-white/10"
           style={{
-            backgroundImage: `linear-gradient(to right, ${colors.light}, ${colors.light}ee)`
+            background: `linear-gradient(135deg, ${colors.main}15, ${colors.accent}05)`
           }}
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 flex-1">
-              <span className="text-xl">{colors.icon}</span>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3 flex-1">
+              <div
+                className={`flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br ${colors.gradient} shadow-lg text-2xl transform group-hover:rotate-12 transition-transform duration-300`}
+                style={{ boxShadow: `0 8px 24px ${colors.main}40` }}
+              >
+                {colors.icon}
+              </div>
               {isEditing ? (
                 <input
                   type="text"
                   value={editedLabel}
                   onChange={(e) => setEditedLabel(e.target.value)}
-                  className="flex-1 text-sm font-semibold bg-white rounded-lg px-2 py-1.5 border-2 border-purple-200 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 shadow-sm"
+                  className="flex-1 text-sm font-bold bg-white/10 rounded-xl px-3 py-2 border border-white/20 focus:outline-none focus:border-amber-400/50 focus:ring-2 focus:ring-amber-400/30 shadow-inner text-white placeholder-slate-400"
+                  style={{ fontFamily: 'Outfit, sans-serif' }}
                   placeholder="标题"
                   autoFocus
                 />
               ) : (
-                <h3 className="text-sm font-bold text-slate-800 flex-1">{nodeData?.label || '未命名'}</h3>
+                <h3 className="text-base font-black text-white flex-1" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                  {nodeData?.label || '未命名'}
+                </h3>
               )}
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               {!isEditing ? (
                 <>
                   <button
                     onClick={() => setShowMetadata(!showMetadata)}
-                    className="p-1.5 rounded-lg hover:bg-white/90 transition-all text-slate-500 hover:text-purple-600 hover:shadow-sm"
+                    className="p-2 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-amber-400 backdrop-blur-sm border border-transparent hover:border-white/20"
                   >
-                    <Info className="w-3.5 h-3.5" />
+                    <Info className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="p-1.5 rounded-lg hover:bg-white/90 transition-all text-slate-500 hover:text-purple-600 hover:shadow-sm"
+                    className="p-2 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-emerald-400 backdrop-blur-sm border border-transparent hover:border-white/20"
                   >
-                    <Edit3 className="w-3.5 h-3.5" />
+                    <Edit3 className="w-4 h-4" />
                   </button>
                 </>
               ) : (
                 <>
                   <button
                     onClick={handleSave}
-                    className="p-1.5 rounded-lg hover:bg-green-50 transition-all text-green-600 shadow-sm hover:shadow"
+                    className="p-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition-all text-emerald-400 border border-emerald-400/30 shadow-lg"
                   >
-                    <Check className="w-3.5 h-3.5" />
+                    <Check className="w-4 h-4" />
                   </button>
                   <button
                     onClick={handleCancel}
-                    className="p-1.5 rounded-lg hover:bg-red-50 transition-all text-red-600 shadow-sm hover:shadow"
+                    className="p-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 transition-all text-pink-400 border border-pink-400/30 shadow-lg"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </>
               )}
@@ -154,29 +186,46 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
           <div className="relative">
             <button
               onClick={() => setShowDomainSelector(!showDomainSelector)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all hover:bg-white/90 shadow-sm hover:shadow"
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all backdrop-blur-sm border`}
               style={{
+                background: `linear-gradient(135deg, ${colors.main}20, ${colors.accent}10)`,
                 color: colors.main,
-                backgroundColor: 'rgba(255, 255, 255, 0.6)'
+                borderColor: `${colors.main}30`,
+                fontFamily: 'Outfit, sans-serif'
               }}
             >
-              <span>{domain}</span>
-              <ChevronDown className="w-3.5 h-3.5" />
+              <span className="uppercase">{domain}</span>
+              <ChevronDown className="w-4 h-4" />
             </button>
 
             {showDomainSelector && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border-2 border-purple-100 z-50 max-h-64 overflow-y-auto">
+              <div
+                className="absolute top-full left-0 right-0 mt-2 rounded-2xl shadow-2xl border z-50 max-h-72 overflow-y-auto backdrop-blur-xl"
+                style={{
+                  background: 'rgba(15, 23, 42, 0.95)',
+                  borderColor: 'rgba(255, 255, 255, 0.1)'
+                }}
+              >
                 {Object.values(CC_BMC_DOMAINS).map((d) => {
                   const dColor = DOMAIN_COLORS[d]
                   return (
                     <button
                       key={d}
                       onClick={() => handleDomainChange(d)}
-                      className="w-full px-4 py-2.5 text-left text-xs hover:bg-purple-50 transition-all flex items-center gap-2.5 first:rounded-t-2xl last:rounded-b-2xl"
+                      className="w-full px-4 py-3 text-left text-xs hover:bg-white/10 transition-all flex items-center gap-3 first:rounded-t-2xl last:rounded-b-2xl border-b border-white/5 last:border-0"
                     >
-                      <span className="text-base">{dColor.icon}</span>
-                      <span className="flex-1 font-medium text-slate-700">{d}</span>
-                      {d === domain && <Check className="w-3.5 h-3.5 text-purple-600" />}
+                      <div
+                        className={`w-10 h-10 rounded-xl bg-gradient-to-br ${dColor.gradient} flex items-center justify-center text-lg shadow-lg`}
+                        style={{ boxShadow: `0 4px 12px ${dColor.main}40` }}
+                      >
+                        {dColor.icon}
+                      </div>
+                      <span className="flex-1 font-bold text-slate-200 uppercase tracking-wide" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                        {d}
+                      </span>
+                      {d === domain && (
+                        <Check className="w-4 h-4 text-amber-400" />
+                      )}
                     </button>
                   )
                 })}
@@ -186,42 +235,51 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
         </div>
 
         {/* 内容区 */}
-        <div className="p-4">
+        <div className="p-5 relative">
           {isEditing ? (
             <textarea
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
               placeholder="输入内容（支持 Markdown）"
-              className="w-full h-32 bg-purple-50/50 border-2 border-purple-200 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 shadow-inner placeholder-slate-400"
+              className="w-full h-36 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 shadow-inner placeholder-slate-500 text-slate-200 backdrop-blur-sm"
             />
           ) : (
-            <div className="prose prose-sm max-w-none text-slate-700 min-h-[80px] max-h-40 overflow-y-auto">
+            <div className="prose prose-sm prose-invert max-w-none text-slate-300 min-h-[100px] max-h-48 overflow-y-auto leading-relaxed">
               <ReactMarkdown>{nodeData?.content || '*暂无内容*'}</ReactMarkdown>
             </div>
           )}
 
           {/* 元数据 */}
           {showMetadata && nodeData?.metadata && (
-            <div className="mt-3 pt-3 border-t border-purple-100 space-y-2.5">
+            <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
               {nodeData.metadata.agent_signature && (
-                <div className="flex items-center gap-2 text-xs text-slate-600">
-                  <span className="font-semibold">创建者:</span>
-                  <span className="px-2.5 py-1 bg-purple-50 rounded-lg text-purple-700 font-medium shadow-sm">
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span className="font-semibold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>创建者:</span>
+                  <span
+                    className="px-3 py-1.5 rounded-lg font-bold shadow-lg"
+                    style={{
+                      background: `linear-gradient(135deg, ${colors.main}20, ${colors.accent}10)`,
+                      color: colors.main,
+                      border: `1px solid ${colors.main}30`,
+                      fontFamily: 'JetBrains Mono, monospace'
+                    }}
+                  >
                     {nodeData.metadata.agent_signature}
                   </span>
                 </div>
               )}
 
               {nodeData.metadata.confidence && (
-                <div className="flex items-center gap-2 text-xs text-slate-600">
-                  <span className="font-semibold">置信度:</span>
-                  <div className="flex-1 h-2 bg-purple-50 rounded-full overflow-hidden shadow-inner">
+                <div className="flex items-center gap-3 text-xs text-slate-400">
+                  <span className="font-semibold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>置信度:</span>
+                  <div className="flex-1 h-2.5 bg-white/5 rounded-full overflow-hidden shadow-inner border border-white/10">
                     <div
                       className="h-full transition-all rounded-full"
                       style={{
                         width: nodeData.metadata.confidence === 'high' ? '100%' :
                                nodeData.metadata.confidence === 'medium' ? '66%' : '33%',
-                        background: `linear-gradient(to right, ${colors.main}, ${colors.accent})`
+                        background: `linear-gradient(90deg, ${colors.main}, ${colors.accent})`,
+                        boxShadow: `0 0 12px ${colors.main}60`
                       }}
                     />
                   </div>
@@ -229,7 +287,14 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
               )}
 
               {nodeData.metadata.source && (
-                <div className="text-xs text-slate-600 bg-purple-50 rounded-lg px-2.5 py-1.5">
+                <div
+                  className="text-xs text-slate-300 rounded-xl px-3 py-2 border"
+                  style={{
+                    background: `${colors.main}10`,
+                    borderColor: `${colors.main}20`,
+                    fontFamily: 'JetBrains Mono, monospace'
+                  }}
+                >
                   <span className="font-semibold">来源: </span>
                   <span>{nodeData.metadata.source}</span>
                 </div>
@@ -237,17 +302,25 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
             </div>
           )}
         </div>
+
+        {/* 底部装饰线 */}
+        <div
+          className="h-1"
+          style={{
+            background: `linear-gradient(90deg, transparent, ${colors.main}60, ${colors.accent}60, transparent)`
+          }}
+        />
       </div>
 
       <Handle
         type="source"
         position={Position.Bottom}
         style={{
-          background: colors.main,
-          width: 8,
-          height: 8,
-          border: '2px solid white',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          background: `linear-gradient(135deg, ${colors.main}, ${colors.accent})`,
+          width: 10,
+          height: 10,
+          border: '2px solid rgba(255,255,255,0.3)',
+          boxShadow: `0 4px 12px ${colors.main}40`
         }}
       />
     </>

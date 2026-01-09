@@ -97,7 +97,7 @@
 - `/api/analyze` Route 复用相同 Blueprint，并在前端通过 `CanvasViewport.generateAnalysis` 更新 React Flow 画布。
 
 ## Starlink 品牌化注意事项
-- 当前 npm 包名仍使用 `@branching-chat/*`，后续如需全面更名，可在各 `package.json` 与 import 路径中替换。
+- 当前 npm 包名仍使用 `@starlink/*`，后续如需全面更名，可在各 `package.json` 与 import 路径中替换。
 - 文档、日志输出、环境变量等也仍引用旧名称（如服务器启动日志），建议在迭代中逐步调整为 Starlink。
 - 若要统一命名，请从 `package.json`、`.env`、GraphQL endpoint 日志、README/CODEX 等文档着手。
 

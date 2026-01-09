@@ -47,6 +47,30 @@ pnpm dev:server
 - `startConversation(workspaceId, question)` – 启动多维画布推理
 - `conversationProgress` (subscription) – 推送画布增量 & 状态事件
 
+## LangGraph + ComfyUI Backend (Optional)
+
+To enable LangGraph-driven ComfyUI image generation and streaming canvas updates, set these environment variables (e.g. in `packages/server/.env`):
+
+```
+OPENAI_API_KEY=...
+LANGGRAPH_MODEL=gpt-4o-mini
+COMFYUI_BASE_URL=http://localhost:8188
+COMFYUI_WORKFLOW_PATH=packages/server/workflows/comfy-template.json
+COMFYUI_TIMEOUT_MS=120000
+```
+
+Start ComfyUI separately, then run `pnpm dev:server`. Replace `packages/server/workflows/comfy-template.json` with your exported workflow JSON if needed.
+
+If you prefer a one-command dev setup (ComfyUI + GraphQL + Web), set `COMFYUI_DIR` and optionally `COMFYUI_CMD`, then run:
+
+```
+COMFYUI_DIR=/absolute/path/to/ComfyUI
+COMFYUI_CMD="python main.py --listen 0.0.0.0"
+pnpm dev:langgraph
+```
+
+If `COMFYUI_DIR` is not set, the script starts only GraphQL + Web.
+
 ## Running the Frontend
 
 在另一个终端：

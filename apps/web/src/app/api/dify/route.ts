@@ -5,7 +5,7 @@ import {
   type DifyRetryConfig,
   type DifyWorkflowExecutionRequest,
   createAuditLogger
-} from '@branching-chat/shared'
+} from '@starlink/shared'
 import { DifyService } from '../../../services/DifyService'
 import { getDifyWorkflow } from '../../../config/dify'
 

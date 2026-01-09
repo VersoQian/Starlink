@@ -1,5 +1,5 @@
 import GraphQLJSON from 'graphql-type-json'
-import { conversationMetadataSchema } from '@branching-chat/shared'
+import { conversationMetadataSchema } from '@starlink/shared'
 import type { GraphQLContext } from '../context/index.js'
 
 export const resolvers = {

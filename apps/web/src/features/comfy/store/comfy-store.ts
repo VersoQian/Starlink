@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type { Node, Edge } from 'reactflow'
+import { createClient } from 'graphql-ws'
+import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import type {
   MacraNodeData,
   MacraEdgeData,
@@ -7,10 +9,9 @@ import type {
   OrchestratorRequest,
   OrchestratorResponse,
   CriticRequest,
-  CriticResponse,
-  NodeType,
-  CCBMCDomain
+  CriticResponse
 } from '@/types/macra'
+import type { CanvasNode, CanvasEdge, WorkspaceGraphResponse } from '@/types/graph'
 
 // 节点数据类型（保留旧接口以兼容）
 export type NodeStatus = 'idle' | 'processing' | 'done' | 'error'
@@ -30,7 +31,95 @@ export interface NodeData {
   error?: string
 }
 
+type ConversationProgressEvent = {
+  type: 'graph/appended' | 'graph/diff' | 'status'
+  conversationId: string
+  status?: 'idle' | 'running' | 'failed' | 'completed'
+  message?: string | null
+  payload?: unknown
+}
+
+const START_CONVERSATION_MUTATION = /* GraphQL */ `
+  mutation StartConversation($workspaceId: ID!, $question: String!) {
+    startConversation(workspaceId: $workspaceId, question: $question) {
+      metadata {
+        id
+      }
+      graph {
+        workspaceId
+        nodes {
+          id
+          type
+          position {
+            x
+            y
+          }
+          data
+        }
+        edges {
+          id
+          source
+          target
+          label
+        }
+      }
+    }
+  }
+`
+
+const CONVERSATION_PROGRESS_SUBSCRIPTION = /* GraphQL */ `
+  subscription ConversationProgress {
+    conversationProgress {
+      type
+      conversationId
+      status
+      message
+      payload
+    }
+  }
+`
+
+let graphWsClient: ReturnType<typeof createClient> | null = null
+let activeSubscription: (() => void) | null = null
+
+const getGraphQLWsClient = () => {
+  if (graphWsClient) return graphWsClient
+  const endpoint = process.env.NEXT_PUBLIC_GRAPHQL_URL ?? 'http://localhost:4000/graphql'
+  const wsUrl = endpoint.startsWith('https')
+    ? endpoint.replace(/^https/, 'wss')
+    : endpoint.replace(/^http/, 'ws')
+  graphWsClient = createClient({ url: wsUrl, lazy: true })
+  return graphWsClient
+}
+
+const mapCanvasNodeToReactFlow = (node: CanvasNode): Node => {
+  const type = node.type === 'image' ? 'canvas-image' : 'canvas-note'
+  return {
+    id: node.id,
+    type,
+    position: node.position,
+    data: node.data
+  }
+}
+
+const mapCanvasEdgeToReactFlow = (edge: CanvasEdge): Edge => ({
+  id: edge.id,
+  source: edge.source,
+  target: edge.target,
+  label: edge.label,
+  type: 'smoothstep'
+})
+
+const mergeById = <T extends { id: string }>(current: T[], updates?: T[]) => {
+  if (!updates || updates.length === 0) return current
+  const merged = new Map(current.map((item) => [item.id, item]))
+  updates.forEach((item) => merged.set(item.id, item))
+  return [...merged.values()]
+}
+
 interface MacraState {
+  workspaceId: string
+
   // ReactFlow节点和边
   nodes: Node[]
   edges: Edge[]
@@ -49,6 +138,8 @@ interface MacraState {
   isOrchestratorProcessing: boolean
   isCriticProcessing: boolean
   lastCriticRun: number | null
+
+  setWorkspaceId: (workspaceId: string) => void
 
   // 操作方法
   setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void
@@ -71,10 +162,10 @@ interface MacraState {
   // Canvas Actions 操作
   applyCanvasActions: (actions: CanvasAction[]) => Promise<void>
 
-  // AI Orchestrator 调用
-  callOrchestrator: (userPrompt: string, mode?: 'seed' | 'completion' | 'general') => Promise<void>
+  // Business LangGraph 调用（通过 GraphQL startConversation）
+  callLangGraph: (userPrompt: string, mode?: 'seed' | 'completion' | 'general') => Promise<void>
 
-  // AI Critic 调用
+  // AI Critic 调用（通过 GraphQL 后端自动触发，前端保留手动触发接口）
   callCritic: () => Promise<void>
 
   // 工作流执行（兼容旧版本）
@@ -86,6 +177,7 @@ interface MacraState {
 }
 
 export const useComfyStore = create<MacraState>((set, get) => ({
+  workspaceId: 'comfy-default',
   nodes: [],
   edges: [],
   nodeDataMap: new Map(),
@@ -95,6 +187,10 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   isOrchestratorProcessing: false,
   isCriticProcessing: false,
   lastCriticRun: null,
+
+  setWorkspaceId: (workspaceId) => {
+    set({ workspaceId })
+  },
 
   setNodes: (nodes) => {
     set({
@@ -254,56 +350,116 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     }
   },
 
-  // ============== AI Orchestrator 调用 ==============
-  callOrchestrator: async (userPrompt, mode = 'general') => {
+  // ============== Business LangGraph 调用 ==============
+  callLangGraph: async (userPrompt, _mode = 'general') => {
+    void _mode
     set({ isOrchestratorProcessing: true })
 
-    try {
-      const { nodes, edges, macraNodes } = get()
+    if (activeSubscription) {
+      activeSubscription()
+      activeSubscription = null
+    }
 
-      // 准备画布摘要
-      const canvas_summary = {
-        nodes: Array.from(macraNodes.values()).map(n => ({
-          id: n.id,
-          type: n.type,
-          label: n.label,
-          content: n.content,
-          domain: n.domain
-        })),
-        edges: edges.map(e => ({
-          source: e.source,
-          target: e.target,
-          type: (e.type as any) || 'default'
+    set({
+      nodes: [],
+      edges: [],
+      nodeDataMap: new Map(),
+      macraNodes: new Map()
+    })
+
+    const workspaceId = get().workspaceId
+    if (!workspaceId) {
+      set({ isOrchestratorProcessing: false })
+      throw new Error('workspaceId 未设置')
+    }
+
+    try {
+      const client = getGraphQLClient()
+      const response = await client.request<{
+        startConversation: { metadata: { id: string }; graph: WorkspaceGraphResponse }
+      }>(START_CONVERSATION_MUTATION, {
+        workspaceId,
+        question: userPrompt
+      })
+
+      const conversationId = response.startConversation.metadata.id
+
+      const applyGraph = (graph: WorkspaceGraphResponse) => {
+        set({
+          nodes: graph.nodes.map(mapCanvasNodeToReactFlow),
+          edges: graph.edges.map(mapCanvasEdgeToReactFlow)
+        })
+      }
+
+      const applyDelta = (delta: { nodes?: CanvasNode[]; edges?: CanvasEdge[] }) => {
+        const nodeUpdates = delta.nodes?.map(mapCanvasNodeToReactFlow)
+        const edgeUpdates = delta.edges?.map(mapCanvasEdgeToReactFlow)
+        set((state) => ({
+          nodes: nodeUpdates ? mergeById(state.nodes, nodeUpdates) : state.nodes,
+          edges: edgeUpdates ? mergeById(state.edges, edgeUpdates) : state.edges
         }))
       }
 
-      const request: OrchestratorRequest = {
-        user_prompt: userPrompt,
-        canvas_summary,
-        mode
+      if (response.startConversation.graph) {
+        applyGraph(response.startConversation.graph)
       }
 
-      // 调用 API
-      const response = await fetch('/api/macra/orchestrate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request)
+      await new Promise<void>((resolve, reject) => {
+        const wsClient = getGraphQLWsClient()
+        const dispose = wsClient.subscribe(
+          { query: CONVERSATION_PROGRESS_SUBSCRIPTION },
+          {
+            next: ({ data }) => {
+              const event = (data as { conversationProgress?: ConversationProgressEvent })?.conversationProgress
+              if (!event || event.conversationId !== conversationId) return
+
+              if (event.type === 'graph/appended' && event.payload) {
+                applyGraph(event.payload as WorkspaceGraphResponse)
+              }
+
+              if (event.type === 'graph/diff' && event.payload) {
+                applyDelta(event.payload as { nodes?: CanvasNode[]; edges?: CanvasEdge[] })
+              }
+
+              if (event.type === 'status') {
+                if (event.status === 'completed') {
+                  if (activeSubscription) {
+                    activeSubscription()
+                    activeSubscription = null
+                  }
+                  resolve()
+                }
+                if (event.status === 'failed') {
+                  if (activeSubscription) {
+                    activeSubscription()
+                    activeSubscription = null
+                  }
+                  reject(new Error(event.message ?? '生成失败'))
+                }
+              }
+            },
+            error: (error) => {
+              if (activeSubscription) {
+                activeSubscription()
+                activeSubscription = null
+              }
+              reject(error)
+            },
+            complete: () => {
+              if (activeSubscription) {
+                activeSubscription()
+                activeSubscription = null
+              }
+              resolve()
+            }
+          }
+        )
+        activeSubscription = () => dispose()
       })
-
-      if (!response.ok) {
-        throw new Error(`Orchestrator API 失败: ${response.statusText}`)
-      }
-
-      const data: OrchestratorResponse = await response.json()
-
-      console.log('🤖 Orchestrator 思考过程:', data.thought_process)
-
-      // 应用画布操作
-      await get().applyCanvasActions(data.canvas_actions)
 
       set({ isOrchestratorProcessing: false })
     } catch (error) {
-      console.error('❌ Orchestrator 调用失败:', error)
+      console.error('❌ Business LangGraph 调用失败:', error)
       set({ isOrchestratorProcessing: false })
       throw error
     }
@@ -507,6 +663,10 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   },
 
   reset: () => {
+    if (activeSubscription) {
+      activeSubscription()
+      activeSubscription = null
+    }
     set({
       nodes: [],
       edges: [],

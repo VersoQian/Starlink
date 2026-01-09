@@ -1,4 +1,4 @@
-import { createAuditLogger } from '@branching-chat/shared'
+import { createAuditLogger } from '@starlink/shared'
 
 const auditLogger = createAuditLogger('packages/server:llm-service')
 

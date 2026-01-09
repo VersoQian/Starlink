@@ -19,7 +19,7 @@
 - TypeScript everywhere; use 2-space indentation, single quotes, and avoid semicolons to match existing files.
 - React components follow `PascalCase.tsx`; hooks live in `hooks/` and use the `useX` naming pattern.
 - GraphQL files group schema fragments by feature under `packages/server/src/graphql/`.
-- Run `npm run lint -w frontend` or `pnpm --filter @branching-chat/server lint` before sending changes.
+- Run `npm run lint -w frontend` or `pnpm --filter @starlink/server lint` before sending changes.
 - Tailwind is the primary styling layer; compose utility classes instead of ad-hoc CSS.
 
 ## Testing Guidelines

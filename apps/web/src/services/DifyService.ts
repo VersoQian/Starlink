@@ -2,7 +2,7 @@ import {
   DifyRequestError,
   type DifyPriority,
   type DifyRetryConfig
-} from '@branching-chat/shared'
+} from '@starlink/shared'
 import { getDifyBaseUrl, getDifyWorkflow } from '../config/dify'
 
 export type ExecuteWorkflowOptions = {

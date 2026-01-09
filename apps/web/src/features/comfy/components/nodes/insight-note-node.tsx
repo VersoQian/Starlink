@@ -16,6 +16,7 @@ export function InsightNoteNode({ id, data }: NodeProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(nodeData?.content || '')
   const [editedLabel, setEditedLabel] = useState(nodeData?.label || '')
+  const [isHovered, setIsHovered] = useState(false)
 
   const handleSave = useCallback(() => {
     updateMacraNode(id, {
@@ -36,18 +37,50 @@ export function InsightNoteNode({ id, data }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="w-3 h-3 bg-purple-500 border-2 border-white shadow-md"
+        style={{
+          background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+          width: 10,
+          height: 10,
+          border: '2px solid rgba(255,255,255,0.3)',
+          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.4)'
+        }}
       />
 
-      <Card className="w-96 shadow-xl border-2 border-purple-200 bg-gradient-to-br from-purple-50 via-white to-purple-50 relative overflow-hidden hover:shadow-2xl transition-all duration-300 rounded-2xl">
-        {/* 装饰性背景 */}
-        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-200/30 to-transparent rounded-full blur-2xl" />
+      <div
+        className="w-[400px] rounded-3xl overflow-hidden transition-all duration-500 hover:scale-105 relative group"
+        style={{
+          background: 'rgba(255, 255, 255, 0.03)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          boxShadow: isHovered
+            ? '0 20px 60px -15px rgba(59, 130, 246, 0.6), 0 0 0 1px rgba(59, 130, 246, 0.2), inset 0 1px 0 rgba(255,255,255,0.1)'
+            : '0 10px 30px -10px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)'
+        }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        {/* 装饰性光晕效果 */}
+        <div
+          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl blur-2xl"
+          style={{
+            background: 'radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.2), transparent 70%)'
+          }}
+        />
 
-        <CardHeader className="pb-3 relative z-10">
+        {/* 顶部栏 */}
+        <div
+          className="relative px-6 py-5 border-b border-white/10"
+          style={{
+            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.05))'
+          }}
+        >
           <div className="flex items-start justify-between">
-            <div className="flex items-center gap-2 flex-1">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-purple-400 to-purple-500 shadow-lg">
-                <Lightbulb className="w-5 h-5 text-white" />
+            <div className="flex items-center gap-3 flex-1">
+              <div
+                className="flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-400 to-blue-500 shadow-lg text-2xl transform group-hover:rotate-12 transition-transform duration-300 border-2 border-white/20"
+                style={{ boxShadow: '0 8px 24px rgba(59, 130, 246, 0.4)' }}
+              >
+                <Lightbulb className="w-7 h-7 text-white" />
               </div>
 
               {isEditing ? (
@@ -55,19 +88,21 @@ export function InsightNoteNode({ id, data }: NodeProps) {
                   type="text"
                   value={editedLabel}
                   onChange={(e) => setEditedLabel(e.target.value)}
-                  className="flex-1 text-sm font-semibold bg-white/80 border-2 border-purple-200 rounded-lg px-2 py-1.5 text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-300 shadow-sm"
+                  className="flex-1 text-sm font-bold bg-white/10 rounded-xl px-3 py-2 border border-white/20 focus:outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/30 shadow-inner text-white placeholder-slate-400"
+                  style={{ fontFamily: 'Outfit, sans-serif' }}
                   placeholder="洞察标题"
+                  autoFocus
                 />
               ) : (
                 <div className="flex-1">
-                  <CardTitle className="text-sm text-purple-900 font-bold flex items-center gap-2">
+                  <h3 className="text-base font-black text-white flex items-center gap-2" style={{ fontFamily: 'Outfit, sans-serif' }}>
                     {nodeData?.label || '洞察便签'}
-                    {nodeData?.metadata?.agent_signature === 'Orchestrator' && (
-                      <Sparkles className="w-4 h-4 text-purple-500" />
+                    {nodeData?.metadata?.agent_signature && (
+                      <Sparkles className="w-4 h-4 text-blue-400 animate-pulse" />
                     )}
-                  </CardTitle>
+                  </h3>
                   {nodeData?.metadata?.agent_signature && (
-                    <p className="text-xs text-purple-600 mt-0.5 font-medium">
+                    <p className="text-xs text-blue-300 mt-1 font-medium" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
                       来自 {nodeData.metadata.agent_signature}
                     </p>
                   )}
@@ -75,11 +110,11 @@ export function InsightNoteNode({ id, data }: NodeProps) {
               )}
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               {!isEditing ? (
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="p-1.5 rounded-lg hover:bg-purple-100 transition-all text-purple-600 hover:shadow-sm"
+                  className="p-2 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-blue-400 backdrop-blur-sm border border-transparent hover:border-white/20"
                   title="编辑"
                 >
                   <Edit3 className="w-4 h-4" />
@@ -88,14 +123,14 @@ export function InsightNoteNode({ id, data }: NodeProps) {
                 <>
                   <button
                     onClick={handleSave}
-                    className="p-1.5 rounded-lg hover:bg-green-100 transition-all text-green-600 shadow-sm hover:shadow"
+                    className="p-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition-all text-emerald-400 border border-emerald-400/30 shadow-lg"
                     title="保存"
                   >
                     <Check className="w-4 h-4" />
                   </button>
                   <button
                     onClick={handleCancel}
-                    className="p-1.5 rounded-lg hover:bg-red-100 transition-all text-red-600 shadow-sm hover:shadow"
+                    className="p-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 transition-all text-pink-400 border border-pink-400/30 shadow-lg"
                     title="取消"
                   >
                     <X className="w-4 h-4" />
@@ -104,19 +139,19 @@ export function InsightNoteNode({ id, data }: NodeProps) {
               )}
             </div>
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent className="space-y-3 relative z-10">
-          {/* 内容区域 */}
+        {/* 内容区 */}
+        <div className="p-6 relative space-y-4">
           {isEditing ? (
             <textarea
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
               placeholder="输入洞察内容（支持 Markdown）..."
-              className="w-full h-40 bg-white/80 border-2 border-purple-200 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 shadow-inner"
+              className="w-full h-48 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50 shadow-inner placeholder-slate-500 text-slate-200 backdrop-blur-sm"
             />
           ) : (
-            <div className="prose prose-sm max-w-none bg-white/70 backdrop-blur-sm rounded-xl p-4 min-h-[100px] max-h-64 overflow-y-auto border-2 border-purple-100 shadow-sm">
+            <div className="prose prose-sm prose-invert max-w-none text-slate-300 min-h-[120px] max-h-72 overflow-y-auto leading-relaxed bg-white/5 rounded-xl p-4 border border-white/10 shadow-inner">
               <ReactMarkdown>
                 {nodeData?.content || '*这里将展示AI生成的洞察和建议*'}
               </ReactMarkdown>
@@ -125,31 +160,46 @@ export function InsightNoteNode({ id, data }: NodeProps) {
 
           {/* 置信度指示器 */}
           {nodeData?.metadata?.confidence && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-purple-700 font-semibold">置信度:</span>
-              <div className="flex-1 h-2 bg-purple-100 rounded-full overflow-hidden shadow-inner">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400 font-semibold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                置信度:
+              </span>
+              <div className="flex-1 h-2.5 bg-white/5 rounded-full overflow-hidden shadow-inner border border-white/10">
                 <div
-                  className={`h-full bg-gradient-to-r from-purple-400 to-purple-500 transition-all rounded-full ${
-                    nodeData.metadata.confidence === 'high' ? 'w-full' :
-                    nodeData.metadata.confidence === 'medium' ? 'w-2/3' :
-                    'w-1/3'
-                  }`}
+                  className="h-full transition-all rounded-full"
+                  style={{
+                    width: nodeData.metadata.confidence === 'high' ? '100%' :
+                           nodeData.metadata.confidence === 'medium' ? '66%' : '33%',
+                    background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
+                    boxShadow: '0 0 12px rgba(59, 130, 246, 0.6)'
+                  }}
                 />
               </div>
-              <Badge
-                variant={nodeData.metadata.confidence === 'high' ? 'default' : 'secondary'}
-                className="text-xs bg-purple-100 text-purple-700 border-purple-200"
+              <span
+                className="px-3 py-1 rounded-lg text-xs font-bold border shadow-sm"
+                style={{
+                  background: 'rgba(59, 130, 246, 0.2)',
+                  color: '#3b82f6',
+                  borderColor: 'rgba(59, 130, 246, 0.3)',
+                  fontFamily: 'JetBrains Mono, monospace'
+                }}
               >
                 {nodeData.metadata.confidence}
-              </Badge>
+              </span>
             </div>
           )}
 
           {/* 数据来源 */}
           {nodeData?.metadata?.source && (
-            <div className="bg-white/60 rounded-xl p-2.5 border-2 border-purple-100 shadow-sm">
-              <p className="text-xs text-purple-700">
-                <span className="font-semibold">来源: </span>
+            <div
+              className="rounded-xl px-4 py-3 border"
+              style={{
+                background: 'rgba(59, 130, 246, 0.1)',
+                borderColor: 'rgba(59, 130, 246, 0.2)'
+              }}
+            >
+              <p className="text-xs text-slate-300" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                <span className="font-semibold text-blue-400">来源: </span>
                 {nodeData.metadata.source}
               </p>
             </div>
@@ -157,21 +207,44 @@ export function InsightNoteNode({ id, data }: NodeProps) {
 
           {/* 标签 */}
           {nodeData?.metadata?.tags && nodeData.metadata.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-2">
               {nodeData.metadata.tags.map((tag, idx) => (
-                <Badge key={idx} variant="outline" className="text-xs bg-white/60 border-purple-200 text-purple-700 shadow-sm">
+                <span
+                  key={idx}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border backdrop-blur-sm"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    borderColor: 'rgba(59, 130, 246, 0.3)',
+                    color: '#93c5fd',
+                    fontFamily: 'JetBrains Mono, monospace'
+                  }}
+                >
                   {tag}
-                </Badge>
+                </span>
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* 底部装饰线 */}
+        <div
+          className="h-1"
+          style={{
+            background: 'linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.8), rgba(37, 99, 235, 0.6), transparent)'
+          }}
+        />
+      </div>
 
       <Handle
         type="source"
         position={Position.Right}
-        className="w-3 h-3 bg-purple-500 border-2 border-white shadow-md"
+        style={{
+          background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+          width: 10,
+          height: 10,
+          border: '2px solid rgba(255,255,255,0.3)',
+          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.4)'
+        }}
       />
     </>
   )

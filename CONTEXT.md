@@ -182,7 +182,7 @@ wrangler deploy    # Deploy to Cloudflare
 ## File Structure
 
 ```
-/templates/branching-chat/
+/templates/starlink/
 ├── client/                 # Frontend React application
 │   ├── App.tsx            # Main app component
 │   ├── components/        # UI components
