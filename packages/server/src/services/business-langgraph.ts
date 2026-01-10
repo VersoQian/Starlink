@@ -7,6 +7,12 @@ import { createAuditLogger, type CanvasEdge, type CanvasGraph, type CanvasNode }
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
+const CROSS_CULTURAL_SYSTEM_PROMPT = `你是一名跨文化商业分析助手。请遵守以下要求：
+- 以文化中立、避免刻板印象的方式进行分析，明确区分事实、数据与推断。
+- 当涉及不同国家或地区时，说明适用的文化范围与默认假设，避免将单一文化经验泛化。
+- 若缺少明确的地区或文化背景，请在输出中给出合理的文化假设与可能差异。
+- 输出内容需便于多文化受众理解，避免价值判断式措辞。`
+
 // ============== CC-BMC 九大维度（与前端保持一致） ==============
 const CC_BMC_DOMAINS = {
   CUSTOMER_SEGMENTS: '客户细分',
@@ -45,7 +51,9 @@ const MacraNodeDataSchema = z.object({
     agent_signature: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
     confidence: z.enum(['high', 'medium', 'low']).optional(),
     source: z.string().optional(),
-    tags: z.array(z.string()).optional()
+    tags: z.array(z.string()).optional(),
+    cultural_scope: z.string().optional(),
+    locale_assumptions: z.array(z.string()).optional()
   }),
   agentType: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
   isInteractive: z.boolean().optional(),
@@ -294,7 +302,7 @@ export class BusinessLangGraphService {
   private async runMarketAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     if (!this.model) return { marketNodes: [] }
 
-    const prompt = `你是 Market_Agent（市场分析专家），负责生成 CC-BMC 商业模型画布中的三个维度：
+    const domainPrompt = `你是 Market_Agent（市场分析专家），负责生成 CC-BMC 商业模型画布中的三个维度：
 
 1. **客户细分** (CUSTOMER_SEGMENTS)：目标客户群体、用户画像、市场规模
 2. **渠道通路** (CHANNELS)：如何触达客户、线上/线下渠道、分发策略
@@ -308,7 +316,7 @@ export class BusinessLangGraphService {
 - domain: "客户细分" | "渠道通路" | "客户关系"
 - label: 简短标题（10 字以内）
 - content: 详细分析（Markdown 格式，包含数据、趋势、建议）
-- metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+- metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"], cultural_scope: "文化范围", locale_assumptions: ["默认文化假设1", "默认文化假设2"] }
 
 示例：
 [
@@ -322,14 +330,19 @@ export class BusinessLangGraphService {
       "agent_signature": "Market_Agent",
       "confidence": "high",
       "source": "基于中汽协 2024 年度报告",
-      "tags": ["B2C", "B2B"]
+      "tags": ["B2C", "B2B"],
+      "cultural_scope": "中国一线城市",
+      "locale_assumptions": ["强调家庭出行体验", "偏好本地售后网络"]
     }
   }
 ]
 `
 
     try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
+      const response = await this.model.invoke([
+        new SystemMessage(`${CROSS_CULTURAL_SYSTEM_PROMPT}\n\n${domainPrompt}`),
+        new HumanMessage(state.question)
+      ])
       const content = response.content as string
 
       // 使用增强的 JSON 解析函数
@@ -363,7 +376,7 @@ export class BusinessLangGraphService {
   private async runProductAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     if (!this.model) return { productNodes: [] }
 
-    const prompt = `你是 Product_Agent（产品策略专家），负责生成 CC-BMC 商业模型画布中的三个维度：
+    const domainPrompt = `你是 Product_Agent（产品策略专家），负责生成 CC-BMC 商业模型画布中的三个维度：
 
 1. **价值主张** (VALUE_PROPOSITIONS)：核心价值、差异化优势、解决的痛点
 2. **核心资源** (KEY_RESOURCES)：关键资产、技术能力、人才团队
@@ -377,7 +390,7 @@ export class BusinessLangGraphService {
 - domain: "价值主张" | "核心资源" | "关键业务"
 - label: 简短标题（5-8 字）
 - content: 简洁分析（Markdown 格式，3-5 个要点，每个要点 1 行，总计 100 字以内）
-- metadata: { agent_signature: "Product_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+- metadata: { agent_signature: "Product_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"], cultural_scope: "文化范围", locale_assumptions: ["默认文化假设1", "默认文化假设2"] }
 
 **重要**：content 必须简洁，避免过长描述。
 
@@ -393,14 +406,19 @@ export class BusinessLangGraphService {
       "agent_signature": "Product_Agent",
       "confidence": "high",
       "source": "行业报告",
-      "tags": ["科技", "体验"]
+      "tags": ["科技", "体验"],
+      "cultural_scope": "亚太城市通勤人群",
+      "locale_assumptions": ["重视移动互联体验", "倾向高密度城市场景"]
     }
   }
 ]
 `
 
     try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
+      const response = await this.model.invoke([
+        new SystemMessage(`${CROSS_CULTURAL_SYSTEM_PROMPT}\n\n${domainPrompt}`),
+        new HumanMessage(state.question)
+      ])
       const content = response.content as string
 
       // 使用增强的 JSON 解析函数
@@ -433,7 +451,7 @@ export class BusinessLangGraphService {
   private async runFinanceAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     if (!this.model) return { financeNodes: [] }
 
-    const prompt = `你是 Finance_Agent（财务分析专家），负责生成 CC-BMC 商业模型画布中的两个维度：
+    const domainPrompt = `你是 Finance_Agent（财务分析专家），负责生成 CC-BMC 商业模型画布中的两个维度：
 
 1. **收入来源** (REVENUE_STREAMS)：商业模式、定价策略、收入结构
 2. **成本结构** (COST_STRUCTURE)：主要成本、成本控制、盈利能力
@@ -446,7 +464,7 @@ export class BusinessLangGraphService {
 - domain: "收入来源" | "成本结构"
 - label: 简短标题（10 字以内）
 - content: 详细分析（Markdown 格式，包含数据、趋势、建议）
-- metadata: { agent_signature: "Finance_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+- metadata: { agent_signature: "Finance_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"], cultural_scope: "文化范围", locale_assumptions: ["默认文化假设1", "默认文化假设2"] }
 
 示例：
 [
@@ -460,14 +478,19 @@ export class BusinessLangGraphService {
       "agent_signature": "Finance_Agent",
       "confidence": "high",
       "source": "基于财报数据",
-      "tags": ["营收", "订阅"]
+      "tags": ["营收", "订阅"],
+      "cultural_scope": "北美市场",
+      "locale_assumptions": ["分期支付普及", "订阅消费接受度高"]
     }
   }
 ]
 `
 
     try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
+      const response = await this.model.invoke([
+        new SystemMessage(`${CROSS_CULTURAL_SYSTEM_PROMPT}\n\n${domainPrompt}`),
+        new HumanMessage(state.question)
+      ])
       const content = response.content as string
 
       // 使用增强的 JSON 解析函数
