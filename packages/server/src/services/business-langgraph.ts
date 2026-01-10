@@ -24,10 +24,15 @@ type CCBMCDomain = (typeof CC_BMC_DOMAINS)[keyof typeof CC_BMC_DOMAINS]
 
 // ============== Agent 类型 ==============
 const AGENT_TYPES = {
-  MARKET: 'Market_Agent',
-  PRODUCT: 'Product_Agent',
-  FINANCE: 'Finance_Agent',
-  COMPLIANCE: 'Compliance_Agent',
+  CUSTOMER_SEGMENTS: 'Customer_Segments_Agent',
+  CUSTOMER_RELATIONSHIPS: 'Customer_Relationships_Agent',
+  CHANNELS: 'Channels_Agent',
+  VALUE_PROPOSITIONS: 'Value_Propositions_Agent',
+  REVENUE_STREAMS: 'Revenue_Streams_Agent',
+  KEY_ACTIVITIES: 'Key_Activities_Agent',
+  KEY_RESOURCES: 'Key_Resources_Agent',
+  KEY_PARTNERSHIPS: 'Key_Partnerships_Agent',
+  COST_STRUCTURE: 'Cost_Structure_Agent',
   ORCHESTRATOR: 'Orchestrator',
   CRITIC: 'Adversarial_Critic'
 } as const
@@ -69,9 +74,15 @@ const BusinessState = Annotation.Root({
   userId: Annotation<string>(),
   question: Annotation<string>(),
   intent: Annotation<Intent | null>(),
-  marketNodes: Annotation<MacraNodeData[]>(),
-  productNodes: Annotation<MacraNodeData[]>(),
-  financeNodes: Annotation<MacraNodeData[]>(),
+  customerSegmentsNodes: Annotation<MacraNodeData[]>(),
+  customerRelationshipsNodes: Annotation<MacraNodeData[]>(),
+  channelsNodes: Annotation<MacraNodeData[]>(),
+  valuePropositionsNodes: Annotation<MacraNodeData[]>(),
+  revenueStreamsNodes: Annotation<MacraNodeData[]>(),
+  keyActivitiesNodes: Annotation<MacraNodeData[]>(),
+  keyResourcesNodes: Annotation<MacraNodeData[]>(),
+  keyPartnershipsNodes: Annotation<MacraNodeData[]>(),
+  costStructureNodes: Annotation<MacraNodeData[]>(),
   agentAvatars: Annotation<MacraNodeData[]>(),
   conflicts: Annotation<MacraNodeData[]>(),
   edges: Annotation<CanvasEdge[]>()
@@ -124,6 +135,17 @@ export class BusinessLangGraphService {
 
     // 3. 创建 LangGraph
     const graph = this.createGraph()
+    const domainNodeHandlers = [
+      { nodeName: 'customerSegmentsAgent', key: 'customerSegmentsNodes' as const },
+      { nodeName: 'customerRelationshipsAgent', key: 'customerRelationshipsNodes' as const },
+      { nodeName: 'channelsAgent', key: 'channelsNodes' as const },
+      { nodeName: 'valuePropositionsAgent', key: 'valuePropositionsNodes' as const },
+      { nodeName: 'revenueStreamsAgent', key: 'revenueStreamsNodes' as const },
+      { nodeName: 'keyActivitiesAgent', key: 'keyActivitiesNodes' as const },
+      { nodeName: 'keyResourcesAgent', key: 'keyResourcesNodes' as const },
+      { nodeName: 'keyPartnershipsAgent', key: 'keyPartnershipsNodes' as const },
+      { nodeName: 'costStructureAgent', key: 'costStructureNodes' as const }
+    ]
 
     try {
       // 4. 执行 LangGraph（流式模式）
@@ -133,9 +155,15 @@ export class BusinessLangGraphService {
           userId: context.userId,
           question: context.question,
           intent: null,
-          marketNodes: [],
-          productNodes: [],
-          financeNodes: [],
+          customerSegmentsNodes: [],
+          customerRelationshipsNodes: [],
+          channelsNodes: [],
+          valuePropositionsNodes: [],
+          revenueStreamsNodes: [],
+          keyActivitiesNodes: [],
+          keyResourcesNodes: [],
+          keyPartnershipsNodes: [],
+          costStructureNodes: [],
           agentAvatars: [],
           conflicts: [],
           edges: []
@@ -163,27 +191,13 @@ export class BusinessLangGraphService {
             }
           }
 
-          // Market Agent
-          if (nodeName === 'marketAgent' && payload.marketNodes) {
-            const nodes = payload.marketNodes as MacraNodeData[]
-            for (const node of nodes) {
-              yield { type: 'delta', delta: builder.addMacraNode(node) }
-            }
-          }
-
-          // Product Agent
-          if (nodeName === 'productAgent' && payload.productNodes) {
-            const nodes = payload.productNodes as MacraNodeData[]
-            for (const node of nodes) {
-              yield { type: 'delta', delta: builder.addMacraNode(node) }
-            }
-          }
-
-          // Finance Agent
-          if (nodeName === 'financeAgent' && payload.financeNodes) {
-            const nodes = payload.financeNodes as MacraNodeData[]
-            for (const node of nodes) {
-              yield { type: 'delta', delta: builder.addMacraNode(node) }
+          const domainHandler = domainNodeHandlers.find((handler) => handler.nodeName === nodeName)
+          if (domainHandler) {
+            const nodes = payload[domainHandler.key] as MacraNodeData[] | undefined
+            if (nodes) {
+              for (const node of nodes) {
+                yield { type: 'delta', delta: builder.addMacraNode(node) }
+              }
             }
           }
 
@@ -229,23 +243,52 @@ export class BusinessLangGraphService {
   private createGraph() {
     return new StateGraph(BusinessState)
       .addNode('routerAgent', async (state) => this.routeIntent(state))
-      .addNode('marketAgent', async (state) => this.runMarketAgent(state))
-      .addNode('productAgent', async (state) => this.runProductAgent(state))
-      .addNode('financeAgent', async (state) => this.runFinanceAgent(state))
+      .addNode('customerSegmentsAgent', async (state) => this.runCustomerSegmentsAgent(state))
+      .addNode('customerRelationshipsAgent', async (state) => this.runCustomerRelationshipsAgent(state))
+      .addNode('channelsAgent', async (state) => this.runChannelsAgent(state))
+      .addNode('valuePropositionsAgent', async (state) => this.runValuePropositionsAgent(state))
+      .addNode('revenueStreamsAgent', async (state) => this.runRevenueStreamsAgent(state))
+      .addNode('keyActivitiesAgent', async (state) => this.runKeyActivitiesAgent(state))
+      .addNode('keyResourcesAgent', async (state) => this.runKeyResourcesAgent(state))
+      .addNode('keyPartnershipsAgent', async (state) => this.runKeyPartnershipsAgent(state))
+      .addNode('costStructureAgent', async (state) => this.runCostStructureAgent(state))
       .addNode('orchestrator', async (state) => this.orchestrate(state))
       .addNode('critic', async (state) => this.runCritic(state))
       .addEdge(START, 'routerAgent')
       .addConditionalEdges('routerAgent', (state) => {
         const intent = state.intent?.intent || 'general'
         if (intent === 'generate_bmc') {
-          return ['marketAgent', 'productAgent', 'financeAgent']
+          return [
+            'customerSegmentsAgent',
+            'customerRelationshipsAgent',
+            'channelsAgent',
+            'valuePropositionsAgent',
+            'revenueStreamsAgent',
+            'keyActivitiesAgent',
+            'keyResourcesAgent',
+            'keyPartnershipsAgent',
+            'costStructureAgent'
+          ]
         }
         if (intent === 'detect_conflicts') {
           return ['critic']
         }
         return ['orchestrator']
       })
-      .addEdge(['marketAgent', 'productAgent', 'financeAgent'], 'orchestrator')
+      .addEdge(
+        [
+          'customerSegmentsAgent',
+          'customerRelationshipsAgent',
+          'channelsAgent',
+          'valuePropositionsAgent',
+          'revenueStreamsAgent',
+          'keyActivitiesAgent',
+          'keyResourcesAgent',
+          'keyPartnershipsAgent',
+          'costStructureAgent'
+        ],
+        'orchestrator'
+      )
       .addEdge('orchestrator', 'critic')
       .addEdge('critic', END)
       .compile()
@@ -291,256 +334,390 @@ export class BusinessLangGraphService {
     }
   }
 
-  private async runMarketAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { marketNodes: [] }
+  private async buildDomainNodes(options: {
+    state: BusinessStateType
+    prompt: string
+    agentName: string
+    domain: CCBMCDomain
+    idPrefix: string
+    agentType: AgentType
+  }): Promise<MacraNodeData[]> {
+    if (!this.model) return []
 
-    const prompt = `你是 Market_Agent（市场分析专家），负责生成 CC-BMC 商业模型画布中的三个维度：
+    try {
+      const response = await this.model.invoke([new SystemMessage(options.prompt), new HumanMessage(options.state.question)])
+      const content = response.content as string
+      const nodes = extractAndParseJSON(content, options.agentName)
 
-1. **客户细分** (CUSTOMER_SEGMENTS)：目标客户群体、用户画像、市场规模
-2. **渠道通路** (CHANNELS)：如何触达客户、线上/线下渠道、分发策略
-3. **客户关系** (CUSTOMER_RELATIONSHIPS)：如何维系客户、服务模式、用户粘性
+      if (nodes.length === 0) {
+        return []
+      }
+
+      return nodes.map((node) => ({
+        ...node,
+        id: `${options.idPrefix}-${nanoid(8)}`,
+        type: 'cc-bmc-card' as const,
+        domain: options.domain,
+        metadata: {
+          ...node.metadata,
+          agent_signature: options.agentType
+        }
+      }))
+    } catch (error) {
+      auditLogger.error({
+        action: `business-langgraph.${options.agentName}`,
+        metadata: { error: String(error) }
+      })
+      return []
+    }
+  }
+
+  private async runCustomerSegmentsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Customer_Segments_Agent（客户细分专家），负责生成 CC-BMC 商业模型画布中的维度：
+
+**客户细分**：目标客户群体、用户画像、市场规模。
 
 用户问题：${state.question}
 
-请生成 3 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
-- id: 自动生成（格式 market-xxxxx）
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 customer-segments-xxxxx）
 - type: "cc-bmc-card"
-- domain: "客户细分" | "渠道通路" | "客户关系"
+- domain: "客户细分"
 - label: 简短标题（10 字以内）
 - content: 详细分析（Markdown 格式，包含数据、趋势、建议）
-- metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
-
-示例：
-[
-  {
-    "id": "market-${nanoid(8)}",
-    "type": "cc-bmc-card",
-    "domain": "客户细分",
-    "label": "目标客户群体",
-    "content": "## 核心客户\\n1. **城市中产家庭** (35-50岁)\\n   - 环保意识强\\n   - 占比 45%\\n2. **商用车队运营商**\\n   - 注重 TCO\\n   - 占比 30%",
-    "metadata": {
-      "agent_signature": "Market_Agent",
-      "confidence": "high",
-      "source": "基于中汽协 2024 年度报告",
-      "tags": ["B2C", "B2B"]
-    }
-  }
-]
+- metadata: { agent_signature: "Customer_Segments_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 `
 
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runCustomerSegmentsAgent',
+      domain: CC_BMC_DOMAINS.CUSTOMER_SEGMENTS,
+      idPrefix: 'customer-segments',
+      agentType: AGENT_TYPES.CUSTOMER_SEGMENTS
+    })
 
-      // 使用增强的 JSON 解析函数
-      const nodes = extractAndParseJSON(content, 'runMarketAgent')
-
-      if (nodes.length === 0) {
-        return { marketNodes: [] }
-      }
-
-      // 验证和规范化
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `market-${nanoid(8)}`,
-        type: 'cc-bmc-card' as const,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.MARKET
-        }
-      }))
-
-      return { marketNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runMarketAgent',
-        metadata: { error: String(error) }
-      })
-      return { marketNodes: [] }
-    }
+    return { customerSegmentsNodes: nodes }
   }
 
-  private async runProductAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { productNodes: [] }
+  private async runCustomerRelationshipsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Customer_Relationships_Agent（客户关系专家），负责生成 CC-BMC 商业模型画布中的维度：
 
-    const prompt = `你是 Product_Agent（产品策略专家），负责生成 CC-BMC 商业模型画布中的三个维度：
-
-1. **价值主张** (VALUE_PROPOSITIONS)：核心价值、差异化优势、解决的痛点
-2. **核心资源** (KEY_RESOURCES)：关键资产、技术能力、人才团队
-3. **关键业务** (KEY_ACTIVITIES)：核心活动、业务流程、运营重点
+**客户关系**：客户互动方式、服务模式、用户粘性。
 
 用户问题：${state.question}
 
-请生成 3 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
-- id: 自动生成（格式 product-xxxxx）
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 customer-relationships-xxxxx）
 - type: "cc-bmc-card"
-- domain: "价值主张" | "核心资源" | "关键业务"
-- label: 简短标题（5-8 字）
-- content: 简洁分析（Markdown 格式，3-5 个要点，每个要点 1 行，总计 100 字以内）
-- metadata: { agent_signature: "Product_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
-
-**重要**：content 必须简洁，避免过长描述。
-
-示例：
-[
-  {
-    "id": "product-abc123",
-    "type": "cc-bmc-card",
-    "domain": "价值主张",
-    "label": "智能驾驶",
-    "content": "## 核心价值\\n- L2+ 自动驾驶\\n- OTA 升级\\n- 零排放低成本",
-    "metadata": {
-      "agent_signature": "Product_Agent",
-      "confidence": "high",
-      "source": "行业报告",
-      "tags": ["科技", "体验"]
-    }
-  }
-]
+- domain: "客户关系"
+- label: 简短标题（10 字以内）
+- content: 详细分析（Markdown 格式，包含服务策略与建议）
+- metadata: { agent_signature: "Customer_Relationships_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 `
 
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runCustomerRelationshipsAgent',
+      domain: CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS,
+      idPrefix: 'customer-relationships',
+      agentType: AGENT_TYPES.CUSTOMER_RELATIONSHIPS
+    })
 
-      // 使用增强的 JSON 解析函数
-      const nodes = extractAndParseJSON(content, 'runProductAgent')
-
-      if (nodes.length === 0) {
-        return { productNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `product-${nanoid(8)}`,
-        type: 'cc-bmc-card' as const,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.PRODUCT
-        }
-      }))
-
-      return { productNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runProductAgent',
-        metadata: { error: String(error) }
-      })
-      return { productNodes: [] }
-    }
+    return { customerRelationshipsNodes: nodes }
   }
 
-  private async runFinanceAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { financeNodes: [] }
+  private async runChannelsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Channels_Agent（渠道通路专家），负责生成 CC-BMC 商业模型画布中的维度：
 
-    const prompt = `你是 Finance_Agent（财务分析专家），负责生成 CC-BMC 商业模型画布中的两个维度：
-
-1. **收入来源** (REVENUE_STREAMS)：商业模式、定价策略、收入结构
-2. **成本结构** (COST_STRUCTURE)：主要成本、成本控制、盈利能力
+**渠道通路**：触达方式、线上/线下渠道、分发策略。
 
 用户问题：${state.question}
 
-请生成 2 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
-- id: 自动生成（格式 finance-xxxxx）
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 channels-xxxxx）
 - type: "cc-bmc-card"
-- domain: "收入来源" | "成本结构"
+- domain: "渠道通路"
+- label: 简短标题（10 字以内）
+- content: 详细分析（Markdown 格式，包含触达策略与建议）
+- metadata: { agent_signature: "Channels_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+`
+
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runChannelsAgent',
+      domain: CC_BMC_DOMAINS.CHANNELS,
+      idPrefix: 'channels',
+      agentType: AGENT_TYPES.CHANNELS
+    })
+
+    return { channelsNodes: nodes }
+  }
+
+  private async runValuePropositionsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Value_Propositions_Agent（价值主张专家），负责生成 CC-BMC 商业模型画布中的维度：
+
+**价值主张**：核心价值、差异化优势、解决的痛点。
+
+用户问题：${state.question}
+
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 value-propositions-xxxxx）
+- type: "cc-bmc-card"
+- domain: "价值主张"
+- label: 简短标题（10 字以内）
+- content: 简洁分析（Markdown 格式，包含 3-5 个要点）
+- metadata: { agent_signature: "Value_Propositions_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+`
+
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runValuePropositionsAgent',
+      domain: CC_BMC_DOMAINS.VALUE_PROPOSITIONS,
+      idPrefix: 'value-propositions',
+      agentType: AGENT_TYPES.VALUE_PROPOSITIONS
+    })
+
+    return { valuePropositionsNodes: nodes }
+  }
+
+  private async runRevenueStreamsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Revenue_Streams_Agent（收入来源专家），负责生成 CC-BMC 商业模型画布中的维度：
+
+**收入来源**：商业模式、定价策略、收入结构。
+
+用户问题：${state.question}
+
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 revenue-streams-xxxxx）
+- type: "cc-bmc-card"
+- domain: "收入来源"
 - label: 简短标题（10 字以内）
 - content: 详细分析（Markdown 格式，包含数据、趋势、建议）
-- metadata: { agent_signature: "Finance_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
-
-示例：
-[
-  {
-    "id": "finance-${nanoid(8)}",
-    "type": "cc-bmc-card",
-    "domain": "收入来源",
-    "label": "多元收入模式",
-    "content": "## 收入结构\\n1. **车辆销售** (70%)\\n   - 平均售价 25万\\n2. **增值服务** (20%)\\n   - FSD 订阅\\n3. **充电网络** (10%)",
-    "metadata": {
-      "agent_signature": "Finance_Agent",
-      "confidence": "high",
-      "source": "基于财报数据",
-      "tags": ["营收", "订阅"]
-    }
-  }
-]
+- metadata: { agent_signature: "Revenue_Streams_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 `
 
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runRevenueStreamsAgent',
+      domain: CC_BMC_DOMAINS.REVENUE_STREAMS,
+      idPrefix: 'revenue-streams',
+      agentType: AGENT_TYPES.REVENUE_STREAMS
+    })
 
-      // 使用增强的 JSON 解析函数
-      const nodes = extractAndParseJSON(content, 'runFinanceAgent')
+    return { revenueStreamsNodes: nodes }
+  }
 
-      if (nodes.length === 0) {
-        return { financeNodes: [] }
-      }
+  private async runKeyActivitiesAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Key_Activities_Agent（关键业务专家），负责生成 CC-BMC 商业模型画布中的维度：
 
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `finance-${nanoid(8)}`,
-        type: 'cc-bmc-card' as const,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.FINANCE
-        }
-      }))
+**关键业务**：核心活动、业务流程、运营重点。
 
-      return { financeNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runFinanceAgent',
-        metadata: { error: String(error) }
-      })
-      return { financeNodes: [] }
-    }
+用户问题：${state.question}
+
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 key-activities-xxxxx）
+- type: "cc-bmc-card"
+- domain: "关键业务"
+- label: 简短标题（10 字以内）
+- content: 简洁分析（Markdown 格式，包含 3-5 个要点）
+- metadata: { agent_signature: "Key_Activities_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+`
+
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runKeyActivitiesAgent',
+      domain: CC_BMC_DOMAINS.KEY_ACTIVITIES,
+      idPrefix: 'key-activities',
+      agentType: AGENT_TYPES.KEY_ACTIVITIES
+    })
+
+    return { keyActivitiesNodes: nodes }
+  }
+
+  private async runKeyResourcesAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Key_Resources_Agent（核心资源专家），负责生成 CC-BMC 商业模型画布中的维度：
+
+**核心资源**：关键资产、技术能力、人才团队。
+
+用户问题：${state.question}
+
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 key-resources-xxxxx）
+- type: "cc-bmc-card"
+- domain: "核心资源"
+- label: 简短标题（10 字以内）
+- content: 详细分析（Markdown 格式，包含资源构成与优势）
+- metadata: { agent_signature: "Key_Resources_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+`
+
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runKeyResourcesAgent',
+      domain: CC_BMC_DOMAINS.KEY_RESOURCES,
+      idPrefix: 'key-resources',
+      agentType: AGENT_TYPES.KEY_RESOURCES
+    })
+
+    return { keyResourcesNodes: nodes }
+  }
+
+  private async runKeyPartnershipsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Key_Partnerships_Agent（重要合作专家），负责生成 CC-BMC 商业模型画布中的维度：
+
+**重要合作**：关键合作伙伴、合作价值、协作关系。
+
+用户问题：${state.question}
+
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 key-partnerships-xxxxx）
+- type: "cc-bmc-card"
+- domain: "重要合作"
+- label: 简短标题（10 字以内）
+- content: 详细分析（Markdown 格式，包含合作策略与价值）
+- metadata: { agent_signature: "Key_Partnerships_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+`
+
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runKeyPartnershipsAgent',
+      domain: CC_BMC_DOMAINS.KEY_PARTNERSHIPS,
+      idPrefix: 'key-partnerships',
+      agentType: AGENT_TYPES.KEY_PARTNERSHIPS
+    })
+
+    return { keyPartnershipsNodes: nodes }
+  }
+
+  private async runCostStructureAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const prompt = `你是 Cost_Structure_Agent（成本结构专家），负责生成 CC-BMC 商业模型画布中的维度：
+
+**成本结构**：主要成本、成本控制、盈利能力。
+
+用户问题：${state.question}
+
+请生成 1 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 cost-structure-xxxxx）
+- type: "cc-bmc-card"
+- domain: "成本结构"
+- label: 简短标题（10 字以内）
+- content: 详细分析（Markdown 格式，包含成本结构与建议）
+- metadata: { agent_signature: "Cost_Structure_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+`
+
+    const nodes = await this.buildDomainNodes({
+      state,
+      prompt,
+      agentName: 'runCostStructureAgent',
+      domain: CC_BMC_DOMAINS.COST_STRUCTURE,
+      idPrefix: 'cost-structure',
+      agentType: AGENT_TYPES.COST_STRUCTURE
+    })
+
+    return { costStructureNodes: nodes }
+  }
+
+  private getAllDomainNodes(state: BusinessStateType) {
+    return [
+      ...state.customerSegmentsNodes,
+      ...state.customerRelationshipsNodes,
+      ...state.channelsNodes,
+      ...state.valuePropositionsNodes,
+      ...state.revenueStreamsNodes,
+      ...state.keyActivitiesNodes,
+      ...state.keyResourcesNodes,
+      ...state.keyPartnershipsNodes,
+      ...state.costStructureNodes
+    ]
   }
 
   private async orchestrate(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     // 1. 生成 Agent Avatar 节点
     const agentAvatars: MacraNodeData[] = []
+    const avatarConfigs = [
+      {
+        nodes: state.customerSegmentsNodes,
+        idPrefix: 'avatar-customer-segments',
+        label: '客户细分专家',
+        domainLabel: CC_BMC_DOMAINS.CUSTOMER_SEGMENTS,
+        agentType: AGENT_TYPES.CUSTOMER_SEGMENTS
+      },
+      {
+        nodes: state.customerRelationshipsNodes,
+        idPrefix: 'avatar-customer-relationships',
+        label: '客户关系专家',
+        domainLabel: CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS,
+        agentType: AGENT_TYPES.CUSTOMER_RELATIONSHIPS
+      },
+      {
+        nodes: state.channelsNodes,
+        idPrefix: 'avatar-channels',
+        label: '渠道通路专家',
+        domainLabel: CC_BMC_DOMAINS.CHANNELS,
+        agentType: AGENT_TYPES.CHANNELS
+      },
+      {
+        nodes: state.valuePropositionsNodes,
+        idPrefix: 'avatar-value-propositions',
+        label: '价值主张专家',
+        domainLabel: CC_BMC_DOMAINS.VALUE_PROPOSITIONS,
+        agentType: AGENT_TYPES.VALUE_PROPOSITIONS
+      },
+      {
+        nodes: state.revenueStreamsNodes,
+        idPrefix: 'avatar-revenue-streams',
+        label: '收入来源专家',
+        domainLabel: CC_BMC_DOMAINS.REVENUE_STREAMS,
+        agentType: AGENT_TYPES.REVENUE_STREAMS
+      },
+      {
+        nodes: state.keyActivitiesNodes,
+        idPrefix: 'avatar-key-activities',
+        label: '关键业务专家',
+        domainLabel: CC_BMC_DOMAINS.KEY_ACTIVITIES,
+        agentType: AGENT_TYPES.KEY_ACTIVITIES
+      },
+      {
+        nodes: state.keyResourcesNodes,
+        idPrefix: 'avatar-key-resources',
+        label: '核心资源专家',
+        domainLabel: CC_BMC_DOMAINS.KEY_RESOURCES,
+        agentType: AGENT_TYPES.KEY_RESOURCES
+      },
+      {
+        nodes: state.keyPartnershipsNodes,
+        idPrefix: 'avatar-key-partnerships',
+        label: '重要合作专家',
+        domainLabel: CC_BMC_DOMAINS.KEY_PARTNERSHIPS,
+        agentType: AGENT_TYPES.KEY_PARTNERSHIPS
+      },
+      {
+        nodes: state.costStructureNodes,
+        idPrefix: 'avatar-cost-structure',
+        label: '成本结构专家',
+        domainLabel: CC_BMC_DOMAINS.COST_STRUCTURE,
+        agentType: AGENT_TYPES.COST_STRUCTURE
+      }
+    ]
 
-    if (state.marketNodes.length > 0) {
+    for (const config of avatarConfigs) {
+      if (config.nodes.length === 0) continue
       agentAvatars.push({
-        id: `avatar-market-${nanoid(8)}`,
+        id: `${config.idPrefix}-${nanoid(8)}`,
         type: 'agent-avatar',
-        label: '市场分析专家',
-        content: `我已为你分析了目标客户、渠道通路和客户关系三个维度。\n\n**核心洞察**：${state.marketNodes[0]?.label || '市场分析'}`,
-        agentType: AGENT_TYPES.MARKET,
+        label: config.label,
+        content: `我已为你分析了${config.domainLabel}维度。\n\n**核心洞察**：${config.nodes[0]?.label || config.domainLabel}`,
+        agentType: config.agentType,
         isInteractive: true,
         metadata: {
-          agent_signature: AGENT_TYPES.MARKET,
-          confidence: 'high'
-        }
-      })
-    }
-
-    if (state.productNodes.length > 0) {
-      agentAvatars.push({
-        id: `avatar-product-${nanoid(8)}`,
-        type: 'agent-avatar',
-        label: '产品策略专家',
-        content: `我已为你分析了价值主张、核心资源和关键业务。\n\n**核心洞察**：${state.productNodes[0]?.label || '产品策略'}`,
-        agentType: AGENT_TYPES.PRODUCT,
-        isInteractive: true,
-        metadata: {
-          agent_signature: AGENT_TYPES.PRODUCT,
-          confidence: 'high'
-        }
-      })
-    }
-
-    if (state.financeNodes.length > 0) {
-      agentAvatars.push({
-        id: `avatar-finance-${nanoid(8)}`,
-        type: 'agent-avatar',
-        label: '财务分析专家',
-        content: `我已为你分析了收入来源和成本结构。\n\n**核心洞察**：${state.financeNodes[0]?.label || '财务分析'}`,
-        agentType: AGENT_TYPES.FINANCE,
-        isInteractive: true,
-        metadata: {
-          agent_signature: AGENT_TYPES.FINANCE,
+          agent_signature: config.agentType,
           confidence: 'high'
         }
       })
@@ -548,11 +725,7 @@ export class BusinessLangGraphService {
 
     // 2. 生成边（连接关系）- 完整的 CC-BMC 逻辑连接
     const edges: CanvasEdge[] = []
-    const allNodes = [
-      ...state.marketNodes,
-      ...state.productNodes,
-      ...state.financeNodes
-    ]
+    const allNodes = this.getAllDomainNodes(state)
 
     // 辅助函数：查找节点
     const findNode = (domain: string) => allNodes.find((n) => n.domain === domain)
@@ -666,11 +839,7 @@ export class BusinessLangGraphService {
     // 未来可以调用 LLM 进行深度分析
     const conflicts: MacraNodeData[] = []
 
-    const allNodes = [
-      ...state.marketNodes,
-      ...state.productNodes,
-      ...state.financeNodes
-    ]
+    const allNodes = this.getAllDomainNodes(state)
 
     // 示例：检查是否同时提到"高端市场"和"低价策略"
     const hasHighEnd = allNodes.some((n) => typeof n.content === 'string' && (n.content.includes('高端') || n.content.includes('中产')))
