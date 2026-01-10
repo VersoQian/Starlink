@@ -20,6 +20,15 @@ export type CCBMCDomain = (typeof CC_BMC_DOMAINS)[keyof typeof CC_BMC_DOMAINS]
 
 // ============== Agent 类型 ==============
 export const AGENT_TYPES = {
+  CUSTOMER_SEGMENTS: 'CustomerSegment_Agent',
+  CUSTOMER_RELATIONSHIPS: 'CustomerRelationship_Agent',
+  CHANNELS: 'Channels_Agent',
+  VALUE_PROPOSITIONS: 'ValueProposition_Agent',
+  REVENUE_STREAMS: 'RevenueStream_Agent',
+  KEY_ACTIVITIES: 'KeyActivity_Agent',
+  KEY_RESOURCES: 'KeyResource_Agent',
+  KEY_PARTNERSHIPS: 'KeyPartnership_Agent',
+  COST_STRUCTURE: 'CostStructure_Agent',
   MARKET: 'Market_Agent',
   PRODUCT: 'Product_Agent',
   FINANCE: 'Finance_Agent',
@@ -49,6 +58,7 @@ export interface NodeMetadata {
   created_at?: string                // 创建时间
   updated_at?: string                // 更新时间
   tags?: string[]                    // 标签
+  cultural_context?: string          // 文化假设/适配地域
 }
 
 // ============== 节点数据结构 ==============

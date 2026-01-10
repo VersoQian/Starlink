@@ -10,6 +10,69 @@ import { Bot, MessageCircle, X, Send, Loader2, Sparkles } from 'lucide-react'
 
 // Agent 配色方案 - Tech-Luxe Gradient
 const AGENT_CONFIG: Record<AgentType, { gradient: string; avatar: string; name: string; description: string; accentColor: string }> = {
+  [AGENT_TYPES.CUSTOMER_SEGMENTS]: {
+    gradient: 'from-sky-400 to-sky-500',
+    avatar: '🧭',
+    name: '客户细分专家',
+    description: '目标客户与画像分析',
+    accentColor: '#38bdf8'
+  },
+  [AGENT_TYPES.CUSTOMER_RELATIONSHIPS]: {
+    gradient: 'from-cyan-400 to-cyan-500',
+    avatar: '🤝',
+    name: '客户关系专家',
+    description: '关系维护与用户粘性',
+    accentColor: '#22d3ee'
+  },
+  [AGENT_TYPES.CHANNELS]: {
+    gradient: 'from-blue-400 to-blue-500',
+    avatar: '🚚',
+    name: '渠道通路专家',
+    description: '触达与分发策略',
+    accentColor: '#3b82f6'
+  },
+  [AGENT_TYPES.VALUE_PROPOSITIONS]: {
+    gradient: 'from-violet-400 to-violet-500',
+    avatar: '💎',
+    name: '价值主张专家',
+    description: '核心价值与差异化',
+    accentColor: '#8b5cf6'
+  },
+  [AGENT_TYPES.REVENUE_STREAMS]: {
+    gradient: 'from-emerald-400 to-emerald-500',
+    avatar: '💹',
+    name: '收入来源专家',
+    description: '商业模式与定价',
+    accentColor: '#10b981'
+  },
+  [AGENT_TYPES.KEY_ACTIVITIES]: {
+    gradient: 'from-amber-400 to-amber-500',
+    avatar: '🛠️',
+    name: '关键业务专家',
+    description: '核心活动与流程',
+    accentColor: '#f59e0b'
+  },
+  [AGENT_TYPES.KEY_RESOURCES]: {
+    gradient: 'from-lime-400 to-lime-500',
+    avatar: '🧰',
+    name: '核心资源专家',
+    description: '关键资产与能力',
+    accentColor: '#84cc16'
+  },
+  [AGENT_TYPES.KEY_PARTNERSHIPS]: {
+    gradient: 'from-orange-400 to-orange-500',
+    avatar: '🧩',
+    name: '重要合作专家',
+    description: '合作伙伴与协同',
+    accentColor: '#f97316'
+  },
+  [AGENT_TYPES.COST_STRUCTURE]: {
+    gradient: 'from-rose-400 to-rose-500',
+    avatar: '📉',
+    name: '成本结构专家',
+    description: '成本构成与优化',
+    accentColor: '#fb7185'
+  },
   [AGENT_TYPES.MARKET]: {
     gradient: 'from-blue-400 to-blue-500',
     avatar: '📊',
