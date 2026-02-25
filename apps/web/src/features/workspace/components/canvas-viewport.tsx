@@ -39,6 +39,7 @@ import { DashedEdge } from './edges/dashed-edge'
 import { TimelineEdge } from './edges/timeline-edge'
 import type { TimelineNode as TimelineNodeData, TimelineEdge as TimelineEdgeData } from '@/types/timeline'
 import clsx from 'clsx'
+import { saveTimelineIteration } from '../lib/timeline-history-storage'
 
 export type CanvasViewportHandle = {
   generateAnalysis: (question: string) => Promise<void>
@@ -475,6 +476,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
       syncTimeline(result)
       if (result.iteration) {
         addIterationToStore(result.iteration)
+        saveTimelineIteration(workspaceId, activeTaskId, result.iteration)
       }
     },
     [

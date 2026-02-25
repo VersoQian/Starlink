@@ -2,6 +2,12 @@ import { KbStatus, KnowledgeBase } from '@prisma/client'
 import { prisma } from '../prisma'
 
 export class KbService {
+  static async list(): Promise<KnowledgeBase[]> {
+    return prisma.knowledgeBase.findMany({
+      orderBy: { updatedAt: 'desc' }
+    })
+  }
+
   static async create(ownerId?: string): Promise<KnowledgeBase> {
     return prisma.knowledgeBase.create({
       data: {

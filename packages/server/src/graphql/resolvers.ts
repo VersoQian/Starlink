@@ -1,12 +1,20 @@
 import GraphQLJSON from 'graphql-type-json'
 import { conversationMetadataSchema } from '@starlink/shared'
 import type { GraphQLContext } from '../context/index.js'
+import {
+  addKnowledgeSeed,
+  createKnowledgeBase,
+  getKnowledgeBaseStatus,
+  importKnowledgeUrl,
+  listKnowledgeBases,
+  publishKnowledgeBase
+} from '../services/kb-task-service.js'
 
 export const resolvers = {
   JSON: GraphQLJSON,
   Query: {
     workspaceGraph: async (_: unknown, args: { workspaceId: string }, ctx: GraphQLContext) => {
-      return ctx.conversationStore.getGraph(args.workspaceId)
+      return await ctx.conversationStore.getGraph(args.workspaceId)
     },
     conversation: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
       const record = ctx.conversationStore.getConversation(args.id)
@@ -17,8 +25,18 @@ export const resolvers = {
           createdAt: record.metadata.createdAt.toISOString(),
           updatedAt: record.metadata.updatedAt.toISOString()
         },
-        graph: record.graph
+        graph: record.graph,
+        knowledgeEvidence: record.knowledgeEvidence ?? []
       }
+    },
+    kbTaskStatus: async (_: unknown, args: { kbId: string }, ctx: GraphQLContext) => {
+      return ctx.taskEventStore.getTaskStatuses(args.kbId)
+    },
+    knowledgeBases: async () => {
+      return await listKnowledgeBases()
+    },
+    knowledgeBaseStatus: async (_: unknown, args: { kbId: string }) => {
+      return await getKnowledgeBaseStatus(args.kbId)
     }
   },
   Mutation: {
@@ -39,7 +57,8 @@ export const resolvers = {
           createdAt: metadata.createdAt.toISOString(),
           updatedAt: metadata.updatedAt.toISOString()
         },
-        graph: record.graph
+        graph: record.graph,
+        knowledgeEvidence: record.knowledgeEvidence ?? []
       }
     },
     addNode: async (
@@ -50,7 +69,7 @@ export const resolvers = {
       },
       ctx: GraphQLContext
     ) => {
-      const node = ctx.conversationStore.addNode(args.workspaceId, args.input)
+      const node = await ctx.conversationStore.addNode(args.workspaceId, args.input)
       return node
     },
     connectNodes: async (
@@ -61,8 +80,20 @@ export const resolvers = {
       },
       ctx: GraphQLContext
     ) => {
-      const edge = ctx.conversationStore.connectNodes(args.workspaceId, args.input)
+      const edge = await ctx.conversationStore.connectNodes(args.workspaceId, args.input)
       return edge
+    },
+    createKnowledgeBase: async () => {
+      return await createKnowledgeBase()
+    },
+    publishKnowledgeBase: async (_: unknown, args: { kbId: string }) => {
+      return await publishKnowledgeBase(args.kbId)
+    },
+    addKnowledgeSeed: async (_: unknown, args: { kbId: string; text: string }) => {
+      return await addKnowledgeSeed(args.kbId, args.text)
+    },
+    importKnowledgeUrl: async (_: unknown, args: { kbId: string; url: string }) => {
+      return await importKnowledgeUrl(args.kbId, args.url)
     }
   },
   Subscription: {

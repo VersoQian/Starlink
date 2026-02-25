@@ -39,3 +39,38 @@ export type InsightLog = {
   summary: string
   actions: string[]
 }
+
+export type KbTaskStatus = {
+  taskId: string
+  kbId: string
+  status: 'pending' | 'processing' | 'succeeded' | 'failed'
+  taskType: 'seed' | 'file' | 'url'
+  error?: string | null
+  updatedAt: string
+  lastEventId: string
+}
+
+export type KnowledgeTask = {
+  id: string
+  kbId: string
+  type: 'seed' | 'file' | 'url'
+  status: 'pending' | 'processing' | 'succeeded' | 'failed'
+  payload: Record<string, unknown>
+  error?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type KnowledgeBaseSummary = {
+  id: string
+  name: string
+  status: string
+  createdAt: string
+  updatedAt: string
+  publishedAt?: string | null
+}
+
+export type KnowledgeBaseStatus = {
+  knowledgeBase: KnowledgeBaseSummary
+  tasks: KnowledgeTask[]
+}

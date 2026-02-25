@@ -5,10 +5,12 @@ import type {
   CanvasGraph,
   CanvasNode,
   ConversationEvent,
-  ConversationMetadata
+  ConversationMetadata,
+  KnowledgeEvidence
 } from '@starlink/shared'
 import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@starlink/shared'
 import { BusinessLangGraphService, type BusinessStreamUpdate, type GraphDelta } from '../services/business-langgraph.js'
+import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js'
 export type ConversationStoreDeps = {
   pubSub: PubSub
 }
@@ -16,6 +18,7 @@ export type ConversationStoreDeps = {
 type ConversationRecord = {
   metadata: ConversationMetadata
   graph: CanvasGraph
+  knowledgeEvidence: KnowledgeEvidence[]
 }
 
 const EVENT_TOPIC = 'conversation-progress'
@@ -51,7 +54,8 @@ export class ConversationStore {
         workspaceId,
         nodes: [],
         edges: []
-      }
+      },
+      knowledgeEvidence: []
     }
 
     this.conversations.set(id, record)
@@ -67,6 +71,7 @@ export class ConversationStore {
         const currentGraph = initResult.value.graph
         record.graph = currentGraph
         this.workspaceGraphs.set(workspaceId, currentGraph)
+        await this.persistGraphState(currentGraph)
         const baseEvent: ConversationEvent = {
           type: 'graph/appended',
           conversationId: id,
@@ -106,10 +111,15 @@ export class ConversationStore {
 
   getConversation(id: string): ConversationRecord | null {
     const record = this.conversations.get(id)
-    return record ? { ...record, metadata: conversationMetadataSchema.parse(record.metadata) } : null
+    if (!record) return null
+    const metadata = conversationMetadataSchema.parse(record.metadata)
+    return {
+      ...record,
+      metadata
+    }
   }
 
-  getGraph(workspaceId: string): CanvasGraph {
+  async getGraph(workspaceId: string): Promise<CanvasGraph> {
     const manualGraph = this.workspaceGraphs.get(workspaceId)
     if (manualGraph) {
       return {
@@ -128,6 +138,17 @@ export class ConversationStore {
         edges: [...existing.graph.edges]
       }
     }
+
+    const persistedGraph = await loadPersistedGraph(workspaceId)
+    if (persistedGraph) {
+      this.workspaceGraphs.set(workspaceId, persistedGraph)
+      return {
+        workspaceId,
+        nodes: [...persistedGraph.nodes],
+        edges: [...persistedGraph.edges]
+      }
+    }
+
     const emptyGraph: CanvasGraph = {
       workspaceId,
       nodes: [],
@@ -137,10 +158,10 @@ export class ConversationStore {
     return emptyGraph
   }
 
-  addNode(
+  async addNode(
     workspaceId: string,
     input: { id?: string; type: string; position: { x: number; y: number }; data: unknown }
-  ): CanvasNode {
+  ): Promise<CanvasNode> {
     const id = input.id ?? nanoid()
     const parsed = canvasNodeSchema.parse({
       id,
@@ -149,7 +170,7 @@ export class ConversationStore {
       data: input.data
     })
 
-    const baseGraph = this.getGraph(workspaceId)
+    const baseGraph = await this.getGraph(workspaceId)
 
     const updatedNodes = [...baseGraph.nodes.filter((node) => node.id !== parsed.id), parsed]
     const updatedGraph: CanvasGraph = {
@@ -159,6 +180,7 @@ export class ConversationStore {
     }
 
     this.workspaceGraphs.set(workspaceId, updatedGraph)
+    await this.persistGraphState(updatedGraph)
 
     // Also update any conversation record referencing this workspace
     for (const record of this.conversations.values()) {
@@ -173,10 +195,10 @@ export class ConversationStore {
     return parsed
   }
 
-  connectNodes(
+  async connectNodes(
     workspaceId: string,
     input: { id?: string; source: string; target: string; label?: string | null }
-  ): CanvasEdge {
+  ): Promise<CanvasEdge> {
     const id = input.id ?? nanoid()
     const parsed = canvasEdgeSchema.parse({
       id,
@@ -185,7 +207,7 @@ export class ConversationStore {
       label: input.label ?? null
     })
 
-    const baseGraph = this.getGraph(workspaceId)
+    const baseGraph = await this.getGraph(workspaceId)
     const updatedEdges = [...baseGraph.edges.filter((edge) => edge.id !== parsed.id), parsed]
     const updatedGraph: CanvasGraph = {
       workspaceId,
@@ -194,6 +216,7 @@ export class ConversationStore {
     }
 
     this.workspaceGraphs.set(workspaceId, updatedGraph)
+    await this.persistGraphState(updatedGraph)
 
     for (const record of this.conversations.values()) {
       if (record.graph.workspaceId === workspaceId) {
@@ -207,6 +230,14 @@ export class ConversationStore {
     return parsed
   }
 
+  private async persistGraphState(graph: CanvasGraph) {
+    try {
+      await persistCanvasGraph(graph)
+    } catch (error) {
+      console.error('Failed to persist canvas graph', error)
+    }
+  }
+
   getEventIterator() {
     return this.pubSub.asyncIterableIterator<{ conversationProgress: ConversationEvent }>(EVENT_TOPIC)
   }
@@ -218,15 +249,19 @@ export class ConversationStore {
     conversationId: string
     initialized: boolean
   }) {
+    console.log('🎬 [runConversationStream] Starting background stream processing...')
     let { stream, record, workspaceId, conversationId, initialized } = options
     let currentGraph = record.graph
 
     try {
+      console.log('🔄 [runConversationStream] Iterating stream updates...')
       for await (const update of stream) {
         if (update.type === 'init') {
           currentGraph = update.graph
           record.graph = currentGraph
           this.workspaceGraphs.set(workspaceId, currentGraph)
+          await this.persistGraphState(currentGraph)
+          record.knowledgeEvidence = update.knowledgeEvidence ?? []
           if (!initialized) {
             initialized = true
             const appendedEvent: ConversationEvent = {
@@ -239,24 +274,32 @@ export class ConversationStore {
           continue
         }
 
-        currentGraph = applyGraphDelta(currentGraph, update.delta)
-        record.graph = currentGraph
-        this.workspaceGraphs.set(workspaceId, currentGraph)
+        if (update.type === 'delta') {
+          currentGraph = applyGraphDelta(currentGraph, update.delta)
+          record.graph = currentGraph
+          this.workspaceGraphs.set(workspaceId, currentGraph)
+          await this.persistGraphState(currentGraph)
 
-        const event: ConversationEvent = initialized
-          ? {
-              type: 'graph/diff',
-              conversationId,
-              payload: { nodes: update.delta.nodes, edges: update.delta.edges }
-            }
-          : {
-              type: 'graph/appended',
-              conversationId,
-              payload: currentGraph
-            }
+          const event: ConversationEvent = initialized
+            ? {
+                type: 'graph/diff',
+                conversationId,
+                payload: { nodes: update.delta.nodes, edges: update.delta.edges }
+              }
+            : {
+                type: 'graph/appended',
+                conversationId,
+                payload: currentGraph
+              }
 
-        await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: event })
-        initialized = true
+          await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: event })
+          initialized = true
+          continue
+        }
+
+        if (update.type === 'status') {
+          continue
+        }
       }
 
       const completeEvent: ConversationEvent = {
@@ -271,8 +314,14 @@ export class ConversationStore {
         status: 'completed',
         updatedAt: new Date()
       }
+      console.log('✅ [runConversationStream] Stream completed successfully')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      const stack = error instanceof Error ? error.stack : undefined
+      console.error('❌ [runConversationStream] Stream failed:', message)
+      if (stack) {
+        console.error('Stack trace:', stack)
+      }
       const failedEvent: ConversationEvent = {
         type: 'status',
         conversationId,

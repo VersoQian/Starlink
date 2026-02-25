@@ -7,6 +7,7 @@ import { prisma } from '../prisma'
 
 jest.mock('../services/KbService', () => ({
   KbService: {
+    list: jest.fn(),
     create: jest.fn(),
     getById: jest.fn(),
     update: jest.fn(),
@@ -81,6 +82,27 @@ beforeEach(() => {
 })
 
 describe('kb routes (unit)', () => {
+  it('GET /kb should return knowledge base list', async () => {
+    const handler = getHandler('get', '/kb')
+    const res = createMockRes()
+    ;(kbServiceMock.list as jest.Mock).mockResolvedValue([
+      { id: 'kb-1', name: 'KB1' },
+      { id: 'kb-2', name: 'KB2' }
+    ])
+
+    await handler({} as Request, res, jest.fn())
+
+    expect(kbServiceMock.list).toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        knowledgeBases: expect.arrayContaining([
+          expect.objectContaining({ id: 'kb-1' }),
+          expect.objectContaining({ id: 'kb-2' })
+        ])
+      })
+    )
+  })
+
   it('POST /kb should create knowledge base', async () => {
     const handler = getHandler('post', '/kb')
     const res = createMockRes()

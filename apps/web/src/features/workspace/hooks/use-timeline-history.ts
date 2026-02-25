@@ -1,22 +1,27 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import type { TimelineIteration } from '@/types/timeline'
+import { loadTimelineHistory } from '../lib/timeline-history-storage'
 
-export function useTimelineHistory(tenantId: string, taskId?: string) {
-  return useQuery<{ iterations: TimelineIteration[] }>({
-    queryKey: ['timeline-history', tenantId, taskId],
+export type TimelineHistoryResponse = {
+  iterations: TimelineIteration[]
+}
+
+export function useTimelineHistory(
+  workspaceId: string,
+  taskId?: string | null
+): UseQueryResult<TimelineHistoryResponse> {
+  return useQuery({
+    queryKey: ['timeline-history', workspaceId, taskId ?? null],
+    enabled: Boolean(workspaceId && taskId),
     queryFn: async () => {
-      if (!taskId) {
+      if (!workspaceId || !taskId) {
         return { iterations: [] }
       }
-      const response = await fetch(`/api/timeline/${encodeURIComponent(taskId)}?tenantId=${encodeURIComponent(tenantId)}`)
-      if (!response.ok) {
-        const message = await response.text()
-        throw new Error(message || '获取时间线失败')
+      return {
+        iterations: loadTimelineHistory(workspaceId, taskId)
       }
-      return (await response.json()) as { iterations: TimelineIteration[] }
-    },
-    enabled: Boolean(taskId)
+    }
   })
 }

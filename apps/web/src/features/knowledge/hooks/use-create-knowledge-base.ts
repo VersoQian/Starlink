@@ -1,0 +1,36 @@
+'use client'
+
+import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
+import { getGraphQLClient } from '@/shared/lib/graphql-client'
+import type { KnowledgeBaseSummary } from '@/types/knowledge'
+
+const CREATE_KNOWLEDGE_BASE_MUTATION = /* GraphQL */ `
+  mutation CreateKnowledgeBase {
+    createKnowledgeBase {
+      id
+      name
+      status
+      createdAt
+      updatedAt
+      publishedAt
+    }
+  }
+`
+
+export function useCreateKnowledgeBase(): UseMutationResult<KnowledgeBaseSummary, Error, void> {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async () => {
+      const client = getGraphQLClient()
+      const response = await client.request<{ createKnowledgeBase: KnowledgeBaseSummary }>(
+        CREATE_KNOWLEDGE_BASE_MUTATION
+      )
+      return response.createKnowledgeBase
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] })
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-base-status'] })
+    }
+  })
+}

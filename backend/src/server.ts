@@ -4,10 +4,7 @@ import helmet from 'helmet'
 import cors from 'cors'
 import path from 'node:path'
 import { kbRouter } from './routes/kb'
-import { aiRouter } from './routes/ai'
 import { errorHandler } from './middleware/error'
-import { graphqlHTTP } from 'express-graphql'
-import { schema } from './graphql/schema'
 
 const app = express()
 
@@ -30,19 +27,10 @@ app.use(morgan('dev'))
 const uploadDir = process.env.UPLOAD_DIR ?? path.resolve(process.cwd(), 'uploads')
 app.use('/uploads', express.static(uploadDir))
 
-app.use(
-  '/graphql',
-  graphqlHTTP({
-    schema,
-    graphiql: process.env.NODE_ENV !== 'production'
-  })
-)
-
 app.use(kbRouter)
-app.use(aiRouter)
 app.use(errorHandler)
 
-const port = Number(process.env.PORT ?? 4000)
+const port = Number(process.env.PORT ?? 4001)
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(port, () => {

@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:knowledge": "playwright test tests/e2e/knowledge.spec.ts",
+    "test:e2e:knowledge:flow": "playwright test tests/e2e/knowledge.spec.ts --grep @kb-flow",
+    "test:e2e:knowledge:recovery": "playwright test tests/e2e/knowledge.spec.ts --grep @kb-recovery"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.0",

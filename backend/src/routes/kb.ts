@@ -7,6 +7,15 @@ import { prisma } from '../prisma'
 
 export const kbRouter = Router()
 
+kbRouter.get('/kb', async (_req, res, next) => {
+  try {
+    const list = await KbService.list()
+    res.json({ knowledgeBases: list })
+  } catch (error) {
+    next(error)
+  }
+})
+
 kbRouter.post('/kb', async (_req, res, next) => {
   try {
     const kb = await KbService.create()

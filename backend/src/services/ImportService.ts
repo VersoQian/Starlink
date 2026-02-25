@@ -1,9 +1,10 @@
-import { DocumentSourceType, ImportStatus, ImportTask, ImportTaskType } from '@prisma/client'
+import { DocumentSourceType, ImportStatus, ImportTask } from '@prisma/client'
 import { prisma } from '../prisma'
 import { UsageService } from './UsageService'
 import { TaskRunner } from './TaskRunner'
 import { KbService } from './KbService'
 import { UploadResult } from '../types'
+import { TaskEventService } from './TaskEventService'
 
 export class ImportService {
   static async addSeed(kbId: string, text: string) {
@@ -24,6 +25,12 @@ export class ImportService {
     })
 
     await KbService.setStatus(kbId, 'processing')
+    await TaskEventService.emitTaskStatus({
+      taskId: task.id,
+      kbId,
+      taskType: task.type,
+      status: task.status
+    })
     TaskRunner.enqueue(task)
     return task
   }
@@ -51,6 +58,12 @@ export class ImportService {
         },
       })
       tasks.push(task)
+      await TaskEventService.emitTaskStatus({
+        taskId: task.id,
+        kbId,
+        taskType: task.type,
+        status: task.status
+      })
       TaskRunner.enqueue(task)
     }
     if (tasks.length) {
@@ -69,6 +82,12 @@ export class ImportService {
       },
     })
     await KbService.setStatus(kbId, 'processing')
+    await TaskEventService.emitTaskStatus({
+      taskId: task.id,
+      kbId,
+      taskType: task.type,
+      status: task.status
+    })
     TaskRunner.enqueue(task)
     return task
   }
@@ -77,6 +96,13 @@ export class ImportService {
     const task = await prisma.importTask.update({
       where: { id: taskId },
       data: { status, error },
+    })
+    await TaskEventService.emitTaskStatus({
+      taskId: task.id,
+      kbId: task.kbId,
+      taskType: task.type,
+      status: task.status,
+      error
     })
     return task
   }
@@ -89,7 +115,7 @@ export class ImportService {
     await UsageService.incrementTokens(tokens)
 
     if (task.type === 'url') {
-      const url = (task.payload as any).url as string
+      const url = (task.payload as { url?: string }).url ?? ''
       await prisma.document.create({
         data: {
           kbId: task.kbId,

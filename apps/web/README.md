@@ -51,6 +51,15 @@ npx playwright install
 # Run headless tests (dev server auto-starts)
 npm run test:e2e
 
+# Run knowledge suite only
+npm run test:e2e:knowledge
+
+# Run knowledge flow only
+npm run test:e2e:knowledge:flow
+
+# Run knowledge recovery only
+npm run test:e2e:knowledge:recovery
+
 # Run headed for debugging
 npm run test:e2e:headed
 ```

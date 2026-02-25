@@ -1,6 +1,6 @@
-# Knowledge Base Backend API
+# Knowledge Task Service
 
-Node.js + Express + TypeScript REST API supporting the knowledge-base builder front-end.
+Node.js + Express + TypeScript service for KB import/indexing pipeline.
 
 ## Prerequisites
 
@@ -10,35 +10,38 @@ Node.js + Express + TypeScript REST API supporting the knowledge-base builder fr
 ## Setup
 
 ```bash
-pnpm install
-pnpm prisma migrate dev
-pnpm dev
+npm install
+npx prisma migrate dev
+npm run dev
 ```
 
 ## Scripts
 
 | Script | Description |
 | --- | --- |
-| `pnpm dev` | Start development server with `ts-node-dev` |
-| `pnpm build` | Compile TypeScript to `dist` |
-| `pnpm start` | Run compiled server |
-| `pnpm test` | Execute Jest unit tests |
+| `npm run dev` | Start development server with `ts-node-dev` |
+| `npm run build` | Compile TypeScript to `dist` |
+| `npm run start` | Run compiled server |
+| `npm run test` | Execute Jest unit tests |
 
 ## Environment Variables
 
-Create `.env` based on `.env.example`:
+Create `.env`:
 
 ```
 DATABASE_URL="postgresql://user:password@localhost:5432/kb_dev?schema=public"
 UPLOAD_DIR="./uploads"
-PORT=4000
-DASHSCOPE_API_KEY="sk-xxxxxxxx"      # 通义千问（DashScope）API Key，必填
-TONGYI_MODEL="qwen-plus"             # 可选，自定义模型
-TONGYI_TEMPERATURE="0.0"             # 可选，生成温度
+PORT=4001
+GATEWAY_TASK_EVENT_URL="http://localhost:4000/internal/task-events"
+INTERNAL_SERVICE_TOKEN="change-me"
+TASK_EVENT_RETRY_COUNT=3
+TASK_RUNNER_DELAY_MS=300
+TASK_RUNNER_FORCE_FAILURE=false
 ```
 
 ## API Summary
 
+- `GET /kb` — list knowledge bases
 - `POST /kb` — create knowledge base
 - `GET /kb/:id` — fetch knowledge base
 - `PUT /kb/:id` — update knowledge base fields
@@ -49,4 +52,4 @@ TONGYI_TEMPERATURE="0.0"             # 可选，生成温度
 - `POST /kb/:id/publish` — publish knowledge base
 - `GET /usage` — usage counters
 
-Uploads are stored under `/uploads` (configurable) and served statically.
+The service emits task status events (`created/processing/succeeded/failed`) to gateway via `GATEWAY_TASK_EVENT_URL`.

@@ -11,6 +11,8 @@ import { useServer } from 'graphql-ws/use/ws'
 import { typeDefs } from './graphql/type-defs.js'
 import { resolvers } from './graphql/resolvers.js'
 import { createContext, createWsContext } from './context/index.js'
+import { internalRouter } from './routes/internal-task-events.js'
+import { kbProxyRouter } from './routes/kb-proxy.js'
 
 const PORT = Number(process.env.PORT ?? 4000)
 
@@ -20,6 +22,8 @@ async function start() {
   app.use(helmet())
   app.use(express.json())
   app.use(morgan('dev'))
+  app.use('/internal', internalRouter)
+  app.use('/kb', kbProxyRouter)
 
   const schema = makeExecutableSchema({ typeDefs, resolvers })
 

@@ -2,6 +2,7 @@ import { ImportService } from '../services/ImportService'
 import { prisma } from '../prisma'
 import { TaskRunner } from '../services/TaskRunner'
 import { KbService } from '../services/KbService'
+import { TaskEventService } from '../services/TaskEventService'
 
 jest.mock('../prisma', () => ({
   prisma: {
@@ -35,9 +36,16 @@ jest.mock('../services/KbService', () => ({
   },
 }))
 
+jest.mock('../services/TaskEventService', () => ({
+  TaskEventService: {
+    emitTaskStatus: jest.fn(),
+  },
+}))
+
 const prismaMock = prisma as any
 const taskRunnerMock = TaskRunner as jest.Mocked<typeof TaskRunner>
 const kbServiceMock = KbService as jest.Mocked<typeof KbService>
+const taskEventServiceMock = TaskEventService as jest.Mocked<typeof TaskEventService>
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -53,6 +61,7 @@ describe('ImportService.addSeed', () => {
     expect(prismaMock.seed.create).toHaveBeenCalled()
     expect(prismaMock.importTask.create).toHaveBeenCalled()
     expect(kbServiceMock.setStatus).toHaveBeenCalledWith('kb-1', 'processing')
+    expect(taskEventServiceMock.emitTaskStatus).toHaveBeenCalled()
     expect(taskRunnerMock.enqueue).toHaveBeenCalled()
   })
 })
@@ -69,6 +78,7 @@ describe('ImportService.addFiles', () => {
     await ImportService.addFiles('kb-1', uploads)
 
     expect(prismaMock.document.create).toHaveBeenCalledTimes(1)
+    expect(taskEventServiceMock.emitTaskStatus).toHaveBeenCalled()
     expect(taskRunnerMock.enqueue).toHaveBeenCalled()
     expect(kbServiceMock.setStatus).toHaveBeenCalledWith('kb-1', 'processing')
   })

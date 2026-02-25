@@ -1,6 +1,6 @@
-# Knowledge Base Backend API
+# GraphQL Gateway
 
-Node.js + Express + TypeScript REST API supporting the knowledge-base builder front-end.
+Express + Apollo GraphQL gateway for workspace/canvas/conversation.
 
 ## Prerequisites
 
@@ -11,39 +11,40 @@ Node.js + Express + TypeScript REST API supporting the knowledge-base builder fr
 
 ```bash
 pnpm install
-pnpm prisma migrate dev
-pnpm dev
+pnpm --filter @starlink/server dev
 ```
 
 ## Scripts
 
 | Script | Description |
 | --- | --- |
-| `pnpm dev` | Start development server with `ts-node-dev` |
-| `pnpm build` | Compile TypeScript to `dist` |
-| `pnpm start` | Run compiled server |
-| `pnpm test` | Execute Jest unit tests |
+| `pnpm --filter @starlink/server dev` | Start gateway |
+| `pnpm --filter @starlink/server build` | Compile TypeScript |
+| `pnpm --filter @starlink/server start` | Run compiled server |
+| `pnpm --filter @starlink/server lint` | Type check |
 
 ## Environment Variables
 
-Create `.env` based on `.env.example`:
+Create `.env`:
 
 ```
 DATABASE_URL="postgresql://user:password@localhost:5432/kb_dev?schema=public"
-UPLOAD_DIR="./uploads"
 PORT=4000
+INTERNAL_SERVICE_TOKEN="change-me"
+KB_TASK_SERVICE_URL="http://localhost:4001"
 ```
 
 ## API Summary
 
-- `POST /kb` — create knowledge base
-- `GET /kb/:id` — fetch knowledge base
-- `PUT /kb/:id` — update knowledge base fields
-- `POST /kb/:id/seed` — add text seed and queue task
-- `POST /kb/:id/import/file` — upload files (multipart)
-- `POST /kb/:id/import/url` — import from URL
-- `GET /kb/:id/status` — aggregated status and tasks
-- `POST /kb/:id/publish` — publish knowledge base
-- `GET /usage` — usage counters
+- `POST /graphql` — queries/mutations
+- `WS /graphql` — subscription stream
+- `POST /internal/task-events` — internal KB task event ingestion (token protected)
+- `POST /kb/:kbId/import/file` — proxy multipart file upload to task service
 
-Uploads are stored under `/uploads` (configurable) and served statically.
+The gateway keeps task status projections in memory and exposes:
+- `kbTaskStatus(kbId: ID!)`
+- `knowledgeBases`
+- `createKnowledgeBase`
+- `publishKnowledgeBase(kbId: ID!)`
+- `addKnowledgeSeed(kbId: ID!, text: String!)`
+- `importKnowledgeUrl(kbId: ID!, url: String!)`
