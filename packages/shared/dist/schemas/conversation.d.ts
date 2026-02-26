@@ -972,6 +972,23 @@ export declare const conversationMetadataSchema: z.ZodObject<{
     updatedAt: Date;
     latestQuestion?: string | undefined;
 }>;
+export declare const knowledgeEvidenceSchema: z.ZodObject<{
+    docId: z.ZodString;
+    snippet: z.ZodString;
+    score: z.ZodNumber;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, "strip", z.ZodTypeAny, {
+    docId: string;
+    snippet: string;
+    score: number;
+    metadata?: Record<string, unknown> | undefined;
+}, {
+    docId: string;
+    snippet: string;
+    score: number;
+    metadata?: Record<string, unknown> | undefined;
+}>;
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 export type ConversationEvent = z.infer<typeof conversationEventSchema>;
 export type ConversationMetadata = z.infer<typeof conversationMetadataSchema>;
+export type KnowledgeEvidence = z.infer<typeof knowledgeEvidenceSchema>;

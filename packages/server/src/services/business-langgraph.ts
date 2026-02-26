@@ -3,8 +3,13 @@ import { z } from 'zod'
 import { ChatOpenAI } from '@langchain/openai'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { Annotation, StateGraph, START, END } from '@langchain/langgraph'
-import { createAuditLogger, type CanvasEdge, type CanvasGraph, type CanvasNode } from '@starlink/shared'
-import { KnowledgeService, type KnowledgeEvidence } from './knowledge/knowledge-service.js'
+import {
+  createAuditLogger,
+  type CanvasEdge,
+  type CanvasGraph,
+  type CanvasNode,
+  type KnowledgeEvidence
+} from '@starlink/shared'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
@@ -23,123 +28,30 @@ const CC_BMC_DOMAINS = {
 
 type CCBMCDomain = (typeof CC_BMC_DOMAINS)[keyof typeof CC_BMC_DOMAINS]
 
-const CC_BMC_NODE_TYPES = {
-  CUSTOMER_SEGMENTS: 'cc-bmc-customer-segments',
-  CUSTOMER_RELATIONSHIPS: 'cc-bmc-customer-relationships',
-  CHANNELS: 'cc-bmc-channels',
-  VALUE_PROPOSITIONS: 'cc-bmc-value-propositions',
-  REVENUE_STREAMS: 'cc-bmc-revenue-streams',
-  KEY_ACTIVITIES: 'cc-bmc-key-activities',
-  KEY_RESOURCES: 'cc-bmc-key-resources',
-  KEY_PARTNERSHIPS: 'cc-bmc-key-partnerships',
-  COST_STRUCTURE: 'cc-bmc-cost-structure'
-} as const
-
-type CCBMCNodeType = (typeof CC_BMC_NODE_TYPES)[keyof typeof CC_BMC_NODE_TYPES]
-
 // ============== Agent 类型 ==============
 const AGENT_TYPES = {
-  CUSTOMER_SEGMENTS: 'CustomerSegment_Agent',
-  CUSTOMER_RELATIONSHIPS: 'CustomerRelationship_Agent',
-  CHANNELS: 'Channels_Agent',
-  VALUE_PROPOSITIONS: 'ValueProposition_Agent',
-  REVENUE_STREAMS: 'RevenueStream_Agent',
-  KEY_ACTIVITIES: 'KeyActivity_Agent',
-  KEY_RESOURCES: 'KeyResource_Agent',
-  KEY_PARTNERSHIPS: 'KeyPartnership_Agent',
-  COST_STRUCTURE: 'CostStructure_Agent',
   MARKET: 'Market_Agent',
   PRODUCT: 'Product_Agent',
   FINANCE: 'Finance_Agent',
   COMPLIANCE: 'Compliance_Agent',
-  SEMANTIC_PLAN: 'SemanticPlan_Agent',
-  CULTURAL_CONTEXT: 'CulturalContext_Agent',
-  CULTURAL_SIMULATION: 'CulturalSimulation_Agent',
-  CULTURAL_REPORT: 'CulturalReport_Agent',
   ORCHESTRATOR: 'Orchestrator',
   CRITIC: 'Adversarial_Critic'
 } as const
 
 type AgentType = (typeof AGENT_TYPES)[keyof typeof AGENT_TYPES]
 
-const MACRA_NODE_TYPES = [
-  'cc-bmc-card',
-  CC_BMC_NODE_TYPES.CUSTOMER_SEGMENTS,
-  CC_BMC_NODE_TYPES.CUSTOMER_RELATIONSHIPS,
-  CC_BMC_NODE_TYPES.CHANNELS,
-  CC_BMC_NODE_TYPES.VALUE_PROPOSITIONS,
-  CC_BMC_NODE_TYPES.REVENUE_STREAMS,
-  CC_BMC_NODE_TYPES.KEY_ACTIVITIES,
-  CC_BMC_NODE_TYPES.KEY_RESOURCES,
-  CC_BMC_NODE_TYPES.KEY_PARTNERSHIPS,
-  CC_BMC_NODE_TYPES.COST_STRUCTURE,
-  'agent-avatar',
-  'insight-note',
-  'conflict-alert',
-  'data-source',
-  'plan-node'
-] as const
-
-// ============== Agent 分组（用于两阶段执行） ==============
-const STAGE1_AGENTS = ['customerSegmentsAgent', 'valuePropositionsAgent', 'revenueStreamsAgent'] as const
-const STAGE2_AGENTS = [
-  'customerRelationshipsAgent',
-  'channelsAgent',
-  'keyActivitiesAgent',
-  'keyResourcesAgent',
-  'keyPartnershipsAgent',
-  'costStructureAgent'
-] as const
-
-// Agent节点名 → State字段名的映射
-const AGENT_NODE_MAPPING: Record<string, string> = {
-  routerAgent: 'planNodes',
-  customerSegmentsAgent: 'customerSegmentsNodes',
-  customerRelationshipsAgent: 'customerRelationshipsNodes',
-  channelsAgent: 'channelsNodes',
-  valuePropositionsAgent: 'valuePropositionsNodes',
-  revenueStreamsAgent: 'revenueStreamsNodes',
-  keyActivitiesAgent: 'keyActivitiesNodes',
-  keyResourcesAgent: 'keyResourcesNodes',
-  keyPartnershipsAgent: 'keyPartnershipsNodes',
-  costStructureAgent: 'costStructureNodes',
-  culturalContextAgent: 'culturalContextNodes',
-  culturalSimulationAgent: 'culturalSimulationNodes',
-  culturalReportAgent: 'culturalReportNodes'
-}
-
 // ============== MacraNodeData Schema（用于验证 LLM 输出） ==============
 const MacraNodeDataSchema = z.object({
   id: z.string(),
-  type: z.enum([
-    'cc-bmc-card',
-    'cc-bmc-customer-segments',
-    'cc-bmc-customer-relationships',
-    'cc-bmc-channels',
-    'cc-bmc-value-propositions',
-    'cc-bmc-revenue-streams',
-    'cc-bmc-key-activities',
-    'cc-bmc-key-resources',
-    'cc-bmc-key-partnerships',
-    'cc-bmc-cost-structure',
-    'agent-avatar',
-    'insight-note',
-    'conflict-alert',
-    'data-source',
-    'plan-node'
-  ]),
+  type: z.enum(['cc-bmc-card', 'agent-avatar', 'insight-note', 'conflict-alert', 'data-source']),
   label: z.string().max(50),
-  summary: z.string(), // 核心摘要（画布默认显示，100字内）
-  fullContent: z.string(), // 完整详细内容（展开显示，500字内）
-  content: z.string().optional(), // 向后兼容，如果没有 summary/fullContent 则使用 content
+  content: z.string(),
   domain: z.enum(Object.values(CC_BMC_DOMAINS) as [string, ...string[]]).optional(),
   metadata: z.object({
     agent_signature: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
     confidence: z.enum(['high', 'medium', 'low']).optional(),
     source: z.string().optional(),
-    tags: z.array(z.string()).optional(),
-    cultural_context: z.string().optional(),
-    semantic_status: z.enum(['pending', 'confirmed', 'needs-clarification']).optional()
+    tags: z.array(z.string()).optional()
   }),
   agentType: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
   isInteractive: z.boolean().optional(),
@@ -157,493 +69,18 @@ const IntentSchema = z.object({
 
 type Intent = z.infer<typeof IntentSchema>
 
-// ============== Prompt Templates（优化版 - 支持详细内容）==============
-
-// CC-BMC 框架整体上下文说明
-const CC_BMC_FRAMEWORK_CONTEXT = `
-【CC-BMC 商业模式分析框架】
-
-CC-BMC（Canvas Cultural Business Model）是一个9维度的系统化商业模式分析框架，帮助创业者从全局视角构建可持续的商业模式。
-
-核心维度及逻辑关系：
-
-1️⃣ **客户端（需求侧）**
-   - 客户细分 (Customer Segments)：定义目标用户群体、市场规模、用户画像
-   - 客户关系 (Customer Relationships)：设计用户互动方式、忠诚度策略、生命周期管理
-   - 渠道通路 (Channels)：规划用户触达、服务交付、品牌传播渠道
-
-2️⃣ **价值端（核心）**
-   - 价值主张 (Value Propositions)：提炼核心价值、差异化优势、解决的用户痛点
-
-3️⃣ **收入端（验证）**
-   - 收入来源 (Revenue Streams)：构建盈利模式、定价策略、收入结构
-
-4️⃣ **运营端（支撑侧）**
-   - 关键业务 (Key Activities)：支撑价值主张的核心运营活动
-   - 核心资源 (Key Resources)：实现关键业务所需的战略性资产
-   - 重要合作 (Key Partnerships)：补充核心资源、降低风险的外部协作
-
-5️⃣ **成本端（效率）**
-   - 成本结构 (Cost Structure)：分析成本构成、优化运营效率
-
-【跨维度协同关系】
-- 价值主张 ↔ 客户细分：价值主张必须精准匹配目标客户的核心需求
-- 渠道通路 ↔ 客户关系：渠道设计需要适配客户关系策略
-- 关键业务 ↔ 价值主张：关键业务必须有效支撑价值主张的实现
-- 核心资源 ↔ 关键业务：资源配置为关键业务提供战略保障
-- 重要合作 ↔ 核心资源：合作伙伴补充自身资源的不足
-- 收入来源 ↔ 价值主张：收入模式验证价值主张的市场可行性
-- 成本结构 ↔ 运营端：成本结构反映运营效率和资源利用率
-`
-
-// Agent 协作指南
-const AGENT_COLLABORATION_GUIDE = `
-【你的分析使命】
-作为 CC-BMC 分析框架的专项 Agent，你需要：
-
-1. **深度分析你负责的维度**
-   - 结合用户的具体业务场景，提供详实、可落地的分析
-   - 不仅指出"是什么"，更要解释"为什么"和"怎么做"
-
-2. **考虑与其他维度的协同关系**
-   - 你的分析不是孤立的，要主动识别与其他维度的依赖和协同
-   - 思考你的维度如何支撑或依赖其他维度
-
-3. **识别跨维度的机会和风险**
-   - 发现跨维度的协同效应（1+1>2 的机会）
-   - 警示跨维度的冲突风险（可能存在的矛盾）
-
-4. **提供战略性和可操作的建议**
-   - 基于分析提出具体的实施路径
-   - 考虑资源约束和执行优先级
-
-【其他 Agent 的职责】（你需要了解的协作背景）
-
-▸ **客户细分 Agent (Customer Segments)**
-  定义目标用户群体、市场规模、用户画像、需求特征
-
-▸ **客户关系 Agent (Customer Relationships)**
-  设计用户互动方式、忠诚度策略、留存机制、社区建设
-
-▸ **渠道通路 Agent (Channels)**
-  规划用户触达方式、服务交付路径、品牌传播渠道
-
-▸ **价值主张 Agent (Value Propositions)**
-  提炼核心价值、差异化优势、用户痛点解决方案
-
-▸ **收入来源 Agent (Revenue Streams)**
-  构建盈利模式、定价策略、收入结构优化
-
-▸ **关键业务 Agent (Key Activities)**
-  识别支撑价值主张的核心运营活动和业务流程
-
-▸ **核心资源 Agent (Key Resources)**
-  明确实现关键业务所需的战略性资产（人才、技术、资本、品牌等）
-
-▸ **重要合作 Agent (Key Partnerships)**
-  规划外部协作、供应链管理、战略联盟
-
-▸ **成本结构 Agent (Cost Structure)**
-  分析成本构成、优化运营效率、平衡成本与价值
-
-【协同思考提示】
-在你的分析中，请特别关注：
-✓ 你的维度如何支撑**价值主张**的实现？
-✓ 与哪些维度存在**强依赖关系**？
-✓ 可能产生哪些**跨维度的协同效应**？
-✓ 是否存在**潜在的跨维度冲突**？
-`
-
-const buildCommonJsonFormat = (nodeType: string) => `返回格式：JSON数组，仅1项，严格遵循以下结构：
-[{
-  "id": "auto-generated",
-  "type": "${nodeType}",
-  "domain": "对应维度",
-  "label": "简短标题(8字内)",
-  "summary": "核心摘要(100字内,3-4个要点,每点1行,Markdown格式)",
-  "fullContent": "完整详细内容(500字内,包含：\\n## 核心分析\\n- 详细要点1\\n- 详细要点2\\n\\n## 数据支撑\\n- 具体数据/趋势\\n\\n## 实施建议\\n- 可行性建议,Markdown格式)",
-  "metadata": {
-    "agent_signature": "对应Agent",
-    "confidence": "high/medium/low",
-    "source": "数据来源",
-    "tags": ["标签"],
-    "cultural_context": "适配地域"
-  }
-}]`
-
-const OPTIMIZATION_RULES = `要求：
-1. summary：简洁核心观点，100字内，3-4个要点
-2. fullContent：深入分析，500字内，包含数据支撑、案例、实施建议
-3. 数据支撑：引用具体数据/趋势/案例
-4. 地域适配：说明文化假设和区域差异
-5. 仅返回JSON数组，无其他文字`
-
-const CULTURAL_REQUIREMENTS = `地域适配：考虑目标市场的文化背景和用户习惯`
-
-const CULTURAL_CONTEXT_RULES = `要求：
-1. summary：跨文化差异的核心要点，100字内，3-4个要点
-2. fullContent：500字内，包含：\n## 核心文化差异\n- 关键差异点\n\n## 区域适配策略\n- 本地化建议\n\n## 风险与注意事项\n- 文化禁忌/合规提醒
-3. 至少覆盖2-3个不同文化/区域市场
-4. metadata.cultural_context：100字内总结跨文化适配结论
-5. 仅返回JSON数组，无其他文字`
-
-const CULTURAL_CONTEXT_JSON_FORMAT = `返回格式：JSON数组，仅1项，严格遵循以下结构：
-[{
-  "id": "auto-generated",
-  "type": "insight-note",
-  "label": "跨文化洞察",
-  "summary": "核心摘要(100字内,3-4个要点,每点1行,Markdown格式)",
-  "fullContent": "完整详细内容(500字内,Markdown格式)",
-  "metadata": {
-    "agent_signature": "CulturalContext_Agent",
-    "confidence": "high/medium/low",
-    "cultural_context": "跨文化适配结论(100字内)",
-    "tags": ["跨文化", "地域适配"]
-  }
-}]`
-
-type CulturalScenario = {
-  id: string
-  title: string
-  category: string
-  description: string
-  goal: string
-  level: string
-}
-
-type CulturalReportTemplate = {
-  id: string
-  name: string
-  description: string
-  tones: string[]
-}
-
-const CULTURAL_SIMULATION_SCENARIOS: CulturalScenario[] = [
-  {
-    id: 'cn-negotiation',
-    title: '与中国合作伙伴谈判',
-    category: '谈判',
-    description: '兼顾礼节与价格博弈，建立信任并争取最佳条款。',
-    goal: '平衡价格与长期合作关系，避免失礼',
-    level: '中级'
-  },
-  {
-    id: 'kr-presentation',
-    title: '韩国客户技术演示',
-    category: '演示',
-    description: '结构化讲解产品价值，处理尖锐的现场提问。',
-    goal: '突出差异化与本地化支持',
-    level: '中高级'
-  },
-  {
-    id: 'us-support',
-    title: '处理美国客户升级投诉',
-    category: '客服',
-    description: '高压情境下保持同理心并提供可执行补救方案。',
-    goal: '降级情绪并锁定解决方案',
-    level: '初中级'
-  }
-]
-
-const CULTURAL_REPORT_TEMPLATES: CulturalReportTemplate[] = [
-  {
-    id: 'talent-report',
-    name: '人才培养报告',
-    description: '评估现状、能力模型与行动规划',
-    tones: ['正式', '中性', '鼓励']
-  },
-  {
-    id: 'market-brief',
-    name: '市场进入简报',
-    description: 'APAC 市场洞察与落地路线',
-    tones: ['正式', '简洁', '行动导向']
-  },
-  {
-    id: 'partnership-proposal',
-    name: '合作提案',
-    description: '价格、里程碑与风险说明',
-    tones: ['合作', '稳健', '务实']
-  }
-]
-
-const CULTURAL_SIMULATION_RULES = `要求：
-1. summary：包含对方回应、礼节提示、策略建议、风险提醒
-2. fullContent：包含模拟对话、建议话术、下一步动作
-3. 至少给出3条可执行的后续回复建议
-4. metadata.cultural_context：总结适配文化差异
-5. 仅返回JSON数组，无其他文字`
-
-const CULTURAL_SIMULATION_JSON_FORMAT = `返回格式：JSON数组，仅1项，严格遵循以下结构：
-[{
-  "id": "auto-generated",
-  "type": "insight-note",
-  "label": "跨文化沟通模拟",
-  "summary": "核心摘要(100字内,3-4个要点,每点1行,Markdown格式)",
-  "fullContent": "完整详细内容(500字内,Markdown格式)",
-  "metadata": {
-    "agent_signature": "CulturalSimulation_Agent",
-    "confidence": "high/medium/low",
-    "cultural_context": "跨文化适配结论(100字内)",
-    "tags": ["跨文化", "沟通模拟"]
-  }
-}]`
-
-const CULTURAL_REPORT_RULES = `要求：
-1. summary：报告要点摘要，100字内
-2. fullContent：包含结构化报告（现状/洞察/策略/行动）
-3. 至少提供3条落地动作
-4. metadata.cultural_context：总结跨文化注意事项
-5. 仅返回JSON数组，无其他文字`
-
-const CULTURAL_REPORT_JSON_FORMAT = `返回格式：JSON数组，仅1项，严格遵循以下结构：
-[{
-  "id": "auto-generated",
-  "type": "insight-note",
-  "label": "跨文化策略报告",
-  "summary": "核心摘要(100字内,3-4个要点,每点1行,Markdown格式)",
-  "fullContent": "完整详细内容(500字内,Markdown格式)",
-  "metadata": {
-    "agent_signature": "CulturalReport_Agent",
-    "confidence": "high/medium/low",
-    "cultural_context": "跨文化适配结论(100字内)",
-    "tags": ["跨文化", "策略报告"]
-  }
-}]`
-
-const SEMANTIC_PLAN_RULES = `要求：
-1. summary：100字内，包含任务目标、关键假设、待确认问题（每点1行，Markdown 列表）
-2. fullContent：包含任务理解、关键假设、待确认问题三段内容
-3. 所有内容需聚焦用户输入，不要扩写虚构信息
-4. 仅返回JSON数组，无其他文字`
-
-const SEMANTIC_PLAN_JSON_FORMAT = `返回格式：JSON数组，仅1项，严格遵循以下结构：
-[{
-  "id": "auto-generated",
-  "type": "plan-node",
-  "label": "语义确认",
-  "summary": "核心摘要(100字内,3-4个要点,每点1行,Markdown格式)",
-  "fullContent": "完整详细内容(500字内,包含：\\n## 任务理解\\n- 要点\\n\\n## 关键假设\\n- 要点\\n\\n## 待确认问题\\n- 要点,Markdown格式)",
-  "metadata": {
-    "agent_signature": "SemanticPlan_Agent",
-    "confidence": "high/medium/low",
-    "tags": ["语义确认"]
-  }
-}]`
-
-const readBooleanEnv = (key: string, defaultValue: boolean) => {
-  const rawValue = process.env[key]
-  if (rawValue === undefined) return defaultValue
-  const normalized = rawValue.trim().toLowerCase()
-  if (!normalized) return defaultValue
-  return ['1', 'true', 'yes', 'on'].includes(normalized)
-}
-
-// 延迟辅助函数，用于避免触发 API 限流
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
-const ENABLE_CULTURAL_SKILLS = readBooleanEnv('ENABLE_CULTURAL_SKILLS', true)
-const ENABLE_SEMANTIC_PLAN = readBooleanEnv('ENABLE_SEMANTIC_PLAN', true)
-
-// 增强版 Prompt 生成器（包含框架上下文和协作指南）
-function createEnhancedAgentPrompt(config: {
-  agentName: string
-  domain: string
-  focus: string
-  question: string
-  nodeType: CCBMCNodeType
-  relatedDimensions?: string[]  // 新增：与当前维度强相关的其他维度
-  knowledgeEvidence?: KnowledgeEvidence[]
-}): string {
-  const relatedDimensionsHint = config.relatedDimensions && config.relatedDimensions.length > 0
-    ? `
-【特别关注与以下维度的协同关系】
-你的分析需要特别考虑与以下维度的依赖、支撑或协同关系：
-${config.relatedDimensions.map(d => `  • ${d}`).join('\n')}
-
-思考：
-- 你的维度如何支撑或依赖这些维度？
-- 是否存在跨维度的协同效应或潜在冲突？
-- 如何通过跨维度协作创造更大价值？
-`
-    : ''
-
-  const evidenceSection = config.knowledgeEvidence && config.knowledgeEvidence.length > 0
-    ? `
-【知识库参考】
-${config.knowledgeEvidence.map((item) => `- [${item.docId}] ${item.snippet}`).join('\n')}
-`
-    : ''
-
-  return `${CC_BMC_FRAMEWORK_CONTEXT}
-
-${AGENT_COLLABORATION_GUIDE}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【你的角色】
-你是 ${config.agentName}，负责分析 CC-BMC 维度：${config.domain}
-
-【分析重点】
-${config.focus}
-
-【用户问题】
-${config.question}
-${relatedDimensionsHint}
-${evidenceSection}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-${OPTIMIZATION_RULES}
-
-${buildCommonJsonFormat(config.nodeType)}`
-}
-
-function pickCulturalScenario(question: string): CulturalScenario {
-  const text = question.toLowerCase()
-
-  if (text.includes('投诉') || text.includes('客服') || text.includes('支持') || text.includes('美国')) {
-    return CULTURAL_SIMULATION_SCENARIOS[2]
-  }
-
-  if (text.includes('演示') || text.includes('展示') || text.includes('路演') || text.includes('韩国')) {
-    return CULTURAL_SIMULATION_SCENARIOS[1]
-  }
-
-  if (text.includes('谈判') || text.includes('价格') || text.includes('合同') || text.includes('中国')) {
-    return CULTURAL_SIMULATION_SCENARIOS[0]
-  }
-
-  return CULTURAL_SIMULATION_SCENARIOS[0]
-}
-
-function pickCulturalReportTemplate(question: string): CulturalReportTemplate {
-  const text = question.toLowerCase()
-
-  if (text.includes('人才') || text.includes('培训') || text.includes('招聘')) {
-    return CULTURAL_REPORT_TEMPLATES[0]
-  }
-
-  if (text.includes('合作') || text.includes('伙伴') || text.includes('联盟')) {
-    return CULTURAL_REPORT_TEMPLATES[2]
-  }
-
-  if (text.includes('市场') || text.includes('进入') || text.includes('出海')) {
-    return CULTURAL_REPORT_TEMPLATES[1]
-  }
-
-  return CULTURAL_REPORT_TEMPLATES[1]
-}
-
-function shouldRunCulturalSkills(question: string): boolean {
-  if (!ENABLE_CULTURAL_SKILLS) return false
-  const text = question.toLowerCase()
-  const directKeywords = [
-    '跨文化',
-    '文化差异',
-    '文化适配',
-    '文化背景',
-    '文化冲突',
-    '跨境沟通',
-    '商务礼仪',
-    '礼节',
-    '本地化',
-    '国际化',
-    '出海',
-    '海外',
-    '跨境',
-    '全球',
-    '多语言',
-    '区域差异'
-  ]
-
-  if (directKeywords.some((keyword) => text.includes(keyword))) {
-    return true
-  }
-
-  const regionKeywords = [
-    '北美',
-    '欧洲',
-    '中东',
-    '拉美',
-    '东南亚',
-    '亚太',
-    '日韩',
-    '日本',
-    '韩国',
-    '美国',
-    '英国',
-    '德国',
-    '法国',
-    '加拿大',
-    '澳洲',
-    '澳大利亚',
-    '新加坡',
-    '印度'
-  ]
-  const expansionKeywords = [
-    '市场',
-    '进入',
-    '落地',
-    '合作',
-    '谈判',
-    '营销',
-    '销售',
-    '运营',
-    '合规',
-    '渠道',
-    '本地'
-  ]
-
-  const hasRegion = regionKeywords.some((keyword) => text.includes(keyword))
-  const hasExpansion = expansionKeywords.some((keyword) => text.includes(keyword))
-
-  return hasRegion && hasExpansion
-}
-
-function shouldRunSemanticPlan(question: string, intent?: Intent['intent'] | null): boolean {
-  if (!ENABLE_SEMANTIC_PLAN) return false
-  if (!question.trim()) return false
-  if (intent === 'detect_conflicts') return false
-  return true
-}
-
-// 维度关联映射：定义每个维度与哪些其他维度有强协同关系
-const DIMENSION_RELATIONSHIPS: Record<string, string[]> = {
-  '客户细分 (Customer Segments)': ['价值主张 (Value Propositions)', '客户关系 (Customer Relationships)', '渠道通路 (Channels)'],
-  '客户关系 (Customer Relationships)': ['客户细分 (Customer Segments)', '渠道通路 (Channels)', '收入来源 (Revenue Streams)'],
-  '渠道通路 (Channels)': ['客户细分 (Customer Segments)', '客户关系 (Customer Relationships)', '关键业务 (Key Activities)'],
-  '价值主张 (Value Propositions)': ['客户细分 (Customer Segments)', '关键业务 (Key Activities)', '收入来源 (Revenue Streams)'],
-  '收入来源 (Revenue Streams)': ['价值主张 (Value Propositions)', '客户关系 (Customer Relationships)', '成本结构 (Cost Structure)'],
-  '关键业务 (Key Activities)': ['价值主张 (Value Propositions)', '核心资源 (Key Resources)', '成本结构 (Cost Structure)'],
-  '核心资源 (Key Resources)': ['关键业务 (Key Activities)', '重要合作 (Key Partnerships)', '成本结构 (Cost Structure)'],
-  '重要合作 (Key Partnerships)': ['核心资源 (Key Resources)', '关键业务 (Key Activities)', '成本结构 (Cost Structure)'],
-  '成本结构 (Cost Structure)': ['关键业务 (Key Activities)', '核心资源 (Key Resources)', '收入来源 (Revenue Streams)']
-}
-
 // ============== LangGraph State ==============
 const BusinessState = Annotation.Root({
   workspaceId: Annotation<string>(),
   userId: Annotation<string>(),
   question: Annotation<string>(),
   intent: Annotation<Intent | null>(),
-  planNodes: Annotation<MacraNodeData[]>(),
-  customerSegmentsNodes: Annotation<MacraNodeData[]>(),
-  customerRelationshipsNodes: Annotation<MacraNodeData[]>(),
-  channelsNodes: Annotation<MacraNodeData[]>(),
-  valuePropositionsNodes: Annotation<MacraNodeData[]>(),
-  revenueStreamsNodes: Annotation<MacraNodeData[]>(),
-  keyActivitiesNodes: Annotation<MacraNodeData[]>(),
-  keyResourcesNodes: Annotation<MacraNodeData[]>(),
-  keyPartnershipsNodes: Annotation<MacraNodeData[]>(),
-  costStructureNodes: Annotation<MacraNodeData[]>(),
-  culturalContextNodes: Annotation<MacraNodeData[]>(),
-  culturalSimulationNodes: Annotation<MacraNodeData[]>(),
-  culturalReportNodes: Annotation<MacraNodeData[]>(),
+  marketNodes: Annotation<MacraNodeData[]>(),
+  productNodes: Annotation<MacraNodeData[]>(),
+  financeNodes: Annotation<MacraNodeData[]>(),
+  agentAvatars: Annotation<MacraNodeData[]>(),
   conflicts: Annotation<MacraNodeData[]>(),
-  edges: Annotation<CanvasEdge[]>(),
-  knowledgeEvidence: Annotation<KnowledgeEvidence[]>(),
-
-  // 两阶段协作相关字段
-  stage1Complete: Annotation<boolean>(),
-  stage1Summary: Annotation<string>()
+  edges: Annotation<CanvasEdge[]>()
 })
 
 type BusinessStateType = typeof BusinessState.State
@@ -663,27 +100,8 @@ export type BusinessStreamUpdate =
 export class BusinessLangGraphService {
   private readonly model: ChatOpenAI | null
 
-  private readonly knowledgeService = new KnowledgeService()
-
   constructor() {
     this.model = createLLMModel()
-  }
-
-  private async gatherKnowledgeEvidence(question: string): Promise<KnowledgeEvidence[]> {
-    // 临时禁用知识库检索，避免 embedding API 超时
-    return []
-
-    /* 原实现
-    try {
-      return await this.knowledgeService.search(question, 3)
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.gatherKnowledgeEvidence',
-        metadata: { error: String(error) }
-      })
-      return []
-    }
-    */
   }
 
   async *streamConversation(context: {
@@ -691,17 +109,13 @@ export class BusinessLangGraphService {
     userId: string
     question: string
   }): AsyncGenerator<BusinessStreamUpdate> {
-    console.log('🚀 [StreamConversation] Starting...', { question: context.question })
     const builder = new BusinessCanvasBuilder(context.workspaceId, context.userId, context.question)
-    const knowledgeEvidence = await this.gatherKnowledgeEvidence(context.question)
 
     // 1. 初始化画布（发送 init 事件）
-    console.log('📊 [StreamConversation] Yielding init event')
-    yield { type: 'init', graph: builder.getGraph(), knowledgeEvidence }
+    yield { type: 'init', graph: builder.getGraph() }
 
     // 2. 如果没有 LLM 配置，返回简单的提示节点
     if (!this.model) {
-      console.error('❌ [StreamConversation] LLM not configured')
       auditLogger.warn({
         action: 'business-langgraph.streamConversation',
         metadata: { message: 'LLM not configured, returning fallback node' }
@@ -715,11 +129,9 @@ export class BusinessLangGraphService {
     }
 
     // 3. 创建 LangGraph
-    console.log('🔧 [StreamConversation] Creating LangGraph')
     const graph = this.createGraph()
 
     try {
-      console.log('▶️  [StreamConversation] Starting LangGraph stream...')
       // 4. 执行 LangGraph（流式模式）
       const stream = await graph.stream(
         {
@@ -727,38 +139,23 @@ export class BusinessLangGraphService {
           userId: context.userId,
           question: context.question,
           intent: null,
-          planNodes: [],
-          customerSegmentsNodes: [],
-          customerRelationshipsNodes: [],
-          channelsNodes: [],
-          valuePropositionsNodes: [],
-          revenueStreamsNodes: [],
-          keyActivitiesNodes: [],
-          keyResourcesNodes: [],
-          keyPartnershipsNodes: [],
-          costStructureNodes: [],
-          culturalContextNodes: [],
-          culturalSimulationNodes: [],
-          culturalReportNodes: [],
+          marketNodes: [],
+          productNodes: [],
+          financeNodes: [],
+          agentAvatars: [],
           conflicts: [],
-          edges: [],
-          stage1Complete: false,
-          stage1Summary: '',
-          knowledgeEvidence
+          edges: []
         },
         { streamMode: 'updates' }
       )
 
-      console.log('⏳ [StreamConversation] Waiting for updates...')
-      let updateCount = 0
       // 5. 逐节点推送更新
       for await (const update of stream) {
-        updateCount++
-        console.log(`📦 [StreamConversation] Update #${updateCount}:`, Object.keys(update))
         const entries = Object.entries(update as Record<string, Record<string, unknown>>)
 
         for (const [nodeName, payload] of entries) {
-          console.log(`  🔸 [${nodeName}] Processing...`, Object.keys(payload))
+          // Debug log (commented out for production)
+          // console.log('business-langgraph.nodeUpdate', { nodeName, payload })
 
           // Router Agent
           if (nodeName === 'routerAgent' && payload.intent) {
@@ -772,10 +169,25 @@ export class BusinessLangGraphService {
             }
           }
 
-          // Domain Agents (统一处理9个维度Agent)
-          const stateField = AGENT_NODE_MAPPING[nodeName]
-          if (stateField && payload[stateField]) {
-            const nodes = payload[stateField] as MacraNodeData[]
+          // Market Agent
+          if (nodeName === 'marketAgent' && payload.marketNodes) {
+            const nodes = payload.marketNodes as MacraNodeData[]
+            for (const node of nodes) {
+              yield { type: 'delta', delta: builder.addMacraNode(node) }
+            }
+          }
+
+          // Product Agent
+          if (nodeName === 'productAgent' && payload.productNodes) {
+            const nodes = payload.productNodes as MacraNodeData[]
+            for (const node of nodes) {
+              yield { type: 'delta', delta: builder.addMacraNode(node) }
+            }
+          }
+
+          // Finance Agent
+          if (nodeName === 'financeAgent' && payload.financeNodes) {
+            const nodes = payload.financeNodes as MacraNodeData[]
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -783,6 +195,12 @@ export class BusinessLangGraphService {
 
           // Orchestrator
           if (nodeName === 'orchestrator') {
+            if (payload.agentAvatars) {
+              const avatars = payload.agentAvatars as MacraNodeData[]
+              for (const avatar of avatars) {
+                yield { type: 'delta', delta: builder.addMacraNode(avatar) }
+              }
+            }
             if (payload.edges) {
               const edges = payload.edges as CanvasEdge[]
               yield { type: 'delta', delta: { edges } }
@@ -799,18 +217,12 @@ export class BusinessLangGraphService {
         }
       }
 
-      console.log(`✅ [StreamConversation] Completed! Total updates: ${updateCount}`)
       yield { type: 'status', status: 'completed' }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      const stack = error instanceof Error ? error.stack : undefined
-      console.error('❌ [StreamConversation] Error:', message)
-      if (stack) {
-        console.error('Stack trace:', stack)
-      }
       auditLogger.error({
         action: 'business-langgraph.streamConversation',
-        metadata: { error: message, stack }
+        metadata: { error: message }
       })
       yield {
         type: 'delta',
@@ -823,59 +235,24 @@ export class BusinessLangGraphService {
   private createGraph() {
     return new StateGraph(BusinessState)
       .addNode('routerAgent', async (state) => this.routeIntent(state))
-      // Stage 1: 核心三维度
-      .addNode('customerSegmentsAgent', async (state) => this.runCustomerSegmentsAgent(state))
-      .addNode('valuePropositionsAgent', async (state) => this.runValuePropositionsAgent(state))
-      .addNode('revenueStreamsAgent', async (state) => this.runRevenueStreamsAgent(state))
-      // Stage 1 Aggregator: 同步点
-      .addNode('stage1Aggregator', async (state) => this.aggregateStage1(state))
-      // Stage 2: 支撑六维度
-      .addNode('customerRelationshipsAgent', async (state) => this.runCustomerRelationshipsAgent(state))
-      .addNode('channelsAgent', async (state) => this.runChannelsAgent(state))
-      .addNode('keyActivitiesAgent', async (state) => this.runKeyActivitiesAgent(state))
-      .addNode('keyResourcesAgent', async (state) => this.runKeyResourcesAgent(state))
-      .addNode('keyPartnershipsAgent', async (state) => this.runKeyPartnershipsAgent(state))
-      .addNode('costStructureAgent', async (state) => this.runCostStructureAgent(state))
-      // Orchestrator & Critic
+      .addNode('marketAgent', async (state) => this.runMarketAgent(state))
+      .addNode('productAgent', async (state) => this.runProductAgent(state))
+      .addNode('financeAgent', async (state) => this.runFinanceAgent(state))
       .addNode('orchestrator', async (state) => this.orchestrate(state))
-      .addNode('culturalContextAgent', async (state) => this.runCulturalContextAgent(state))
-      .addNode('culturalSimulationAgent', async (state) => this.runCulturalSimulationAgent(state))
-      .addNode('culturalReportAgent', async (state) => this.runCulturalReportAgent(state))
       .addNode('critic', async (state) => this.runCritic(state))
-      // Start
       .addEdge(START, 'routerAgent')
-      // Router → Stage 1 (3 core dimensions)
       .addConditionalEdges('routerAgent', (state) => {
         const intent = state.intent?.intent || 'general'
-        console.log(`🔀 [Graph Routing] Intent: ${intent}`)
         if (intent === 'generate_bmc') {
-          // 两阶段模式：先执行核心3维度
-          console.log(`  ➡️  Routing to Stage1 Agents: ${STAGE1_AGENTS.join(', ')}`)
-          return [...STAGE1_AGENTS]
+          return ['marketAgent', 'productAgent', 'financeAgent']
         }
         if (intent === 'detect_conflicts') {
-          console.log('  ➡️  Routing to Critic')
           return ['critic']
         }
-        console.log('  ➡️  Routing to Orchestrator (general intent)')
         return ['orchestrator']
       })
-      // Stage 1 → Stage 1 Aggregator (同步点)
-      .addEdge([...STAGE1_AGENTS], 'stage1Aggregator')
-      // Stage 1 Aggregator → Stage 2 (6 supporting dimensions)
-      .addConditionalEdges('stage1Aggregator', () => [...STAGE2_AGENTS])
-      // Stage 2 → Orchestrator
-      .addEdge([...STAGE2_AGENTS], 'orchestrator')
-      // Orchestrator → Cultural Context → Cultural Skills → Critic → END
-      .addConditionalEdges('orchestrator', (state) => {
-        if (shouldRunCulturalSkills(state.question)) {
-          return ['culturalContextAgent']
-        }
-        return ['critic']
-      })
-      .addEdge('culturalContextAgent', 'culturalSimulationAgent')
-      .addEdge('culturalSimulationAgent', 'culturalReportAgent')
-      .addEdge('culturalReportAgent', 'critic')
+      .addEdge(['marketAgent', 'productAgent', 'financeAgent'], 'orchestrator')
+      .addEdge('orchestrator', 'critic')
       .addEdge('critic', END)
       .compile()
   }
@@ -883,10 +260,8 @@ export class BusinessLangGraphService {
   // ============== Agent Nodes ==============
 
   private async routeIntent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    console.log('🧭 [routeIntent] Starting intent classification...')
     if (!this.model) {
-      console.log('❌ [routeIntent] No LLM model configured')
-      return { intent: { intent: 'general', reasoning: 'LLM not configured' }, planNodes: [] }
+      return { intent: { intent: 'general', reasoning: 'LLM not configured' } }
     }
 
     const prompt = `你是意图路由器，需要判断用户的需求类型。
@@ -894,776 +269,295 @@ export class BusinessLangGraphService {
 用户问题：${state.question}
 
 请分析用户意图，返回以下之一：
-
-**优先级1（最常用）：generate_bmc**
-只要用户问题涉及以下任何方面，都应该选择 generate_bmc：
-- 商业模式、商业分析、业务分析
-- 市场分析、行业分析、竞争分析
-- 品牌发展、企业发展、战略规划
-- 产品、服务、客户、渠道、收入、成本等商业要素
-- 创业、投资、融资、盈利模式
-- 即使用户没有明确说"生成画布"或"CC-BMC"，只要涉及商业话题，就选择此项
-
-**优先级2（仅限特殊场景）：analyze**
-- 用户已经有现成的画布或分析结果，要求进一步分析或提供建议
-- 用户明确说"分析我的XXX"或"优化我的XXX"
-
-**优先级3（仅限冲突检测）：detect_conflicts**
-- 用户明确要求检测逻辑冲突、矛盾、风险
-
-**优先级4（极少使用）：general**
-- 纯粹的闲聊、问候
-- 与商业无关的通用问题（如天气、新闻等）
+- generate_bmc: 用户希望生成完整的商业模型画布（CC-BMC 九大维度）
+- analyze: 用户希望分析现有画布或获取建议
+- detect_conflicts: 用户希望检测逻辑冲突或矛盾
+- general: 通用对话或信息查询
 
 返回 JSON 格式：
 {
   "intent": "generate_bmc",
-  "reasoning": "用户提到了'新能源汽车市场'和'品牌发展'，属于商业分析范畴，应该生成完整的 CC-BMC 画布来系统化分析"
+  "reasoning": "用户提到了'新能源汽车市场'并要求'分析商业模式'，应该生成完整的 CC-BMC 画布"
 }
 `
 
-    let result: Intent
-
     try {
-      console.log('🤖 [routeIntent] Calling LLM for intent classification...')
       const structured = this.model.withStructuredOutput(IntentSchema, {
         name: 'IntentClassification',
         strict: true
       })
-      result = await structured.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      console.log('✅ [routeIntent] Intent classified:', result)
+      const result = await structured.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
+      return { intent: result }
     } catch (error) {
-      console.error('❌ [routeIntent] Intent classification failed:', String(error))
       auditLogger.error({
         action: 'business-langgraph.routeIntent',
         metadata: { error: String(error) }
       })
-      result = { intent: 'generate_bmc', reasoning: 'Failed to classify intent, defaulting to generate_bmc' }
-      console.log('🔄 [routeIntent] Using fallback intent:', result)
-    }
-
-    const planNodes = await this.buildSemanticPlanNodes(state.question, result)
-    console.log(`📋 [routeIntent] Generated ${planNodes.length} plan nodes`)
-    return { intent: result, planNodes }
-  }
-
-  private async buildSemanticPlanNodes(question: string, intent: Intent): Promise<MacraNodeData[]> {
-    if (!this.model) return []
-    if (!shouldRunSemanticPlan(question, intent.intent)) return []
-
-    const intentSummary = `用户意图：${intent.intent}\n意图判断：${intent.reasoning}`
-    const prompt = `你是语义确认 Agent，需要把用户需求整理成可确认的理解清单，帮助用户确认你是否理解正确。
-
-用户问题：${question}
-
-${intentSummary}
-
-${SEMANTIC_PLAN_RULES}
-
-${SEMANTIC_PLAN_JSON_FORMAT}`
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(question)])
-      const content = response.content as string
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runSemanticPlanAgent'), 'runSemanticPlanAgent')
-
-      if (nodes.length === 0) {
-        return []
-      }
-
-      return nodes.map((node) => ({
-        ...node,
-        id: `semantic-plan-${nanoid(8)}`,
-        type: 'plan-node' as const,
-        label: node.label || '语义确认',
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.SEMANTIC_PLAN,
-          semantic_status: node.metadata?.semantic_status ?? 'pending'
-        }
-      }))
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.buildSemanticPlanNodes',
-        metadata: { error: String(error) }
-      })
-      return []
+      return { intent: { intent: 'generate_bmc', reasoning: 'Failed to classify intent, defaulting to generate_bmc' } }
     }
   }
 
-  private async runCustomerSegmentsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { customerSegmentsNodes: [] }
+  private async runMarketAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    if (!this.model) return { marketNodes: [] }
 
-    const prompt = createEnhancedAgentPrompt({
-      agentName: 'CustomerSegment_Agent（客户细分专家）',
-      domain: '客户细分 (Customer Segments)',
-      focus: '目标客户群体、用户画像、市场规模、需求特征',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.CUSTOMER_SEGMENTS,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['客户细分 (Customer Segments)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
+    const prompt = `你是 Market_Agent（市场分析专家），负责生成 CC-BMC 商业模型画布中的三个维度：
+
+1. **客户细分** (CUSTOMER_SEGMENTS)：目标客户群体、用户画像、市场规模
+2. **渠道通路** (CHANNELS)：如何触达客户、线上/线下渠道、分发策略
+3. **客户关系** (CUSTOMER_RELATIONSHIPS)：如何维系客户、服务模式、用户粘性
+
+用户问题：${state.question}
+
+请生成 3 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 market-xxxxx）
+- type: "cc-bmc-card"
+- domain: "客户细分" | "渠道通路" | "客户关系"
+- label: 简短标题（10 字以内）
+- content: 详细分析（Markdown 格式，包含数据、趋势、建议）
+- metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+
+示例：
+[
+  {
+    "id": "market-${nanoid(8)}",
+    "type": "cc-bmc-card",
+    "domain": "客户细分",
+    "label": "目标客户群体",
+    "content": "## 核心客户\\n1. **城市中产家庭** (35-50岁)\\n   - 环保意识强\\n   - 占比 45%\\n2. **商用车队运营商**\\n   - 注重 TCO\\n   - 占比 30%",
+    "metadata": {
+      "agent_signature": "Market_Agent",
+      "confidence": "high",
+      "source": "基于中汽协 2024 年度报告",
+      "tags": ["B2C", "B2B"]
+    }
+  }
+]
+`
 
     try {
       const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
       const content = response.content as string
 
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runCustomerSegmentsAgent'), 'runCustomerSegmentsAgent')
+      // 使用增强的 JSON 解析函数
+      const nodes = extractAndParseJSON(content, 'runMarketAgent')
 
       if (nodes.length === 0) {
-        return { customerSegmentsNodes: [] }
+        return { marketNodes: [] }
+      }
+
+      // 验证和规范化
+      const validatedNodes = nodes.map((node) => ({
+        ...node,
+        id: `market-${nanoid(8)}`,
+        type: 'cc-bmc-card' as const,
+        metadata: {
+          ...node.metadata,
+          agent_signature: AGENT_TYPES.MARKET
+        }
+      }))
+
+      return { marketNodes: validatedNodes }
+    } catch (error) {
+      auditLogger.error({
+        action: 'business-langgraph.runMarketAgent',
+        metadata: { error: String(error) }
+      })
+      return { marketNodes: [] }
+    }
+  }
+
+  private async runProductAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    if (!this.model) return { productNodes: [] }
+
+    const prompt = `你是 Product_Agent（产品策略专家），负责生成 CC-BMC 商业模型画布中的三个维度：
+
+1. **价值主张** (VALUE_PROPOSITIONS)：核心价值、差异化优势、解决的痛点
+2. **核心资源** (KEY_RESOURCES)：关键资产、技术能力、人才团队
+3. **关键业务** (KEY_ACTIVITIES)：核心活动、业务流程、运营重点
+
+用户问题：${state.question}
+
+请生成 3 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 product-xxxxx）
+- type: "cc-bmc-card"
+- domain: "价值主张" | "核心资源" | "关键业务"
+- label: 简短标题（5-8 字）
+- content: 简洁分析（Markdown 格式，3-5 个要点，每个要点 1 行，总计 100 字以内）
+- metadata: { agent_signature: "Product_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+
+**重要**：content 必须简洁，避免过长描述。
+
+示例：
+[
+  {
+    "id": "product-abc123",
+    "type": "cc-bmc-card",
+    "domain": "价值主张",
+    "label": "智能驾驶",
+    "content": "## 核心价值\\n- L2+ 自动驾驶\\n- OTA 升级\\n- 零排放低成本",
+    "metadata": {
+      "agent_signature": "Product_Agent",
+      "confidence": "high",
+      "source": "行业报告",
+      "tags": ["科技", "体验"]
+    }
+  }
+]
+`
+
+    try {
+      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
+      const content = response.content as string
+
+      // 使用增强的 JSON 解析函数
+      const nodes = extractAndParseJSON(content, 'runProductAgent')
+
+      if (nodes.length === 0) {
+        return { productNodes: [] }
       }
 
       const validatedNodes = nodes.map((node) => ({
         ...node,
-        id: `customer-segment-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.CUSTOMER_SEGMENTS,
-        domain: CC_BMC_DOMAINS.CUSTOMER_SEGMENTS,
+        id: `product-${nanoid(8)}`,
+        type: 'cc-bmc-card' as const,
         metadata: {
           ...node.metadata,
-          agent_signature: AGENT_TYPES.CUSTOMER_SEGMENTS
+          agent_signature: AGENT_TYPES.PRODUCT
         }
       }))
 
-      return { customerSegmentsNodes: validatedNodes }
+      return { productNodes: validatedNodes }
     } catch (error) {
       auditLogger.error({
-        action: 'business-langgraph.runCustomerSegmentsAgent',
+        action: 'business-langgraph.runProductAgent',
         metadata: { error: String(error) }
       })
-      return { customerSegmentsNodes: [] }
+      return { productNodes: [] }
     }
   }
 
-  private async runCustomerRelationshipsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { customerRelationshipsNodes: [] }
+  private async runFinanceAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    if (!this.model) return { financeNodes: [] }
 
-    // 添加延迟避免触发 API 限流（Stage2 Agent）
-    await delay(300)
+    const prompt = `你是 Finance_Agent（财务分析专家），负责生成 CC-BMC 商业模型画布中的两个维度：
 
-    let prompt = createEnhancedAgentPrompt({
-      agentName: 'CustomerRelationship_Agent（客户关系专家）',
-      domain: '客户关系 (Customer Relationships)',
-      focus: '维系客户方式、服务模式、用户粘性、触点管理',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.CUSTOMER_RELATIONSHIPS,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['客户关系 (Customer Relationships)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
+1. **收入来源** (REVENUE_STREAMS)：商业模式、定价策略、收入结构
+2. **成本结构** (COST_STRUCTURE)：主要成本、成本控制、盈利能力
 
-    // 注入第一阶段上下文（如果存在）
-    if (state.stage1Summary) {
-      prompt = `${prompt}\n\n${state.stage1Summary}`
+用户问题：${state.question}
+
+请生成 2 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
+- id: 自动生成（格式 finance-xxxxx）
+- type: "cc-bmc-card"
+- domain: "收入来源" | "成本结构"
+- label: 简短标题（10 字以内）
+- content: 详细分析（Markdown 格式，包含数据、趋势、建议）
+- metadata: { agent_signature: "Finance_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+
+示例：
+[
+  {
+    "id": "finance-${nanoid(8)}",
+    "type": "cc-bmc-card",
+    "domain": "收入来源",
+    "label": "多元收入模式",
+    "content": "## 收入结构\\n1. **车辆销售** (70%)\\n   - 平均售价 25万\\n2. **增值服务** (20%)\\n   - FSD 订阅\\n3. **充电网络** (10%)",
+    "metadata": {
+      "agent_signature": "Finance_Agent",
+      "confidence": "high",
+      "source": "基于财报数据",
+      "tags": ["营收", "订阅"]
     }
+  }
+]
+`
 
     try {
       const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
       const content = response.content as string
 
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runCustomerRelationshipsAgent'), 'runCustomerRelationshipsAgent')
+      // 使用增强的 JSON 解析函数
+      const nodes = extractAndParseJSON(content, 'runFinanceAgent')
 
       if (nodes.length === 0) {
-        return { customerRelationshipsNodes: [] }
+        return { financeNodes: [] }
       }
 
       const validatedNodes = nodes.map((node) => ({
         ...node,
-        id: `customer-relationship-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.CUSTOMER_RELATIONSHIPS,
-        domain: CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS,
+        id: `finance-${nanoid(8)}`,
+        type: 'cc-bmc-card' as const,
         metadata: {
           ...node.metadata,
-          agent_signature: AGENT_TYPES.CUSTOMER_RELATIONSHIPS
+          agent_signature: AGENT_TYPES.FINANCE
         }
       }))
 
-      return { customerRelationshipsNodes: validatedNodes }
+      return { financeNodes: validatedNodes }
     } catch (error) {
       auditLogger.error({
-        action: 'business-langgraph.runCustomerRelationshipsAgent',
+        action: 'business-langgraph.runFinanceAgent',
         metadata: { error: String(error) }
       })
-      return { customerRelationshipsNodes: [] }
-    }
-  }
-
-  private async runChannelsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { channelsNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Stage2 Agent）
-    await delay(300)
-
-    let prompt = createEnhancedAgentPrompt({
-      agentName: 'Channels_Agent（渠道通路专家）',
-      domain: '渠道通路 (Channels)',
-      focus: '触达方式、线上/线下渠道、分发策略、渠道组合',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.CHANNELS,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['渠道通路 (Channels)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
-
-    // 注入第一阶段上下文（如果存在）
-    if (state.stage1Summary) {
-      prompt = `${prompt}\n\n${state.stage1Summary}`
-    }
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runChannelsAgent'), 'runChannelsAgent')
-
-      if (nodes.length === 0) {
-        return { channelsNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `channels-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.CHANNELS,
-        domain: CC_BMC_DOMAINS.CHANNELS,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.CHANNELS
-        }
-      }))
-
-      return { channelsNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runChannelsAgent',
-        metadata: { error: String(error) }
-      })
-      return { channelsNodes: [] }
-    }
-  }
-
-  private async runValuePropositionsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { valuePropositionsNodes: [] }
-
-    const prompt = createEnhancedAgentPrompt({
-      agentName: 'ValueProposition_Agent（价值主张专家）',
-      domain: '价值主张 (Value Propositions)',
-      focus: '核心价值、差异化优势、解决的痛点、独特卖点',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.VALUE_PROPOSITIONS,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['价值主张 (Value Propositions)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runValuePropositionsAgent'), 'runValuePropositionsAgent')
-
-      if (nodes.length === 0) {
-        return { valuePropositionsNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `value-proposition-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.VALUE_PROPOSITIONS,
-        domain: CC_BMC_DOMAINS.VALUE_PROPOSITIONS,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.VALUE_PROPOSITIONS
-        }
-      }))
-
-      return { valuePropositionsNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runValuePropositionsAgent',
-        metadata: { error: String(error) }
-      })
-      return { valuePropositionsNodes: [] }
-    }
-  }
-
-  private async runRevenueStreamsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { revenueStreamsNodes: [] }
-
-    const prompt = createEnhancedAgentPrompt({
-      agentName: 'RevenueStream_Agent（收入来源专家）',
-      domain: '收入来源 (Revenue Streams)',
-      focus: '商业模式、定价策略、收入结构、盈利方式',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.REVENUE_STREAMS,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['收入来源 (Revenue Streams)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runRevenueStreamsAgent'), 'runRevenueStreamsAgent')
-
-      if (nodes.length === 0) {
-        return { revenueStreamsNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `revenue-stream-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.REVENUE_STREAMS,
-        domain: CC_BMC_DOMAINS.REVENUE_STREAMS,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.REVENUE_STREAMS
-        }
-      }))
-
-      return { revenueStreamsNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runRevenueStreamsAgent',
-        metadata: { error: String(error) }
-      })
-      return { revenueStreamsNodes: [] }
-    }
-  }
-
-  private async runKeyActivitiesAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { keyActivitiesNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Stage2 Agent）
-    await delay(300)
-
-    let prompt = createEnhancedAgentPrompt({
-      agentName: 'KeyActivity_Agent（关键业务专家）',
-      domain: '关键业务 (Key Activities)',
-      focus: '核心活动、业务流程、运营重点、关键任务',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.KEY_ACTIVITIES,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['关键业务 (Key Activities)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
-
-    // 注入第一阶段上下文（如果存在）
-    if (state.stage1Summary) {
-      prompt = `${prompt}\n\n${state.stage1Summary}`
-    }
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runKeyActivitiesAgent'), 'runKeyActivitiesAgent')
-
-      if (nodes.length === 0) {
-        return { keyActivitiesNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `key-activity-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.KEY_ACTIVITIES,
-        domain: CC_BMC_DOMAINS.KEY_ACTIVITIES,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.KEY_ACTIVITIES
-        }
-      }))
-
-      return { keyActivitiesNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runKeyActivitiesAgent',
-        metadata: { error: String(error) }
-      })
-      return { keyActivitiesNodes: [] }
-    }
-  }
-
-  private async runKeyResourcesAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { keyResourcesNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Stage2 Agent）
-    await delay(300)
-
-    let prompt = createEnhancedAgentPrompt({
-      agentName: 'KeyResource_Agent（核心资源专家）',
-      domain: '核心资源 (Key Resources)',
-      focus: '关键资产、技术能力、人才团队、核心资源',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.KEY_RESOURCES,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['核心资源 (Key Resources)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
-
-    // 注入第一阶段上下文（如果存在）
-    if (state.stage1Summary) {
-      prompt = `${prompt}\n\n${state.stage1Summary}`
-    }
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runKeyResourcesAgent'), 'runKeyResourcesAgent')
-
-      if (nodes.length === 0) {
-        return { keyResourcesNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `key-resource-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.KEY_RESOURCES,
-        domain: CC_BMC_DOMAINS.KEY_RESOURCES,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.KEY_RESOURCES
-        }
-      }))
-
-      return { keyResourcesNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runKeyResourcesAgent',
-        metadata: { error: String(error) }
-      })
-      return { keyResourcesNodes: [] }
-    }
-  }
-
-  private async runKeyPartnershipsAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { keyPartnershipsNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Stage2 Agent）
-    await delay(300)
-
-    let prompt = createEnhancedAgentPrompt({
-      agentName: 'KeyPartnership_Agent（重要合作专家）',
-      domain: '重要合作 (Key Partnerships)',
-      focus: '战略伙伴、供应商、渠道合作、外部依赖',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.KEY_PARTNERSHIPS,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['重要合作 (Key Partnerships)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
-
-    // 注入第一阶段上下文（如果存在）
-    if (state.stage1Summary) {
-      prompt = `${prompt}\n\n${state.stage1Summary}`
-    }
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runKeyPartnershipsAgent'), 'runKeyPartnershipsAgent')
-
-      if (nodes.length === 0) {
-        return { keyPartnershipsNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `key-partnership-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.KEY_PARTNERSHIPS,
-        domain: CC_BMC_DOMAINS.KEY_PARTNERSHIPS,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.KEY_PARTNERSHIPS
-        }
-      }))
-
-      return { keyPartnershipsNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runKeyPartnershipsAgent',
-        metadata: { error: String(error) }
-      })
-      return { keyPartnershipsNodes: [] }
-    }
-  }
-
-  private async runCostStructureAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { costStructureNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Stage2 Agent）
-    await delay(300)
-
-    let prompt = createEnhancedAgentPrompt({
-      agentName: 'CostStructure_Agent（成本结构专家）',
-      domain: '成本结构 (Cost Structure)',
-      focus: '主要成本、成本控制、盈利能力、成本结构',
-      question: state.question,
-      nodeType: CC_BMC_NODE_TYPES.COST_STRUCTURE,
-      relatedDimensions: DIMENSION_RELATIONSHIPS['成本结构 (Cost Structure)'],
-      knowledgeEvidence: state.knowledgeEvidence ?? []
-    })
-
-    // 注入第一阶段上下文（如果存在）
-    if (state.stage1Summary) {
-      prompt = `${prompt}\n\n${state.stage1Summary}`
-    }
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runCostStructureAgent'), 'runCostStructureAgent')
-
-      if (nodes.length === 0) {
-        return { costStructureNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => ({
-        ...node,
-        id: `cost-structure-${nanoid(8)}`,
-        type: CC_BMC_NODE_TYPES.COST_STRUCTURE,
-        domain: CC_BMC_DOMAINS.COST_STRUCTURE,
-        metadata: {
-          ...node.metadata,
-          agent_signature: AGENT_TYPES.COST_STRUCTURE
-        }
-      }))
-
-      return { costStructureNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runCostStructureAgent',
-        metadata: { error: String(error) }
-      })
-      return { costStructureNodes: [] }
-    }
-  }
-
-  private async runCulturalContextAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { culturalContextNodes: [] }
-    if (!shouldRunCulturalSkills(state.question)) return { culturalContextNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Cultural Skills Agent）
-    await delay(500)
-
-    const contextSummary = this.buildCulturalContextSummary(state)
-    if (!contextSummary) {
-      return { culturalContextNodes: [] }
-    }
-
-    const prompt = `你是跨文化商业策略专家，需要基于以下画布信息生成跨文化适配分析。
-
-【用户问题】
-${state.question}
-
-【画布要点】
-${contextSummary}
-
-${CULTURAL_REQUIREMENTS}
-
-${CULTURAL_CONTEXT_RULES}
-
-${CULTURAL_CONTEXT_JSON_FORMAT}`
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runCulturalContextAgent'), 'runCulturalContextAgent')
-
-      if (nodes.length === 0) {
-        return { culturalContextNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => {
-        const label = node.label && node.label !== '未命名' ? node.label : '跨文化洞察'
-        const culturalContext = node.metadata?.cultural_context || node.summary || node.content || ''
-        const tags = Array.isArray(node.metadata?.tags) && node.metadata.tags.length > 0
-          ? node.metadata.tags
-          : ['跨文化', '地域适配']
-
-        return {
-          ...node,
-          id: `cultural-context-${nanoid(8)}`,
-          type: 'insight-note' as const,
-          label,
-          metadata: {
-            ...node.metadata,
-            agent_signature: AGENT_TYPES.CULTURAL_CONTEXT,
-            cultural_context: culturalContext,
-            tags
-          }
-        }
-      })
-
-      return { culturalContextNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runCulturalContextAgent',
-        metadata: { error: String(error) }
-      })
-      return { culturalContextNodes: [] }
-    }
-  }
-
-  private async runCulturalSimulationAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { culturalSimulationNodes: [] }
-    if (!shouldRunCulturalSkills(state.question)) return { culturalSimulationNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Cultural Skills Agent）
-    await delay(500)
-
-    const contextSummary = this.buildCulturalContextSummary(state)
-    if (!contextSummary) {
-      return { culturalSimulationNodes: [] }
-    }
-
-    const scenario = pickCulturalScenario(state.question)
-    const prompt = `你是跨文化沟通教练，请基于以下场景和画布信息提供沟通模拟与建议。
-
-【场景】
-标题：${scenario.title}
-类别：${scenario.category}
-描述：${scenario.description}
-目标：${scenario.goal}
-难度：${scenario.level}
-
-【用户问题】
-${state.question}
-
-【画布要点】
-${contextSummary}
-
-${CULTURAL_REQUIREMENTS}
-
-${CULTURAL_SIMULATION_RULES}
-
-${CULTURAL_SIMULATION_JSON_FORMAT}`
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runCulturalSimulationAgent'), 'runCulturalSimulationAgent')
-
-      if (nodes.length === 0) {
-        return { culturalSimulationNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => {
-        const label = node.label && node.label !== '未命名' ? node.label : `${scenario.title}模拟`
-        const culturalContext = node.metadata?.cultural_context || node.summary || node.content || ''
-        const tags = Array.isArray(node.metadata?.tags) && node.metadata.tags.length > 0
-          ? node.metadata.tags
-          : ['跨文化', '沟通模拟', scenario.category]
-
-        return {
-          ...node,
-          id: `cultural-simulation-${nanoid(8)}`,
-          type: 'insight-note' as const,
-          label,
-          metadata: {
-            ...node.metadata,
-            agent_signature: AGENT_TYPES.CULTURAL_SIMULATION,
-            cultural_context: culturalContext,
-            tags
-          }
-        }
-      })
-
-      return { culturalSimulationNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runCulturalSimulationAgent',
-        metadata: { error: String(error) }
-      })
-      return { culturalSimulationNodes: [] }
-    }
-  }
-
-  private async runCulturalReportAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { culturalReportNodes: [] }
-    if (!shouldRunCulturalSkills(state.question)) return { culturalReportNodes: [] }
-
-    // 添加延迟避免触发 API 限流（Cultural Skills Agent）
-    await delay(500)
-
-    const contextSummary = this.buildCulturalContextSummary(state)
-    if (!contextSummary) {
-      return { culturalReportNodes: [] }
-    }
-
-    const template = pickCulturalReportTemplate(state.question)
-    const tone = template.tones[0] ?? '正式'
-    const prompt = `你是跨文化报告专家，请基于以下模板与画布信息生成策略报告。
-
-【模板】
-名称：${template.name}
-说明：${template.description}
-语气：${tone}
-
-【用户问题】
-${state.question}
-
-【画布要点】
-${contextSummary}
-
-${CULTURAL_REQUIREMENTS}
-
-${CULTURAL_REPORT_RULES}
-
-${CULTURAL_REPORT_JSON_FORMAT}`
-
-    try {
-      const response = await this.model.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
-      const content = response.content as string
-
-      const nodes = normalizeSingleNode(extractAndParseJSON(content, 'runCulturalReportAgent'), 'runCulturalReportAgent')
-
-      if (nodes.length === 0) {
-        return { culturalReportNodes: [] }
-      }
-
-      const validatedNodes = nodes.map((node) => {
-        const label = node.label && node.label !== '未命名' ? node.label : template.name
-        const culturalContext = node.metadata?.cultural_context || node.summary || node.content || ''
-        const tags = Array.isArray(node.metadata?.tags) && node.metadata.tags.length > 0
-          ? node.metadata.tags
-          : ['跨文化', '策略报告', template.name]
-
-        return {
-          ...node,
-          id: `cultural-report-${nanoid(8)}`,
-          type: 'insight-note' as const,
-          label,
-          metadata: {
-            ...node.metadata,
-            agent_signature: AGENT_TYPES.CULTURAL_REPORT,
-            cultural_context: culturalContext,
-            tags
-          }
-        }
-      })
-
-      return { culturalReportNodes: validatedNodes }
-    } catch (error) {
-      auditLogger.error({
-        action: 'business-langgraph.runCulturalReportAgent',
-        metadata: { error: String(error) }
-      })
-      return { culturalReportNodes: [] }
+      return { financeNodes: [] }
     }
   }
 
   private async orchestrate(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    // 生成边（连接关系）- 完整的 CC-BMC 逻辑连接
+    // 1. 生成 Agent Avatar 节点
+    const agentAvatars: MacraNodeData[] = []
+
+    if (state.marketNodes.length > 0) {
+      agentAvatars.push({
+        id: `avatar-market-${nanoid(8)}`,
+        type: 'agent-avatar',
+        label: '市场分析专家',
+        content: `我已为你分析了目标客户、渠道通路和客户关系三个维度。\n\n**核心洞察**：${state.marketNodes[0]?.label || '市场分析'}`,
+        agentType: AGENT_TYPES.MARKET,
+        isInteractive: true,
+        metadata: {
+          agent_signature: AGENT_TYPES.MARKET,
+          confidence: 'high'
+        }
+      })
+    }
+
+    if (state.productNodes.length > 0) {
+      agentAvatars.push({
+        id: `avatar-product-${nanoid(8)}`,
+        type: 'agent-avatar',
+        label: '产品策略专家',
+        content: `我已为你分析了价值主张、核心资源和关键业务。\n\n**核心洞察**：${state.productNodes[0]?.label || '产品策略'}`,
+        agentType: AGENT_TYPES.PRODUCT,
+        isInteractive: true,
+        metadata: {
+          agent_signature: AGENT_TYPES.PRODUCT,
+          confidence: 'high'
+        }
+      })
+    }
+
+    if (state.financeNodes.length > 0) {
+      agentAvatars.push({
+        id: `avatar-finance-${nanoid(8)}`,
+        type: 'agent-avatar',
+        label: '财务分析专家',
+        content: `我已为你分析了收入来源和成本结构。\n\n**核心洞察**：${state.financeNodes[0]?.label || '财务分析'}`,
+        agentType: AGENT_TYPES.FINANCE,
+        isInteractive: true,
+        metadata: {
+          agent_signature: AGENT_TYPES.FINANCE,
+          confidence: 'high'
+        }
+      })
+    }
+
+    // 2. 生成边（连接关系）- 完整的 CC-BMC 逻辑连接
     const edges: CanvasEdge[] = []
     const allNodes = [
-      ...state.customerSegmentsNodes,
-      ...state.customerRelationshipsNodes,
-      ...state.channelsNodes,
-      ...state.valuePropositionsNodes,
-      ...state.revenueStreamsNodes,
-      ...state.keyActivitiesNodes,
-      ...state.keyResourcesNodes,
-      ...state.keyPartnershipsNodes,
-      ...state.costStructureNodes
+      ...state.marketNodes,
+      ...state.productNodes,
+      ...state.financeNodes
     ]
 
     // 辅助函数：查找节点
@@ -1770,116 +664,7 @@ ${CULTURAL_REPORT_JSON_FORMAT}`
       })
     }
 
-    return { edges }
-  }
-
-  /**
-   * 第一阶段聚合器：汇总前3个核心维度的输出
-   * 为第二阶段提供全局上下文
-   */
-  private async aggregateStage1(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    const stage1Nodes = [
-      ...state.customerSegmentsNodes,
-      ...state.valuePropositionsNodes,
-      ...state.revenueStreamsNodes
-    ]
-
-    if (stage1Nodes.length === 0) {
-      return {
-        stage1Complete: true,
-        stage1Summary: '第一阶段未生成有效节点'
-      }
-    }
-
-    // 构建结构化摘要
-    const summary = this.buildStage1Context(state)
-
-    auditLogger.info({
-      action: 'business-langgraph.aggregateStage1',
-      metadata: {
-        stage1NodeCount: stage1Nodes.length,
-        summaryLength: summary.length
-      }
-    })
-
-    return {
-      stage1Complete: true,
-      stage1Summary: summary
-    }
-  }
-
-  /**
-   * 构建第一阶段上下文摘要
-   * 用于第二阶段Agent的Prompt增强
-   */
-  private buildStage1Context(state: BusinessStateType): string {
-    const sections: string[] = []
-
-    sections.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    sections.push('【第一阶段分析结果】')
-    sections.push('以下是商业模式核心三要素的分析结果，请在你的分析中参考这些信息：')
-    sections.push('')
-
-    // 客户细分
-    if (state.customerSegmentsNodes.length > 0) {
-      sections.push('**1️⃣ 客户细分 (Customer Segments)**')
-      state.customerSegmentsNodes.forEach((node) => {
-        const content = node.summary || node.content || ''
-        sections.push(`• ${node.label}：${content}`)
-      })
-      sections.push('')
-    }
-
-    // 价值主张
-    if (state.valuePropositionsNodes.length > 0) {
-      sections.push('**2️⃣ 价值主张 (Value Propositions)**')
-      state.valuePropositionsNodes.forEach((node) => {
-        const content = node.summary || node.content || ''
-        sections.push(`• ${node.label}：${content}`)
-      })
-      sections.push('')
-    }
-
-    // 收入来源
-    if (state.revenueStreamsNodes.length > 0) {
-      sections.push('**3️⃣ 收入来源 (Revenue Streams)**')
-      state.revenueStreamsNodes.forEach((node) => {
-        const content = node.summary || node.content || ''
-        sections.push(`• ${node.label}：${content}`)
-      })
-      sections.push('')
-    }
-
-    sections.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    sections.push('')
-    sections.push('请基于以上第一阶段的分析结果，深入思考你负责的维度如何与这些核心要素协同。')
-
-    return sections.join('\n')
-  }
-
-  private buildCulturalContextSummary(state: BusinessStateType): string {
-    const nodes = [
-      ...state.customerSegmentsNodes,
-      ...state.customerRelationshipsNodes,
-      ...state.channelsNodes,
-      ...state.valuePropositionsNodes,
-      ...state.revenueStreamsNodes,
-      ...state.keyActivitiesNodes,
-      ...state.keyResourcesNodes,
-      ...state.keyPartnershipsNodes,
-      ...state.costStructureNodes
-    ]
-
-    if (nodes.length === 0) return ''
-
-    return nodes
-      .map((node) => {
-        const content = (node.summary || node.content || '').replace(/\s+/g, ' ').trim()
-        const trimmed = content.length > 120 ? `${content.slice(0, 120)}...` : content
-        const domain = node.domain || '综合'
-        return `- ${domain} / ${node.label}：${trimmed}`
-      })
-      .join('\n')
+    return { agentAvatars, edges }
   }
 
   private async runCritic(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
@@ -1888,15 +673,9 @@ ${CULTURAL_REPORT_JSON_FORMAT}`
     const conflicts: MacraNodeData[] = []
 
     const allNodes = [
-      ...state.customerSegmentsNodes,
-      ...state.customerRelationshipsNodes,
-      ...state.channelsNodes,
-      ...state.valuePropositionsNodes,
-      ...state.revenueStreamsNodes,
-      ...state.keyActivitiesNodes,
-      ...state.keyResourcesNodes,
-      ...state.keyPartnershipsNodes,
-      ...state.costStructureNodes
+      ...state.marketNodes,
+      ...state.productNodes,
+      ...state.financeNodes
     ]
 
     // 示例：检查是否同时提到"高端市场"和"低价策略"
@@ -1928,8 +707,6 @@ class BusinessCanvasBuilder {
   private readonly edges = new Map<string, CanvasEdge>()
   private readonly rootId: string
   private nextY = ROOT_POSITION.y + NODE_SPACING
-  // 跟踪每个维度已经放置的节点数量，用于错开布局
-  private readonly domainCounters = new Map<string, number>()
 
   constructor(
     private readonly workspaceId: string,
@@ -1963,39 +740,14 @@ class BusinessCanvasBuilder {
 
   addMacraNode(macraNode: MacraNodeData): GraphDelta {
     // 将 MacraNodeData 转换为 CanvasNode
-    // 向后兼容：如果没有 summary/fullContent，则使用 content
-    const summary = macraNode.summary || macraNode.content || ''
-    const fullContent = macraNode.fullContent || macraNode.content || ''
-
-    // 使用 DOMAIN_POSITIONS 中定义的区域位置，如果没有则使用默认顺序布局
-    let position: { x: number; y: number }
-
-    if (macraNode.domain && DOMAIN_POSITIONS[macraNode.domain]) {
-      // 获取该维度的基础位置
-      const basePosition = DOMAIN_POSITIONS[macraNode.domain]
-
-      // 同一维度的节点垂直错开，每个节点向下偏移 280px
-      const count = this.domainCounters.get(macraNode.domain) || 0
-      this.domainCounters.set(macraNode.domain, count + 1)
-
-      position = {
-        x: basePosition.x,
-        y: basePosition.y + (count * 280)
-      }
-    } else {
-      // 没有维度信息的节点使用默认顺序布局
-      position = { x: ROOT_POSITION.x, y: this.nextY }
-      this.nextY += NODE_SPACING
-    }
-
     const node: CanvasNode = {
       id: macraNode.id,
       type: 'note', // ReactFlow 的通用类型，前端会根据 data 渲染具体组件
-      position,
+      position: { x: ROOT_POSITION.x, y: this.nextY },
       data: {
         type: 'note',
         title: macraNode.label,
-        content: summary, // 默认显示摘要
+        content: macraNode.content,
         variant: 'insight',
         meta: {
           macraType: macraNode.type,
@@ -2004,14 +756,13 @@ class BusinessCanvasBuilder {
           severity: macraNode.severity,
           conflictType: macraNode.conflictType,
           isInteractive: macraNode.isInteractive,
-          summary, // 添加 summary 字段
-          fullContent, // 添加 fullContent 字段
           metadata: macraNode.metadata
         }
       }
     }
 
     this.nodes.set(node.id, node)
+    this.nextY += NODE_SPACING
 
     return { nodes: [node] }
   }
@@ -2045,16 +796,6 @@ class BusinessCanvasBuilder {
 }
 
 // ============== Helper Functions ==============
-function normalizeSingleNode(nodes: MacraNodeData[], agentName: string): MacraNodeData[] {
-  if (nodes.length > 1) {
-    auditLogger.warn({
-      action: `business-langgraph.${agentName}.normalizeSingleNode`,
-      metadata: { message: 'Multiple nodes returned; trimming to first', count: nodes.length }
-    })
-  }
-  return nodes.slice(0, 1)
-}
-
 function extractAndParseJSON(content: string, agentName: string): MacraNodeData[] {
   try {
     // 1. 移除 Markdown 代码块标记
@@ -2075,16 +816,11 @@ function extractAndParseJSON(content: string, agentName: string): MacraNodeData[
     // 3. 清理常见的 JSON 格式问题
     // - 移除尾部多余逗号（如 [1,2,]）
     jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1')
-
-    // - 修复缺少开头引号的属性名（如 domain": → "domain":）
-    // 匹配模式：行首空白 + 非引号字母 + "：
-    jsonStr = jsonStr.replace(/(\s+)([a-zA-Z_][a-zA-Z0-9_]*)":/g, '$1"$2":')
-
-    // - 修复缺少结尾引号的属性名（如 "domain → "domain"）
-    jsonStr = jsonStr.replace(/"([a-zA-Z_][a-zA-Z0-9_]*):/g, '"$1":')
+    // - 替换单引号为双引号（仅在键名和字符串值中）
+    // 注意：这是简化处理，更严格的做法需要完整的 JSON parser
 
     // 4. 解析 JSON
-    const nodes = JSON.parse(jsonStr) as unknown
+    const nodes = JSON.parse(jsonStr) as MacraNodeData[]
 
     if (!Array.isArray(nodes) || nodes.length === 0) {
       auditLogger.error({
@@ -2094,19 +830,7 @@ function extractAndParseJSON(content: string, agentName: string): MacraNodeData[
       return []
     }
 
-    const normalized = nodes
-      .map((node) => normalizeMacraNodeData(node, agentName))
-      .filter((node): node is MacraNodeData => Boolean(node))
-
-    if (normalized.length === 0) {
-      auditLogger.error({
-        action: `business-langgraph.${agentName}.parseJSON`,
-        metadata: { error: 'No valid nodes after normalization' }
-      })
-      return []
-    }
-
-    return normalized
+    return nodes
   } catch (error) {
     auditLogger.error({
       action: `business-langgraph.${agentName}.parseJSON`,
@@ -2118,69 +842,6 @@ function extractAndParseJSON(content: string, agentName: string): MacraNodeData[
     })
     return []
   }
-}
-
-function normalizeMacraNodeData(input: unknown, agentName: string): MacraNodeData | null {
-  if (!input || typeof input !== 'object') {
-    auditLogger.warn({
-      action: `business-langgraph.${agentName}.normalizeMacraNode`,
-      metadata: { message: 'Invalid node payload', input }
-    })
-    return null
-  }
-
-  const raw = input as Record<string, unknown>
-  const baseContent = typeof raw.content === 'string' ? raw.content : ''
-  const label = typeof raw.label === 'string' && raw.label.trim() ? raw.label : '未命名'
-  const summaryCandidate = typeof raw.summary === 'string' ? raw.summary.trim() : ''
-  const fullContentCandidate = typeof raw.fullContent === 'string' ? raw.fullContent.trim() : ''
-  const summary = summaryCandidate || baseContent || label
-  const fullContent = fullContentCandidate || summary
-
-  const metadata =
-    typeof raw.metadata === 'object' && raw.metadata !== null && !Array.isArray(raw.metadata)
-      ? raw.metadata
-      : {}
-
-  const normalized = {
-    id: typeof raw.id === 'string' && raw.id ? raw.id : `auto-${nanoid(8)}`,
-    type: typeof raw.type === 'string' && MACRA_NODE_TYPES.includes(raw.type as (typeof MACRA_NODE_TYPES)[number])
-      ? raw.type
-      : 'cc-bmc-card',
-    label,
-    summary,
-    fullContent,
-    content: typeof raw.content === 'string' ? raw.content : undefined,
-    domain: typeof raw.domain === 'string' && Object.values(CC_BMC_DOMAINS).includes(raw.domain as CCBMCDomain)
-      ? raw.domain
-      : undefined,
-    metadata,
-    agentType:
-      typeof raw.agentType === 'string' && Object.values(AGENT_TYPES).includes(raw.agentType as AgentType)
-        ? raw.agentType
-        : undefined,
-    isInteractive: typeof raw.isInteractive === 'boolean' ? raw.isInteractive : undefined,
-    severity:
-      typeof raw.severity === 'string' && ['high', 'medium', 'low'].includes(raw.severity)
-        ? raw.severity
-        : undefined,
-    conflictType:
-      typeof raw.conflictType === 'string' &&
-      ['resource-goal', 'compliance-business', 'channel-product', 'other'].includes(raw.conflictType)
-        ? raw.conflictType
-        : undefined
-  }
-
-  const parsed = MacraNodeDataSchema.safeParse(normalized)
-  if (!parsed.success) {
-    auditLogger.warn({
-      action: `business-langgraph.${agentName}.normalizeMacraNode`,
-      metadata: { error: parsed.error.message }
-    })
-    return null
-  }
-
-  return parsed.data
 }
 
 function createLLMModel() {
@@ -2201,30 +862,10 @@ function createLLMModel() {
     apiKey,
     model,
     temperature: 0.3,
-    maxTokens: 4000,  // 增加 token 限制，确保能返回完整的 JSON
+    maxTokens: 40000,  // 增加 token 限制，确保能返回完整的 JSON
     configuration
   })
 }
 
 const ROOT_POSITION = { x: 160, y: 160 }
 const NODE_SPACING = 220
-
-// ============== MACRA 区域布局（Business Model Canvas 经典布局） ==============
-const DOMAIN_POSITIONS: Record<string, { x: number; y: number }> = {
-  // 左上区域 - 供应链/内部运营
-  [CC_BMC_DOMAINS.KEY_PARTNERSHIPS]: { x: 200, y: 200 },
-  [CC_BMC_DOMAINS.KEY_ACTIVITIES]: { x: 200, y: 500 },
-  [CC_BMC_DOMAINS.KEY_RESOURCES]: { x: 200, y: 800 },
-
-  // 中间区域 - 价值核心
-  [CC_BMC_DOMAINS.VALUE_PROPOSITIONS]: { x: 700, y: 500 },
-
-  // 右上区域 - 客户/市场
-  [CC_BMC_DOMAINS.CUSTOMER_SEGMENTS]: { x: 1200, y: 200 },
-  [CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS]: { x: 1200, y: 500 },
-  [CC_BMC_DOMAINS.CHANNELS]: { x: 1200, y: 800 },
-
-  // 底部区域 - 财务
-  [CC_BMC_DOMAINS.COST_STRUCTURE]: { x: 400, y: 1150 },
-  [CC_BMC_DOMAINS.REVENUE_STREAMS]: { x: 1000, y: 1150 }
-}

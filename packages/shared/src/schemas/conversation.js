@@ -29,3 +29,9 @@ export const conversationMetadataSchema = z.object({
     status: conversationStatusSchema,
     latestQuestion: z.string().optional()
 });
+export const knowledgeEvidenceSchema = z.object({
+    docId: z.string(),
+    snippet: z.string(),
+    score: z.number(),
+    metadata: z.record(z.unknown()).optional()
+});

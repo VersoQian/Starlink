@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { CC_BMC_DOMAINS, type CCBMCDomain, type MacraNodeData } from '@/types/macra'
-import { Edit3, Check, X, Info, ChevronDown } from 'lucide-react'
+import { Edit3, Check, X, Info, ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
 // 新配色方案 - Tech-Luxe Gradient
@@ -48,7 +48,7 @@ const DOMAIN_COLORS: Record<CCBMCDomain, { main: string; light: string; accent: 
 }
 
 export function CCBMCCardNode({ id, data }: NodeProps) {
-  const { getMacraNode, updateMacraNode } = useComfyStore()
+  const { getMacraNode, updateMacraNode, openDetailPanel } = useComfyStore()
   const nodeData = getMacraNode(id) || (data as MacraNodeData)
 
   const [isEditing, setIsEditing] = useState(false)
@@ -57,9 +57,15 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
   const [showMetadata, setShowMetadata] = useState(false)
   const [showDomainSelector, setShowDomainSelector] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false) // 展开/折叠状态
 
   const domain = nodeData?.domain || CC_BMC_DOMAINS.VALUE_PROPOSITIONS
   const colors = DOMAIN_COLORS[domain]
+
+  // 从 meta 中获取 summary 和 fullContent
+  const summary = (data as any)?.meta?.summary || nodeData?.content || ''
+  const fullContent = (data as any)?.meta?.fullContent || nodeData?.content || ''
+  const hasExtendedContent = summary !== fullContent && fullContent.length > summary.length
 
   const handleSave = useCallback(() => {
     updateMacraNode(id, {
@@ -244,9 +250,39 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
               className="w-full h-36 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 shadow-inner placeholder-slate-500 text-slate-200 backdrop-blur-sm"
             />
           ) : (
-            <div className="prose prose-sm prose-invert max-w-none text-slate-300 min-h-[100px] max-h-48 overflow-y-auto leading-relaxed">
-              <ReactMarkdown>{nodeData?.content || '*暂无内容*'}</ReactMarkdown>
-            </div>
+            <>
+              <div
+                className={`prose prose-sm prose-invert max-w-none text-slate-300 overflow-hidden leading-relaxed transition-all duration-300 ${isExpanded ? 'max-h-none' : 'max-h-32'}`}
+              >
+                <ReactMarkdown>{isExpanded ? fullContent : summary || '*暂无内容*'}</ReactMarkdown>
+              </div>
+
+              {/* 展开/折叠按钮 */}
+              {hasExtendedContent && (
+                <button
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className={`mt-3 flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all backdrop-blur-sm border hover:scale-105`}
+                  style={{
+                    background: `linear-gradient(135deg, ${colors.main}15, ${colors.accent}10)`,
+                    color: colors.main,
+                    borderColor: `${colors.main}30`,
+                    fontFamily: 'Outfit, sans-serif'
+                  }}
+                >
+                  {isExpanded ? (
+                    <>
+                      <Minimize2 className="w-4 h-4" />
+                      <span>收起详情</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-4 h-4" />
+                      <span>展开详情</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </>
           )}
 
           {/* 元数据 */}
@@ -301,6 +337,63 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
               )}
             </div>
           )}
+        </div>
+
+        {/* 底部署名栏 */}
+        <div
+          className="px-5 py-3 border-t border-white/10 flex items-center justify-between"
+          style={{
+            background: `linear-gradient(135deg, ${colors.main}08, ${colors.accent}05)`
+          }}
+        >
+          {/* Agent 署名 */}
+          <div className="flex items-center gap-2">
+            <div
+              className="w-6 h-6 rounded-lg flex items-center justify-center text-xs"
+              style={{
+                background: `linear-gradient(135deg, ${colors.main}30, ${colors.accent}20)`,
+                boxShadow: `0 2px 8px ${colors.main}40`
+              }}
+            >
+              🤖
+            </div>
+            <span className="text-xs text-slate-400" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+              by{' '}
+              <span className="font-bold" style={{ color: colors.main }}>
+                {nodeData?.metadata?.agent_signature || 'AI Agent'}
+              </span>
+            </span>
+            {nodeData?.metadata?.confidence && (
+              <div
+                className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider"
+                style={{
+                  background: `${colors.main}20`,
+                  color: colors.main,
+                  border: `1px solid ${colors.main}30`
+                }}
+              >
+                {nodeData.metadata.confidence}
+              </div>
+            )}
+          </div>
+
+          {/* 查看详情按钮 */}
+          <button
+            onClick={() => {
+              console.log('[CCBMCCardNode] Opening detail panel for node:', id)
+              openDetailPanel(id)
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105 backdrop-blur-sm border"
+            style={{
+              background: `linear-gradient(135deg, ${colors.main}15, ${colors.accent}10)`,
+              color: colors.main,
+              borderColor: `${colors.main}30`,
+              fontFamily: 'Outfit, sans-serif'
+            }}
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+            <span>详情</span>
+          </button>
         </div>
 
         {/* 底部装饰线 */}

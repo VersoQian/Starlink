@@ -18,6 +18,20 @@ export const CC_BMC_DOMAINS = {
 
 export type CCBMCDomain = (typeof CC_BMC_DOMAINS)[keyof typeof CC_BMC_DOMAINS]
 
+export const CC_BMC_NODE_TYPES = {
+  CUSTOMER_SEGMENTS: 'cc-bmc-customer-segments',
+  CUSTOMER_RELATIONSHIPS: 'cc-bmc-customer-relationships',
+  CHANNELS: 'cc-bmc-channels',
+  VALUE_PROPOSITIONS: 'cc-bmc-value-propositions',
+  REVENUE_STREAMS: 'cc-bmc-revenue-streams',
+  KEY_ACTIVITIES: 'cc-bmc-key-activities',
+  KEY_RESOURCES: 'cc-bmc-key-resources',
+  KEY_PARTNERSHIPS: 'cc-bmc-key-partnerships',
+  COST_STRUCTURE: 'cc-bmc-cost-structure'
+} as const
+
+export type CCBMCNodeType = (typeof CC_BMC_NODE_TYPES)[keyof typeof CC_BMC_NODE_TYPES]
+
 // ============== Agent 类型 ==============
 export const AGENT_TYPES = {
   CUSTOMER_SEGMENTS: 'CustomerSegment_Agent',
@@ -33,6 +47,10 @@ export const AGENT_TYPES = {
   PRODUCT: 'Product_Agent',
   FINANCE: 'Finance_Agent',
   COMPLIANCE: 'Compliance_Agent',
+  SEMANTIC_PLAN: 'SemanticPlan_Agent',
+  CULTURAL_CONTEXT: 'CulturalContext_Agent',
+  CULTURAL_SIMULATION: 'CulturalSimulation_Agent',
+  CULTURAL_REPORT: 'CulturalReport_Agent',
   ORCHESTRATOR: 'Orchestrator',
   CRITIC: 'Adversarial_Critic'
 } as const
@@ -41,11 +59,13 @@ export type AgentType = (typeof AGENT_TYPES)[keyof typeof AGENT_TYPES]
 
 // ============== 节点类型 ==============
 export type NodeType =
-  | 'cc-bmc-card'      // 核心业务卡片
+  | 'cc-bmc-card'      // 兼容旧版核心业务卡片
+  | CCBMCNodeType
   | 'agent-avatar'      // 虚拟顾问节点
   | 'conflict-alert'    // 冲突警示
   | 'insight-note'      // 洞察便签
   | 'data-source'       // 数据源节点
+  | 'plan-node'         // 语义确认节点
 
 // ============== 置信度级别 ==============
 export type ConfidenceLevel = 'high' | 'medium' | 'low'
@@ -59,6 +79,14 @@ export interface NodeMetadata {
   updated_at?: string                // 更新时间
   tags?: string[]                    // 标签
   cultural_context?: string          // 文化假设/适配地域
+  semantic_status?: 'pending' | 'confirmed' | 'needs-clarification'
+}
+
+export interface KnowledgeEvidence {
+  docId: string
+  snippet: string
+  score: number
+  metadata?: Record<string, unknown>
 }
 
 // ============== 节点数据结构 ==============
@@ -67,7 +95,9 @@ export interface MacraNodeData {
   type: NodeType
   label: string
   content: string                    // 支持 Markdown
-  domain?: CCBMCDomain               // CC-BMC 维度（仅 cc-bmc-card 使用）
+  summary?: string                   // 核心摘要（可选）
+  fullContent?: string               // 完整内容（可选）
+  domain?: CCBMCDomain               // CC-BMC 维度（cc-bmc-* 类型使用）
   metadata: NodeMetadata
   position?: { x: number; y: number }
   status?: 'idle' | 'processing' | 'done' | 'error'

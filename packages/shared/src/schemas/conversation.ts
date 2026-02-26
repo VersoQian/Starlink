@@ -33,6 +33,14 @@ export const conversationMetadataSchema = z.object({
   latestQuestion: z.string().optional()
 })
 
+export const knowledgeEvidenceSchema = z.object({
+  docId: z.string(),
+  snippet: z.string(),
+  score: z.number(),
+  metadata: z.record(z.unknown()).optional()
+})
+
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>
 export type ConversationEvent = z.infer<typeof conversationEventSchema>
 export type ConversationMetadata = z.infer<typeof conversationMetadataSchema>
+export type KnowledgeEvidence = z.infer<typeof knowledgeEvidenceSchema>

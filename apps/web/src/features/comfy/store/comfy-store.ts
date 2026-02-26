@@ -139,6 +139,16 @@ interface MacraState {
   isCriticProcessing: boolean
   lastCriticRun: number | null
 
+  // 详情面板状态
+  detailPanel: {
+    isOpen: boolean
+    nodeId: string | null
+  }
+
+  // 知识库证据
+  knowledgeEvidence: KnowledgeEvidence[]
+  setKnowledgeEvidence: (evidence: KnowledgeEvidence[]) => void
+
   setWorkspaceId: (workspaceId: string) => void
 
   // 操作方法
@@ -168,6 +178,10 @@ interface MacraState {
   // AI Critic 调用（通过 GraphQL 后端自动触发，前端保留手动触发接口）
   callCritic: () => Promise<void>
 
+  // 详情面板操作
+  openDetailPanel: (nodeId: string) => void
+  closeDetailPanel: () => void
+
   // 工作流执行（兼容旧版本）
   executeWorkflow: () => Promise<void>
   executeNode: (nodeId: string) => Promise<void>
@@ -187,6 +201,15 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   isOrchestratorProcessing: false,
   isCriticProcessing: false,
   lastCriticRun: null,
+  knowledgeEvidence: [],
+  detailPanel: {
+    isOpen: false,
+    nodeId: null
+  },
+
+  setKnowledgeEvidence: (evidence) => {
+    set({ knowledgeEvidence: evidence })
+  },
 
   setWorkspaceId: (workspaceId) => {
     set({ workspaceId })
@@ -243,7 +266,14 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
   // ============== MACRA 节点操作 ==============
   getMacraNode: (nodeId) => {
-    return get().macraNodes.get(nodeId)
+    const result = get().macraNodes.get(nodeId)
+    console.log('[getMacraNode]', {
+      nodeId,
+      found: !!result,
+      totalNodes: get().macraNodes.size,
+      availableIds: Array.from(get().macraNodes.keys()).slice(0, 5)
+    })
+    return result
   },
 
   updateMacraNode: (nodeId, data) => {
@@ -384,20 +414,93 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
       const conversationId = response.startConversation.metadata.id
 
+      const extractMacraNodeData = (canvasNode: CanvasNode): MacraNodeData | null => {
+        const meta = canvasNode.data?.meta
+        if (!meta) {
+          console.warn('[extractMacraNodeData] No meta found for node:', canvasNode.id)
+          return null
+        }
+
+        const macraData: MacraNodeData = {
+          id: canvasNode.id,
+          type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as any,
+          label: canvasNode.data?.title || '未命名',
+          content: canvasNode.data?.content || '',
+          summary: meta.summary || canvasNode.data?.content || '',
+          fullContent: meta.fullContent || canvasNode.data?.content || '',
+          domain: meta.domain,
+          metadata: meta.metadata || {},
+          agentType: meta.agentType,
+          severity: meta.severity,
+          conflictType: meta.conflictType,
+          isInteractive: meta.isInteractive,
+          position: canvasNode.position
+        }
+
+        console.log('[extractMacraNodeData] Extracted:', {
+          id: macraData.id,
+          type: macraData.type,
+          label: macraData.label,
+          hasSummary: !!macraData.summary,
+          hasFullContent: !!macraData.fullContent
+        })
+
+        return macraData
+      }
+
       const applyGraph = (graph: WorkspaceGraphResponse) => {
+        const reactFlowNodes = graph.nodes.map(mapCanvasNodeToReactFlow)
+        const macraNodesMap = new Map<string, MacraNodeData>()
+
+        // 同时构建 macraNodes Map
+        graph.nodes.forEach(node => {
+          const macraData = extractMacraNodeData(node)
+          if (macraData) {
+            macraNodesMap.set(node.id, macraData)
+          }
+        })
+
+        console.log('[applyGraph] Updating store:', {
+          reactFlowNodesCount: reactFlowNodes.length,
+          macraNodesCount: macraNodesMap.size,
+          firstFewIds: Array.from(macraNodesMap.keys()).slice(0, 3)
+        })
+
         set({
-          nodes: graph.nodes.map(mapCanvasNodeToReactFlow),
-          edges: graph.edges.map(mapCanvasEdgeToReactFlow)
+          nodes: reactFlowNodes,
+          edges: graph.edges.map(mapCanvasEdgeToReactFlow),
+          macraNodes: macraNodesMap
         })
       }
 
       const applyDelta = (delta: { nodes?: CanvasNode[]; edges?: CanvasEdge[] }) => {
         const nodeUpdates = delta.nodes?.map(mapCanvasNodeToReactFlow)
         const edgeUpdates = delta.edges?.map(mapCanvasEdgeToReactFlow)
-        set((state) => ({
-          nodes: nodeUpdates ? mergeById(state.nodes, nodeUpdates) : state.nodes,
-          edges: edgeUpdates ? mergeById(state.edges, edgeUpdates) : state.edges
-        }))
+
+        set((state) => {
+          const newMacraNodes = new Map(state.macraNodes)
+
+          // 同时更新 macraNodes Map
+          delta.nodes?.forEach(node => {
+            const macraData = extractMacraNodeData(node)
+            if (macraData) {
+              newMacraNodes.set(node.id, macraData)
+            }
+          })
+
+          console.log('[applyDelta] Updating store:', {
+            deltaNodesCount: delta.nodes?.length || 0,
+            macraNodesCountBefore: state.macraNodes.size,
+            macraNodesCountAfter: newMacraNodes.size,
+            addedIds: delta.nodes?.map(n => n.id).slice(0, 3)
+          })
+
+          return {
+            nodes: nodeUpdates ? mergeById(state.nodes, nodeUpdates) : state.nodes,
+            edges: edgeUpdates ? mergeById(state.edges, edgeUpdates) : state.edges,
+            macraNodes: newMacraNodes
+          }
+        })
       }
 
       if (response.startConversation.graph) {
@@ -563,6 +666,26 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     }
   },
 
+  // ============== 详情面板操作 ==============
+  openDetailPanel: (nodeId) => {
+    console.log('[openDetailPanel] Opening panel for node:', nodeId)
+    set({
+      detailPanel: {
+        isOpen: true,
+        nodeId
+      }
+    })
+  },
+
+  closeDetailPanel: () => {
+    set({
+      detailPanel: {
+        isOpen: false,
+        nodeId: null
+      }
+    })
+  },
+
   // ============== 旧版本工作流执行（兼容） ==============
   executeNode: async (nodeId) => {
     const { nodes, edges, nodeDataMap } = get()
@@ -676,7 +799,12 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       executionQueue: [],
       isOrchestratorProcessing: false,
       isCriticProcessing: false,
-      lastCriticRun: null
+      lastCriticRun: null,
+      knowledgeEvidence: [],
+      detailPanel: {
+        isOpen: false,
+        nodeId: null
+      }
     })
   }
 }))

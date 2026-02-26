@@ -101,6 +101,34 @@ const AGENT_CONFIG: Record<AgentType, { gradient: string; avatar: string; name: 
     description: '合规、法律风险',
     accentColor: '#f472b6'
   },
+  [AGENT_TYPES.SEMANTIC_PLAN]: {
+    gradient: 'from-violet-400 to-indigo-500',
+    avatar: '🧠',
+    name: '语义确认专家',
+    description: '需求理解与确认',
+    accentColor: '#8b5cf6'
+  },
+  [AGENT_TYPES.CULTURAL_CONTEXT]: {
+    gradient: 'from-teal-400 to-cyan-500',
+    avatar: '🌍',
+    name: '文化情境专家',
+    description: '文化背景与适配',
+    accentColor: '#22d3ee'
+  },
+  [AGENT_TYPES.CULTURAL_SIMULATION]: {
+    gradient: 'from-purple-400 to-indigo-500',
+    avatar: '🗣️',
+    name: '跨文化演练专家',
+    description: '沟通模拟与策略',
+    accentColor: '#a855f7'
+  },
+  [AGENT_TYPES.CULTURAL_REPORT]: {
+    gradient: 'from-sky-400 to-blue-500',
+    avatar: '📘',
+    name: '跨文化报告专家',
+    description: '策略报告与落地',
+    accentColor: '#38bdf8'
+  },
   [AGENT_TYPES.ORCHESTRATOR]: {
     gradient: 'from-indigo-400 to-indigo-500',
     avatar: '🎯',

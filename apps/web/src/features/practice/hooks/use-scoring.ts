@@ -29,11 +29,11 @@ export function useScoring(messages: Message[], insights: Insight[], quickReplyU
     }
 
     // 1. 参与度评分 (0-25分) - 基于对话轮数
-    let engagementScore = Math.min(totalTurns * 2.5, 25)
+    const engagementScore = Math.min(totalTurns * 2.5, 25)
 
     // 2. 文化意识评分 (0-30分) - 基于收到的洞察数量
     const uniqueInsightTypes = new Set(insights.map(i => i.title)).size
-    let culturalScore = Math.min(uniqueInsightTypes * 10, 30)
+    const culturalScore = Math.min(uniqueInsightTypes * 10, 30)
 
     // 3. 质量评分 (0-25分) - 基于消息长度和多样性
     const avgLength = userMessages.reduce((sum, m) => sum + m.content.length, 0) / userMessages.length

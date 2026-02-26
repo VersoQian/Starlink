@@ -13,13 +13,16 @@ import { useComfyStore } from '../store'
 import { ResourceNode } from './nodes/resource-node'
 import { AgentNode } from './nodes/agent-node'
 import { ResultNode } from './nodes/result-node'
-import { CCBMCCardNode } from './nodes/cc-bmc-card-node'
 import { AgentAvatarNode } from './nodes/agent-avatar-node'
+import { CCBMCCardNode } from './nodes/cc-bmc-card-node'
 import { ConflictAlertNode } from './nodes/conflict-alert-node'
 import { InsightNoteNode } from './nodes/insight-note-node'
+import { PlanNode } from './nodes/plan-node'
 import { CanvasNoteNode } from './nodes/canvas-note-node'
 import { CanvasImageNode } from './nodes/canvas-image-node'
 import { DataSourceNode } from './nodes/data-source-node'
+import { CanvasRegions } from './canvas-regions'
+import { CCBMCDetailDrawer } from './cc-bmc-detail-drawer'
 import { Button } from '@/shared/components/ui/button'
 import { Sparkles, Loader2, AlertTriangle, Wand2, X, ChevronRight, Send, History, FileText, Lightbulb, Zap, TrendingUp } from 'lucide-react'
 
@@ -27,10 +30,20 @@ const nodeTypes = {
   resource: ResourceNode,
   agent: AgentNode,
   result: ResultNode,
-  'cc-bmc-card': CCBMCCardNode,
   'agent-avatar': AgentAvatarNode,
+  'cc-bmc-card': CCBMCCardNode,
+  'cc-bmc-customer-segments': CCBMCCardNode,
+  'cc-bmc-customer-relationships': CCBMCCardNode,
+  'cc-bmc-channels': CCBMCCardNode,
+  'cc-bmc-value-propositions': CCBMCCardNode,
+  'cc-bmc-revenue-streams': CCBMCCardNode,
+  'cc-bmc-key-activities': CCBMCCardNode,
+  'cc-bmc-key-resources': CCBMCCardNode,
+  'cc-bmc-key-partnerships': CCBMCCardNode,
+  'cc-bmc-cost-structure': CCBMCCardNode,
   'conflict-alert': ConflictAlertNode,
   'insight-note': InsightNoteNode,
+  'plan-node': PlanNode,
   'data-source': DataSourceNode,
   'canvas-note': CanvasNoteNode,
   'canvas-image': CanvasImageNode
@@ -69,18 +82,20 @@ type ComfyCanvasProps = {
 }
 
 export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps) {
-  const {
-    nodes,
-    edges,
-    onNodesChange,
-    onEdgesChange,
-    onConnect,
-    setNodes,
-    callLangGraph,
-    isOrchestratorProcessing,
-    callCritic,
-    isCriticProcessing,
-    setWorkspaceId
+    const {
+      nodes,
+      edges,
+      onNodesChange,
+      onEdgesChange,
+      onConnect,
+      setNodes,
+      callLangGraph,
+      isOrchestratorProcessing,
+      callCritic,
+      isCriticProcessing,
+    setWorkspaceId,
+    knowledgeEvidence,
+    setKnowledgeEvidence
   } = useComfyStore()
 
   const [seedInput, setSeedInput] = useState('')
@@ -343,9 +358,9 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
                   onClick={() => addNode(node.type)}
                   className="w-full group relative overflow-hidden"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl blur-xl"
-                    style={{ background: `linear-gradient(to right, var(--tw-gradient-stops))` }}
-                    className={`bg-gradient-to-r ${node.gradient}`}
+                  <div
+                    className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl blur-xl ${node.gradient}`}
+                    style={{ background: 'linear-gradient(to right, var(--tw-gradient-stops))' }}
                   />
                   <div className="relative flex items-center gap-4 p-4 rounded-2xl glass-effect border border-white/10 group-hover:border-white/30 transition-all group-hover:transform group-hover:scale-105 group-hover:shadow-xl">
                     <div className={`flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br ${node.gradient} shadow-lg text-2xl transform group-hover:rotate-12 transition-transform`}>
@@ -358,6 +373,20 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
                   </div>
                 </button>
               ))}
+
+              {knowledgeEvidence?.length > 0 && (
+                <div className="space-y-2.5">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">知识库证据</h3>
+                  <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-300">
+                    {knowledgeEvidence?.map((evidence) => (
+                      <div key={evidence.docId} className="space-y-1">
+                        <p className="text-amber-300 text-[11px] font-semibold truncate">{evidence.docId}</p>
+                        <p className="text-slate-400 leading-snug">{evidence.snippet}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-5 border-t border-white/10 space-y-3.5">
@@ -420,6 +449,9 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               nodeTypes={nodeTypes}
+              nodesDraggable={true}
+              nodesConnectable={true}
+              elementsSelectable={true}
               defaultEdgeOptions={{
                 type: 'smoothstep',
                 animated: true,
@@ -427,7 +459,14 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
               }}
               className="comfy-canvas"
               fitView
+              fitViewOptions={{
+                padding: 0.2,
+                includeHiddenNodes: false
+              }}
             >
+              {/* CC-BMC 区域划分层 */}
+              <CanvasRegions />
+
               <Background
                 color="#fbbf24"
                 gap={48}
@@ -577,6 +616,9 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
             </div>
           </div>
         )}
+
+        {/* CC-BMC 详情抽屉 */}
+        <CCBMCDetailDrawer />
       </div>
     </>
   )
