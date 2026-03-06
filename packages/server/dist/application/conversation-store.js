@@ -1,59 +1,15 @@
 import { nanoid } from 'nanoid';
-import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@branching-chat/shared';
-import { DifyServerService } from '../services/dify-service.js';
-const EVENT_TOPIC = 'conversation-progress';
-const ROOT_POSITION = { x: 160, y: 160 };
-const SUB_QUESTION_BLUEPRINTS = [
-    {
-        title: '澄清目标与边界',
-        bullets: ['关键目标是什么？', '价值指标如何衡量？', '重要限制或约束有哪些？']
-    },
-    {
-        title: '拆分关键维度',
-        bullets: ['涉及哪些参与方？', '目前有哪些已知信息？', '潜在的未知或风险点？']
-    },
-    {
-        title: '识别资源与数据',
-        bullets: ['有哪些可直接利用的资料？', '需要补充的调研是什么？', '数据同步与责任人是谁？']
-    }
-];
-const DIMENSION_BLUEPRINTS = [
-    {
-        title: '价值主张与用户场景',
-        bullets: ['目标用户痛点', '拟提供的价值组合', '成功衡量指标'],
-        subCategory: 'value_proposition'
-    },
-    {
-        title: '路径与执行机制',
-        bullets: ['关键活动/步骤', '所需协同角色', '可能的阻塞点'],
-        subCategory: 'channels'
-    },
-    {
-        title: '数据与验证计划',
-        bullets: ['需要验证的假设', '优先采集的数据', '验证时间线'],
-        subCategory: 'key_resources'
-    }
-];
-const ACTION_BLUEPRINTS = [
-    {
-        title: '补齐事实基础',
-        bullets: ['梳理现有资料并标记可信度', '盘点关键假设是否成立', '收集团队已有结论']
-    },
-    {
-        title: '设计验证活动',
-        bullets: ['列出必须访谈或调研的对象', '设置观察指标与成功阈值', '准备复盘时间点']
-    },
-    {
-        title: '建立复用模板',
-        bullets: ['沉淀模板/清单供未来复用', '明确后续责任人和协作路径', '安排下一次 Branching 对话']
-    }
-];
-const difyService = new DifyServerService();
+import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@starlink/shared';
+import { BusinessLangGraphService } from '../services/business-langgraph.js';
+import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js';
+const businessLangGraphService = new BusinessLangGraphService();
 export class ConversationStore {
-    constructor({ pubSub }) {
-        this.conversations = new Map();
-        this.workspaceGraphs = new Map();
-        this.pubSub = pubSub;
+    constructor({ eventBus, runtimeRepository }) {
+        this.pendingDecisionApprovals = new Map();
+        this.hitlEnabled = process.env.HITL_ENABLED === 'true';
+        this.hitlApprovalTimeoutMs = Number(process.env.HITL_APPROVAL_TIMEOUT_MS ?? '600000');
+        this.eventBus = eventBus;
+        this.runtimeRepository = runtimeRepository;
     }
     async startConversation(workspaceId, userId, question) {
         const id = nanoid();
@@ -65,49 +21,81 @@ export class ConversationStore {
             status: 'running',
             latestQuestion: question
         };
-        const execution = await buildGraphWithDify({ workspaceId, userId, question });
         const record = {
             metadata,
-            graph: execution.graph
+            graph: {
+                workspaceId,
+                nodes: [],
+                edges: []
+            },
+            knowledgeEvidence: []
         };
-        this.conversations.set(id, record);
-        this.workspaceGraphs.set(workspaceId, execution.graph);
-        const baseEvent = {
-            type: 'graph/appended',
-            conversationId: id,
-            payload: execution.graph
-        };
-        await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: baseEvent });
-        for (const delta of execution.deltas) {
-            const deltaEvent = {
-                type: 'graph/diff',
-                conversationId: id,
-                payload: {
-                    nodes: delta.nodes,
-                    edges: delta.edges
-                }
-            };
-            await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: deltaEvent });
+        await this.runtimeRepository.createConversation(id, record);
+        await this.runtimeRepository.setWorkspaceGraph(workspaceId, record.graph);
+        const stream = businessLangGraphService.streamConversation({
+            workspaceId,
+            userId,
+            question,
+            traceId: id
+        });
+        let initialized = false;
+        try {
+            const initResult = await stream.next();
+            if (!initResult.done && initResult.value?.type === 'init') {
+                initialized = true;
+                const currentGraph = initResult.value.graph;
+                record.graph = currentGraph;
+                await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph);
+                await this.runtimeRepository.updateConversation(id, record);
+                await this.persistGraphState(currentGraph);
+                const baseEvent = {
+                    type: 'graph/appended',
+                    conversationId: id,
+                    payload: currentGraph
+                };
+                await this.publishEvent(baseEvent);
+            }
         }
-        const completeEvent = {
-            type: 'status',
-            conversationId: id,
-            status: 'completed'
-        };
-        await this.pubSub.publish(EVENT_TOPIC, { conversationProgress: completeEvent });
-        record.metadata = {
-            ...record.metadata,
-            status: 'completed',
-            updatedAt: new Date()
-        };
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const failedEvent = {
+                type: 'status',
+                conversationId: id,
+                status: 'failed',
+                message
+            };
+            await this.publishEvent(failedEvent);
+            record.metadata = {
+                ...record.metadata,
+                status: 'failed',
+                updatedAt: new Date()
+            };
+            await this.runtimeRepository.updateConversation(id, record);
+            return record;
+        }
+        setTimeout(() => {
+            void this.runConversationStream({
+                stream,
+                record,
+                workspaceId,
+                conversationId: id,
+                initialized
+            });
+        }, 0);
         return record;
     }
-    getConversation(id) {
-        const record = this.conversations.get(id);
-        return record ? { ...record, metadata: conversationMetadataSchema.parse(record.metadata) } : null;
+    async getConversation(id) {
+        const record = await this.runtimeRepository.getConversation(id);
+        if (!record)
+            return null;
+        const metadata = conversationMetadataSchema.parse(record.metadata);
+        return {
+            ...record,
+            metadata
+        };
     }
-    getGraph(workspaceId) {
-        const manualGraph = this.workspaceGraphs.get(workspaceId);
+    async getGraph(workspaceId) {
+        const manualGraph = await this.runtimeRepository.getWorkspaceGraph(workspaceId);
         if (manualGraph) {
             return {
                 workspaceId: manualGraph.workspaceId,
@@ -115,13 +103,23 @@ export class ConversationStore {
                 edges: [...manualGraph.edges]
             };
         }
-        const existing = [...this.conversations.values()].find((conv) => conv.graph.workspaceId === workspaceId);
+        const workspaceConversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId);
+        const existing = workspaceConversations[0]?.record;
         if (existing) {
-            this.workspaceGraphs.set(workspaceId, existing.graph);
+            await this.runtimeRepository.setWorkspaceGraph(workspaceId, existing.graph);
             return {
                 workspaceId,
                 nodes: [...existing.graph.nodes],
                 edges: [...existing.graph.edges]
+            };
+        }
+        const persistedGraph = await loadPersistedGraph(workspaceId);
+        if (persistedGraph) {
+            await this.runtimeRepository.setWorkspaceGraph(workspaceId, persistedGraph);
+            return {
+                workspaceId,
+                nodes: [...persistedGraph.nodes],
+                edges: [...persistedGraph.edges]
             };
         }
         const emptyGraph = {
@@ -129,10 +127,10 @@ export class ConversationStore {
             nodes: [],
             edges: []
         };
-        this.workspaceGraphs.set(workspaceId, emptyGraph);
+        await this.runtimeRepository.setWorkspaceGraph(workspaceId, emptyGraph);
         return emptyGraph;
     }
-    addNode(workspaceId, input) {
+    async addNode(workspaceId, input) {
         const id = input.id ?? nanoid();
         const parsed = canvasNodeSchema.parse({
             id,
@@ -140,26 +138,29 @@ export class ConversationStore {
             position: input.position,
             data: input.data
         });
-        const baseGraph = this.getGraph(workspaceId);
+        const baseGraph = await this.getGraph(workspaceId);
         const updatedNodes = [...baseGraph.nodes.filter((node) => node.id !== parsed.id), parsed];
         const updatedGraph = {
             workspaceId,
             nodes: updatedNodes,
             edges: baseGraph.edges
         };
-        this.workspaceGraphs.set(workspaceId, updatedGraph);
-        // Also update any conversation record referencing this workspace
-        for (const record of this.conversations.values()) {
-            if (record.graph.workspaceId === workspaceId) {
-                record.graph = {
-                    ...record.graph,
+        await this.runtimeRepository.setWorkspaceGraph(workspaceId, updatedGraph);
+        await this.persistGraphState(updatedGraph);
+        const conversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId);
+        for (const item of conversations) {
+            const nextRecord = {
+                ...item.record,
+                graph: {
+                    ...item.record.graph,
                     nodes: updatedNodes
-                };
-            }
+                }
+            };
+            await this.runtimeRepository.updateConversation(item.id, nextRecord);
         }
         return parsed;
     }
-    connectNodes(workspaceId, input) {
+    async connectNodes(workspaceId, input) {
         const id = input.id ?? nanoid();
         const parsed = canvasEdgeSchema.parse({
             id,
@@ -167,137 +168,326 @@ export class ConversationStore {
             target: input.target,
             label: input.label ?? null
         });
-        const baseGraph = this.getGraph(workspaceId);
+        const baseGraph = await this.getGraph(workspaceId);
         const updatedEdges = [...baseGraph.edges.filter((edge) => edge.id !== parsed.id), parsed];
         const updatedGraph = {
             workspaceId,
             nodes: baseGraph.nodes,
             edges: updatedEdges
         };
-        this.workspaceGraphs.set(workspaceId, updatedGraph);
-        for (const record of this.conversations.values()) {
-            if (record.graph.workspaceId === workspaceId) {
-                record.graph = {
-                    ...record.graph,
+        await this.runtimeRepository.setWorkspaceGraph(workspaceId, updatedGraph);
+        await this.persistGraphState(updatedGraph);
+        const conversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId);
+        for (const item of conversations) {
+            const nextRecord = {
+                ...item.record,
+                graph: {
+                    ...item.record.graph,
                     edges: updatedEdges
-                };
-            }
+                }
+            };
+            await this.runtimeRepository.updateConversation(item.id, nextRecord);
         }
         return parsed;
     }
+    async persistGraphState(graph) {
+        try {
+            await persistCanvasGraph(graph);
+        }
+        catch (error) {
+            console.error('Failed to persist canvas graph', error);
+        }
+    }
     getEventIterator() {
-        return this.pubSub.asyncIterableIterator(EVENT_TOPIC);
+        return this.eventBus.getEventIterator();
+    }
+    async close() {
+        for (const approval of this.pendingDecisionApprovals.values()) {
+            if (approval.timeout) {
+                clearTimeout(approval.timeout);
+            }
+        }
+        this.pendingDecisionApprovals.clear();
+        await this.runtimeRepository.close();
+        await this.eventBus.close();
+    }
+    async approveDecision(conversationId, decision) {
+        const pending = this.pendingDecisionApprovals.get(conversationId);
+        if (!pending) {
+            return false;
+        }
+        const nextDecision = (decision ?? '').trim() || pending.decision;
+        pending.resolve(nextDecision);
+        return true;
+    }
+    async runConversationStream(options) {
+        console.log('🎬 [runConversationStream] Starting background stream processing...');
+        let { stream, record, workspaceId, conversationId, initialized } = options;
+        let currentGraph = record.graph;
+        const emittedTurnNodeIds = new Set();
+        let currentPhase = null;
+        let latestDecision = '';
+        const publishEvent = async (event) => {
+            await this.publishEvent(event);
+        };
+        const publishPhaseChanged = async (phase, reason) => {
+            if (currentPhase === phase)
+                return;
+            currentPhase = phase;
+            await publishEvent({
+                type: 'phase.changed',
+                conversationId,
+                payload: {
+                    workspaceId,
+                    phase,
+                    reason: reason ?? null,
+                    occurredAt: new Date().toISOString()
+                }
+            });
+        };
+        const publishSeminarTurn = async (payload) => {
+            await publishEvent({
+                type: 'seminar.turn.completed',
+                conversationId,
+                payload: {
+                    workspaceId,
+                    phase: payload.phase,
+                    agentId: payload.agentId,
+                    agentName: payload.agentName,
+                    nodeId: payload.nodeId,
+                    title: payload.title,
+                    summary: payload.summary,
+                    occurredAt: new Date().toISOString()
+                }
+            });
+        };
+        await publishPhaseChanged('planning', 'conversation.started');
+        try {
+            console.log('🔄 [runConversationStream] Iterating stream updates...');
+            for await (const update of stream) {
+                if (update.type === 'init') {
+                    currentGraph = update.graph;
+                    record.graph = currentGraph;
+                    await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph);
+                    await this.persistGraphState(currentGraph);
+                    record.knowledgeEvidence = update.knowledgeEvidence ?? [];
+                    await this.runtimeRepository.updateConversation(conversationId, record);
+                    if (!initialized) {
+                        initialized = true;
+                        const appendedEvent = {
+                            type: 'graph/appended',
+                            conversationId,
+                            payload: currentGraph
+                        };
+                        await this.publishEvent(appendedEvent);
+                    }
+                    continue;
+                }
+                if (update.type === 'delta') {
+                    currentGraph = applyGraphDelta(currentGraph, update.delta);
+                    record.graph = currentGraph;
+                    await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph);
+                    await this.runtimeRepository.updateConversation(conversationId, record);
+                    await this.persistGraphState(currentGraph);
+                    const event = initialized
+                        ? {
+                            type: 'graph/diff',
+                            conversationId,
+                            payload: { nodes: update.delta.nodes, edges: update.delta.edges }
+                        }
+                        : {
+                            type: 'graph/appended',
+                            conversationId,
+                            payload: currentGraph
+                        };
+                    await publishEvent(event);
+                    initialized = true;
+                    const deltaNodes = update.delta.nodes ?? [];
+                    for (const node of deltaNodes) {
+                        const info = extractRuntimeInfo(node);
+                        if (!info)
+                            continue;
+                        await publishPhaseChanged(info.stage, `from.${info.agentName}`);
+                        if (!emittedTurnNodeIds.has(node.id)) {
+                            emittedTurnNodeIds.add(node.id);
+                            await publishSeminarTurn({
+                                phase: info.stage,
+                                agentId: info.agentId,
+                                agentName: info.agentName,
+                                nodeId: node.id,
+                                title: info.title,
+                                summary: info.summary
+                            });
+                        }
+                        if (info.stage === 'decision' && info.summary.trim().length > 0) {
+                            latestDecision = info.summary;
+                        }
+                    }
+                    continue;
+                }
+                if (update.type === 'status') {
+                    continue;
+                }
+            }
+            if (!latestDecision) {
+                latestDecision = findLatestDecision(currentGraph);
+            }
+            if (latestDecision) {
+                if (this.hitlEnabled) {
+                    latestDecision = await this.waitForDecisionApproval({
+                        conversationId,
+                        workspaceId,
+                        decision: latestDecision,
+                        record
+                    });
+                }
+                await publishPhaseChanged('decision', 'seminar.final-decision');
+                await publishEvent({
+                    type: 'seminar.decision.made',
+                    conversationId,
+                    payload: {
+                        workspaceId,
+                        phase: 'decision',
+                        decision: latestDecision,
+                        occurredAt: new Date().toISOString()
+                    }
+                });
+            }
+            const completeEvent = {
+                type: 'status',
+                conversationId,
+                status: 'completed'
+            };
+            await publishEvent(completeEvent);
+            record.metadata = {
+                ...record.metadata,
+                status: 'completed',
+                updatedAt: new Date()
+            };
+            await this.runtimeRepository.updateConversation(conversationId, record);
+            console.log('✅ [runConversationStream] Stream completed successfully');
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const stack = error instanceof Error ? error.stack : undefined;
+            console.error('❌ [runConversationStream] Stream failed:', message);
+            if (stack) {
+                console.error('Stack trace:', stack);
+            }
+            const failedEvent = {
+                type: 'status',
+                conversationId,
+                status: 'failed',
+                message
+            };
+            await publishEvent(failedEvent);
+            record.metadata = {
+                ...record.metadata,
+                status: 'failed',
+                updatedAt: new Date()
+            };
+            await this.runtimeRepository.updateConversation(conversationId, record);
+        }
+    }
+    async publishEvent(event) {
+        await this.eventBus.publish(event);
+    }
+    async waitForDecisionApproval(options) {
+        const { conversationId, workspaceId, decision, record } = options;
+        await this.publishEvent({
+            type: 'seminar.decision.requested',
+            conversationId,
+            payload: {
+                workspaceId,
+                phase: 'decision',
+                decision,
+                occurredAt: new Date().toISOString()
+            }
+        });
+        record.metadata = {
+            ...record.metadata,
+            status: 'paused',
+            updatedAt: new Date()
+        };
+        await this.runtimeRepository.updateConversation(conversationId, record);
+        return await new Promise((resolve) => {
+            const finalize = (nextDecision) => {
+                const existing = this.pendingDecisionApprovals.get(conversationId);
+                if (existing?.timeout) {
+                    clearTimeout(existing.timeout);
+                }
+                this.pendingDecisionApprovals.delete(conversationId);
+                resolve(nextDecision);
+            };
+            const timeout = setTimeout(() => {
+                finalize(decision);
+            }, this.hitlApprovalTimeoutMs);
+            this.pendingDecisionApprovals.set(conversationId, {
+                decision,
+                timeout,
+                resolve: finalize
+            });
+        });
     }
 }
-async function buildGraphWithDify(context) {
-    const summary = await difyService.generateSummary(context.question, context.userId);
-    const nodes = [];
-    const edges = [];
-    const deltas = [];
-    const addNode = (node, edge) => {
-        nodes.push(node);
-        if (edge) {
-            edges.push(edge);
+const AGENT_NAME_MAP = {
+    Market_Agent: 'Market Agent',
+    Product_Agent: 'Product Agent',
+    Finance_Agent: 'Finance Agent',
+    Adversarial_Critic: 'Critic Agent',
+    Orchestrator: 'Orchestrator'
+};
+function extractRuntimeInfo(node) {
+    const data = (node.data ?? {});
+    const meta = data.meta;
+    const agentId = meta?.metadata?.agent_signature ?? meta?.agentType;
+    if (!agentId)
+        return null;
+    const title = (typeof data.title === 'string' && data.title.trim()) || node.id;
+    const summary = typeof data.content === 'string' ? data.content : '';
+    const stage = inferPhase(agentId, meta?.macraType, title, summary);
+    return {
+        stage,
+        agentId,
+        agentName: AGENT_NAME_MAP[agentId] ?? agentId,
+        nodeId: node.id,
+        title,
+        summary
+    };
+}
+function inferPhase(agentId, macraType, title = '', content = '') {
+    const corpus = `${title}\n${content}`;
+    if (agentId === 'Adversarial_Critic' || macraType === 'conflict-alert') {
+        return 'review';
+    }
+    if (agentId === 'Orchestrator') {
+        if (/规划|计划|路线|拆解|阶段|里程碑/.test(corpus)) {
+            return 'planning';
         }
-        deltas.push({
-            nodes: [node],
-            edges: edge ? [edge] : undefined
-        });
+        return 'decision';
+    }
+    return 'execution';
+}
+function findLatestDecision(graph) {
+    const decisionNodes = graph.nodes
+        .map((node) => extractRuntimeInfo(node))
+        .filter((item) => item !== null)
+        .filter((item) => item.stage === 'decision');
+    return decisionNodes[decisionNodes.length - 1]?.summary ?? '';
+}
+function applyGraphDelta(graph, delta) {
+    return {
+        workspaceId: graph.workspaceId,
+        nodes: mergeById(graph.nodes, delta.nodes),
+        edges: mergeById(graph.edges, delta.edges)
     };
-    const rootNode = {
-        id: `root-${nanoid(8)}`,
-        type: 'note',
-        position: { ...ROOT_POSITION },
-        data: {
-            type: 'note',
-            title: '多维画布任务',
-            subtitle: `提问人：${context.userId || 'anonymous'}`,
-            content: summary,
-            footerText: 'Dify 工作流生成摘要 · 节点会随着推理逐步出现',
-            variant: 'primary'
-        }
-    };
-    addNode(rootNode);
-    const branchSpacing = 320;
-    const levelSpacing = 220;
-    const branchNodes = SUB_QUESTION_BLUEPRINTS.map((blueprint, index) => {
-        const node = {
-            id: `branch-${nanoid(8)}`,
-            type: 'note',
-            position: {
-                x: ROOT_POSITION.x + branchSpacing * (index + 1),
-                y: ROOT_POSITION.y
-            },
-            data: {
-                type: 'note',
-                title: `分支 ${index + 1} · ${blueprint.title}`,
-                content: `围绕「${context.question}」聚焦这一分支，并记录讨论要点。`,
-                bullets: blueprint.bullets,
-                variant: 'timeline-step'
-            }
-        };
-        const edge = {
-            id: `${rootNode.id}->${node.id}`,
-            source: rootNode.id,
-            target: node.id,
-            label: `主题 ${index + 1}`
-        };
-        addNode(node, edge);
-        return node;
-    });
-    branchNodes.forEach((branch, index) => {
-        const dimensionBlueprint = DIMENSION_BLUEPRINTS[index % DIMENSION_BLUEPRINTS.length];
-        const dimensionNode = {
-            id: `dimension-${nanoid(8)}`,
-            type: 'note',
-            position: {
-                x: branch.position.x,
-                y: branch.position.y + levelSpacing
-            },
-            data: {
-                type: 'note',
-                title: dimensionBlueprint.title,
-                content: `从该维度拆解「${context.question}」。`,
-                bullets: dimensionBlueprint.bullets,
-                variant: 'timeline-dimension',
-                subCategory: dimensionBlueprint.subCategory
-            }
-        };
-        const dimensionEdge = {
-            id: `${branch.id}->${dimensionNode.id}`,
-            source: branch.id,
-            target: dimensionNode.id,
-            label: '分析维度'
-        };
-        addNode(dimensionNode, dimensionEdge);
-        const actionBlueprint = ACTION_BLUEPRINTS[index % ACTION_BLUEPRINTS.length];
-        const actionNode = {
-            id: `action-${nanoid(8)}`,
-            type: 'note',
-            position: {
-                x: dimensionNode.position.x,
-                y: dimensionNode.position.y + levelSpacing
-            },
-            data: {
-                type: 'note',
-                title: actionBlueprint.title,
-                bullets: actionBlueprint.bullets,
-                variant: 'timeline-action',
-                content: '完成后请在节点评论里更新进展。'
-            }
-        };
-        const actionEdge = {
-            id: `${dimensionNode.id}->${actionNode.id}`,
-            source: dimensionNode.id,
-            target: actionNode.id,
-            label: '行动计划'
-        };
-        addNode(actionNode, actionEdge);
-    });
-    const graph = {
-        workspaceId: context.workspaceId,
-        nodes,
-        edges
-    };
-    return { graph, deltas };
+}
+function mergeById(current, updates) {
+    if (!updates || updates.length === 0)
+        return current;
+    const merged = new Map(current.map((item) => [item.id, item]));
+    for (const item of updates) {
+        merged.set(item.id, item);
+    }
+    return [...merged.values()];
 }

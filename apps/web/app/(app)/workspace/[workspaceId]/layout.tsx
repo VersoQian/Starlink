@@ -2,6 +2,7 @@
 
 import { ReactNode, useMemo } from 'react'
 import Link from 'next/link'
+import type { Route } from 'next'
 import { usePathname } from 'next/navigation'
 import { useTheme, cn, bgToText } from '@/lib/theme'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -72,6 +73,18 @@ export default function WorkspaceLayout({ children, params }: WorkspaceLayoutPro
           label: '智绘·无限商业画布',
           description: 'MACRA架构驱动的智能画布，AI多Agent协作生成商业模型。',
           href: `${basePath}/comfy`
+        },
+        {
+          key: 'agents',
+          label: 'Agent 面板',
+          description: '按角色查看每个 Agent 的规划、执行与思考摘要。',
+          href: `${basePath}/agents`
+        },
+        {
+          key: 'seminar',
+          label: '研讨会',
+          description: '多智能体模拟公司研讨，聚合冲突质询与决策收敛。',
+          href: `${basePath}/seminar`
         }
       ] as const,
     [basePath]
@@ -108,7 +121,7 @@ export default function WorkspaceLayout({ children, params }: WorkspaceLayoutPro
             return item.href ? (
               <Link
                 key={item.key}
-                href={item.href}
+                href={item.href as Route}
                 className={cn(
                   'block rounded-xl border px-4 py-3 text-sm font-medium transition',
                   isActive

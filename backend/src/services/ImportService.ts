@@ -107,6 +107,40 @@ export class ImportService {
     return task
   }
 
+  static async claimPendingTask(taskId: string) {
+    const claimed = await prisma.importTask.updateMany({
+      where: {
+        id: taskId,
+        status: 'pending'
+      },
+      data: {
+        status: 'processing',
+        error: null
+      }
+    })
+
+    if (claimed.count === 0) {
+      return null
+    }
+
+    const task = await prisma.importTask.findUnique({
+      where: { id: taskId }
+    })
+
+    if (!task) {
+      return null
+    }
+
+    await TaskEventService.emitTaskStatus({
+      taskId: task.id,
+      kbId: task.kbId,
+      taskType: task.type,
+      status: task.status
+    })
+
+    return task
+  }
+
   static async finalizeTask(task: ImportTask) {
     if (task.status !== 'succeeded') return
 

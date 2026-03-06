@@ -1,7 +1,40 @@
 import { z } from 'zod'
 import { canvasGraphSchema } from './canvas.js'
 
-export const conversationStatusSchema = z.enum(['idle', 'running', 'failed', 'completed'])
+export const conversationStatusSchema = z.enum(['idle', 'running', 'paused', 'failed', 'completed'])
+export const seminarPhaseSchema = z.enum(['planning', 'execution', 'review', 'decision'])
+
+export const phaseChangedPayloadSchema = z.object({
+  workspaceId: z.string(),
+  phase: seminarPhaseSchema,
+  reason: z.string().nullable().optional(),
+  occurredAt: z.string()
+})
+
+export const seminarTurnCompletedPayloadSchema = z.object({
+  workspaceId: z.string(),
+  phase: seminarPhaseSchema,
+  agentId: z.string(),
+  agentName: z.string(),
+  nodeId: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  occurredAt: z.string()
+})
+
+export const seminarDecisionPayloadSchema = z.object({
+  workspaceId: z.string(),
+  phase: z.literal('decision'),
+  decision: z.string(),
+  occurredAt: z.string()
+})
+
+export const seminarDecisionRequestedPayloadSchema = z.object({
+  workspaceId: z.string(),
+  phase: z.literal('decision'),
+  decision: z.string(),
+  occurredAt: z.string()
+})
 
 export const conversationEventSchema = z.discriminatedUnion('type', [
   z.object({
@@ -22,6 +55,26 @@ export const conversationEventSchema = z.discriminatedUnion('type', [
     conversationId: z.string(),
     status: conversationStatusSchema,
     message: z.string().optional()
+  }),
+  z.object({
+    type: z.literal('phase.changed'),
+    conversationId: z.string(),
+    payload: phaseChangedPayloadSchema
+  }),
+  z.object({
+    type: z.literal('seminar.turn.completed'),
+    conversationId: z.string(),
+    payload: seminarTurnCompletedPayloadSchema
+  }),
+  z.object({
+    type: z.literal('seminar.decision.made'),
+    conversationId: z.string(),
+    payload: seminarDecisionPayloadSchema
+  }),
+  z.object({
+    type: z.literal('seminar.decision.requested'),
+    conversationId: z.string(),
+    payload: seminarDecisionRequestedPayloadSchema
   })
 ])
 
@@ -41,6 +94,11 @@ export const knowledgeEvidenceSchema = z.object({
 })
 
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>
+export type SeminarPhase = z.infer<typeof seminarPhaseSchema>
+export type PhaseChangedPayload = z.infer<typeof phaseChangedPayloadSchema>
+export type SeminarTurnCompletedPayload = z.infer<typeof seminarTurnCompletedPayloadSchema>
+export type SeminarDecisionPayload = z.infer<typeof seminarDecisionPayloadSchema>
+export type SeminarDecisionRequestedPayload = z.infer<typeof seminarDecisionRequestedPayloadSchema>
 export type ConversationEvent = z.infer<typeof conversationEventSchema>
 export type ConversationMetadata = z.infer<typeof conversationMetadataSchema>
 export type KnowledgeEvidence = z.infer<typeof knowledgeEvidenceSchema>

@@ -10,6 +10,7 @@ jest.mock('../prisma', () => ({
     importTask: {
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       findUnique: jest.fn(),
       count: jest.fn(),
     },
@@ -81,5 +82,32 @@ describe('ImportService.addFiles', () => {
     expect(taskEventServiceMock.emitTaskStatus).toHaveBeenCalled()
     expect(taskRunnerMock.enqueue).toHaveBeenCalled()
     expect(kbServiceMock.setStatus).toHaveBeenCalledWith('kb-1', 'processing')
+  })
+})
+
+describe('ImportService.claimPendingTask', () => {
+  it('claims pending task and emits processing event', async () => {
+    ;(prismaMock.importTask.updateMany as jest.Mock).mockResolvedValue({ count: 1 })
+    ;(prismaMock.importTask.findUnique as jest.Mock).mockResolvedValue({
+      id: 'task-9',
+      kbId: 'kb-9',
+      type: 'seed',
+      status: 'processing'
+    })
+
+    const claimed = await ImportService.claimPendingTask('task-9')
+
+    expect(prismaMock.importTask.updateMany).toHaveBeenCalledWith({
+      where: { id: 'task-9', status: 'pending' },
+      data: { status: 'processing', error: null }
+    })
+    expect(taskEventServiceMock.emitTaskStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-9',
+        kbId: 'kb-9',
+        status: 'processing'
+      })
+    )
+    expect(claimed).toEqual(expect.objectContaining({ id: 'task-9' }))
   })
 })

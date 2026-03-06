@@ -42,14 +42,38 @@ export function ResultNode({ id }: NodeProps) {
               <div className="text-sm bg-zinc-800/50 p-4 rounded-lg border border-zinc-700 max-h-96 overflow-y-auto text-zinc-300">
                 <ReactMarkdown
                   components={{
-                    h1: ({node, ...props}) => <h1 className="text-lg font-bold mb-2 text-zinc-100" {...props} />,
-                    h2: ({node, ...props}) => <h2 className="text-base font-bold mb-2 text-zinc-100" {...props} />,
-                    h3: ({node, ...props}) => <h3 className="text-sm font-bold mb-1 text-zinc-100" {...props} />,
-                    p: ({node, ...props}) => <p className="mb-2 text-zinc-300" {...props} />,
-                    ul: ({node, ...props}) => <ul className="list-disc list-inside mb-2 text-zinc-300" {...props} />,
-                    ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-2 text-zinc-300" {...props} />,
-                    strong: ({node, ...props}) => <strong className="font-semibold text-zinc-100" {...props} />,
-                    code: ({node, ...props}) => <code className="bg-zinc-900 px-1 py-0.5 rounded text-green-400" {...props} />
+                    h1: ({ node, ...props }) => {
+                      void node
+                      return <h1 className="text-lg font-bold mb-2 text-zinc-100" {...props} />
+                    },
+                    h2: ({ node, ...props }) => {
+                      void node
+                      return <h2 className="text-base font-bold mb-2 text-zinc-100" {...props} />
+                    },
+                    h3: ({ node, ...props }) => {
+                      void node
+                      return <h3 className="text-sm font-bold mb-1 text-zinc-100" {...props} />
+                    },
+                    p: ({ node, ...props }) => {
+                      void node
+                      return <p className="mb-2 text-zinc-300" {...props} />
+                    },
+                    ul: ({ node, ...props }) => {
+                      void node
+                      return <ul className="list-disc list-inside mb-2 text-zinc-300" {...props} />
+                    },
+                    ol: ({ node, ...props }) => {
+                      void node
+                      return <ol className="list-decimal list-inside mb-2 text-zinc-300" {...props} />
+                    },
+                    strong: ({ node, ...props }) => {
+                      void node
+                      return <strong className="font-semibold text-zinc-100" {...props} />
+                    },
+                    code: ({ node, ...props }) => {
+                      void node
+                      return <code className="bg-zinc-900 px-1 py-0.5 rounded text-green-400" {...props} />
+                    }
                   }}
                 >
                   {result}

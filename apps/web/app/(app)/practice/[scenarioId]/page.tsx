@@ -6,7 +6,7 @@ import { ScenarioList, ChatInterface, ContextAssistant, useSessionStorage, useSc
 import type { Scenario, Message, Insight, Resource } from '@/features/practice'
 import { nanoid } from 'nanoid'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { useTheme, cn, bgToText, bgToBorder } from '@/lib/theme'
+import { useTheme, cn, bgToBorder } from '@/lib/theme'
 
 export default function ScenarioPage() {
   const params = useParams()

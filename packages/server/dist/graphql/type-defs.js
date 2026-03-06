@@ -43,9 +43,52 @@ export const typeDefs = gql `
     payload: JSON
   }
 
+  type KnowledgeEvidence {
+    docId: ID!
+    snippet: String!
+    score: Float!
+    metadata: JSON
+  }
+
   type StartConversationPayload {
     metadata: ConversationMetadata!
     graph: CanvasGraph!
+    knowledgeEvidence: [KnowledgeEvidence!]!
+  }
+
+  type KbTaskStatus {
+    taskId: ID!
+    kbId: ID!
+    status: String!
+    taskType: String!
+    error: String
+    updatedAt: String!
+    lastEventId: ID!
+  }
+
+  type KnowledgeBase {
+    id: ID!
+    name: String!
+    status: String!
+    createdAt: String!
+    updatedAt: String!
+    publishedAt: String
+  }
+
+  type KbTask {
+    id: ID!
+    kbId: ID!
+    type: String!
+    status: String!
+    payload: JSON!
+    error: String
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type KnowledgeBaseStatus {
+    knowledgeBase: KnowledgeBase!
+    tasks: [KbTask!]!
   }
 
   input CanvasPositionInput {
@@ -70,12 +113,20 @@ export const typeDefs = gql `
   type Query {
     workspaceGraph(workspaceId: ID!): CanvasGraph!
     conversation(id: ID!): StartConversationPayload
+    kbTaskStatus(kbId: ID!): [KbTaskStatus!]!
+    knowledgeBases: [KnowledgeBase!]!
+    knowledgeBaseStatus(kbId: ID!): KnowledgeBaseStatus!
   }
 
   type Mutation {
     startConversation(workspaceId: ID!, question: String!): StartConversationPayload!
+    approveDecision(conversationId: ID!, decision: String): Boolean!
     addNode(workspaceId: ID!, input: NodeInput!): CanvasNode!
     connectNodes(workspaceId: ID!, input: EdgeInput!): CanvasEdge!
+    createKnowledgeBase: KnowledgeBase!
+    publishKnowledgeBase(kbId: ID!): KnowledgeBase!
+    addKnowledgeSeed(kbId: ID!, text: String!): KbTask!
+    importKnowledgeUrl(kbId: ID!, url: String!): KbTask!
   }
 
   type Subscription {

@@ -10,8 +10,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const {
       text,
-      mode = 'simplified-traditional',
-      workspaceId
+      mode = 'simplified-traditional'
     } = body
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {

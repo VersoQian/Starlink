@@ -70,13 +70,13 @@ function handleChunk(chunk: string, emit?: (event: DifyStreamEvent) => void) {
   let eventType: string | null = null
   let dataPayload = ''
 
-  chunk.split('\n').forEach((line) => {
+  for (const line of chunk.split('\n')) {
     if (line.startsWith('event:')) {
       eventType = line.slice('event:'.length).trim()
     } else if (line.startsWith('data:')) {
       dataPayload += `${line.slice('data:'.length).trim()}\n`
     }
-  })
+  }
 
   const trimmedData = dataPayload.trim()
 

@@ -1,6 +1,8 @@
 'use client'
 
 import {
+  type Dispatch,
+  type SetStateAction,
   forwardRef,
   useCallback,
   useEffect,
@@ -24,6 +26,7 @@ import {
   useReactFlow
 } from 'reactflow'
 import type { UseMutationResult } from '@tanstack/react-query'
+import { useSearchParams } from 'next/navigation'
 
 import { useWorkspaceGraph } from '../hooks'
 import { useCanvasStore } from '../store'
@@ -31,15 +34,16 @@ import { NoteNode } from './nodes/note-node'
 import { DocumentNode } from './nodes/document-node'
 import { TaskNode } from './nodes/task-node'
 import { ReferenceNode } from './nodes/reference-node'
-import type { CanvasNode, CanvasNodeData } from '@/types/graph'
+import type { CanvasEdge, CanvasNode, CanvasNodeData, WorkspaceGraphResponse } from '@/types/graph'
 import { REACT_FLOW_DRAG_TYPE } from '@/shared/lib/drag-constants'
+import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import { useCanvasMutations } from '../hooks'
-import { useAnalyzeQuestion } from '@starlink/ui'
 import { DashedEdge } from './edges/dashed-edge'
 import { TimelineEdge } from './edges/timeline-edge'
-import type { TimelineNode as TimelineNodeData, TimelineEdge as TimelineEdgeData } from '@/types/timeline'
+import type { TimelineIteration, TimelineNode as TimelineNodeData, TimelineEdge as TimelineEdgeData } from '@/types/timeline'
 import clsx from 'clsx'
 import { saveTimelineIteration } from '../lib/timeline-history-storage'
+import { watchConversation } from '@/shared/lib/conversation-sync-engine'
 
 export type CanvasViewportHandle = {
   generateAnalysis: (question: string) => Promise<void>
@@ -49,6 +53,77 @@ export type CanvasViewportHandle = {
 
 type CanvasViewportProps = {
   workspaceId: string
+}
+
+type StartConversationResult = {
+  startConversation: {
+    metadata: {
+      id: string
+    }
+    graph: WorkspaceGraphResponse
+  }
+}
+
+const START_CONVERSATION_MUTATION = /* GraphQL */ `
+  mutation StartConversation($workspaceId: ID!, $question: String!) {
+    startConversation(workspaceId: $workspaceId, question: $question) {
+      metadata {
+        id
+      }
+      graph {
+        workspaceId
+        nodes {
+          id
+          type
+          position {
+            x
+            y
+          }
+          data
+        }
+        edges {
+          id
+          source
+          target
+          label
+        }
+      }
+    }
+  }
+`
+
+function mergeById<T extends { id: string }>(current: T[], updates?: T[]): T[] {
+  if (!updates || updates.length === 0) return current
+  const merged = new Map(current.map((item) => [item.id, item]))
+  for (const item of updates) {
+    merged.set(item.id, item)
+  }
+  return [...merged.values()]
+}
+
+function toTimelinePayload(graph: WorkspaceGraphResponse): { nodes: TimelineNodeData[]; edges: TimelineEdgeData[] } {
+  return {
+    nodes: graph.nodes.map((node) => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      data: node.data as Record<string, unknown>
+    })),
+    edges: graph.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.label ?? null
+    }))
+  }
+}
+
+function applyGraphDelta(graph: WorkspaceGraphResponse, delta: { nodes?: CanvasNode[]; edges?: CanvasEdge[] }): WorkspaceGraphResponse {
+  return {
+    workspaceId: graph.workspaceId,
+    nodes: mergeById(graph.nodes, delta.nodes),
+    edges: mergeById(graph.edges, delta.edges)
+  }
 }
 
 export const CanvasViewport = forwardRef<CanvasViewportHandle, CanvasViewportProps>(function CanvasViewport(
@@ -73,17 +148,20 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
   const containerRef = useRef<HTMLDivElement>(null)
   const { data, isSuccess, isLoading, isError, refetch } = useWorkspaceGraph(workspaceId)
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNodeData>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const reactFlow = useReactFlow()
   const setZoom = useCanvasStore((state) => state.setZoom)
   const taskId = useCanvasStore((state) => state.taskId)
   const setTaskId = useCanvasStore((state) => state.setTaskId)
+  const iterations = useCanvasStore((state) => state.iterations)
   const addIterationToStore = useCanvasStore((state) => state.addIteration)
   const { addNode, connectNodes } = useCanvasMutations(workspaceId)
-  const analyzeQuestion = useAnalyzeQuestion({ endpoint: '/api/ai/analyze' })
+  const searchParams = useSearchParams()
+  const focusNodeId = searchParams.get('focusNodeId')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const selectedNodeIdRef = useRef<string | null>(null)
   const mainNodeIdRef = useRef<string | null>(null)
+  const focusedNodeIdRef = useRef<string | null>(null)
   const [pendingNodes, setPendingNodes] = useState<Node<CanvasNodeData>[]>([])
   const [pendingEdges, setPendingEdges] = useState<Edge[]>([])
   const nodesRef = useRef<Node<CanvasNodeData>[]>([])
@@ -128,6 +206,25 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
   useEffect(() => {
     selectedNodeIdRef.current = selectedNodeId
   }, [selectedNodeId])
+
+  useEffect(() => {
+    if (!focusNodeId) {
+      focusedNodeIdRef.current = null
+      return
+    }
+    if (focusedNodeIdRef.current === focusNodeId) return
+
+    const targetNode = nodesRef.current.find((node) => node.id === focusNodeId)
+    if (!targetNode) return
+
+    focusedNodeIdRef.current = focusNodeId
+    setSelectedNodeId(focusNodeId)
+    reactFlow.fitView({
+      nodes: [targetNode],
+      padding: 0.35,
+      duration: 450
+    })
+  }, [focusNodeId, reactFlow, setSelectedNodeId])
 
   const syncTimeline = useCallback(
     (
@@ -229,7 +326,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
   useEffect(() => {
     if (pendingNodes.length === 0) return
     const queue = [...pendingNodes]
-    let timer: number | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
 
     const addNext = () => {
@@ -270,7 +367,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
   useEffect(() => {
     if (pendingEdges.length === 0 || pendingNodes.length > 0) return
     const queue = [...pendingEdges]
-    let timer: number | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
 
     const addNextEdge = () => {
@@ -329,6 +426,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
       event.preventDefault()
       const nodeType = event.dataTransfer.getData(REACT_FLOW_DRAG_TYPE)
       if (!nodeType) return
+      const canvasNodeType = nodeType as CanvasNode['type']
 
       const bounds = event.currentTarget.getBoundingClientRect()
       const position = reactFlow.project({
@@ -336,10 +434,10 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
         y: event.clientY - bounds.top
       })
 
-      const nodeData = createDefaultNodeData(nodeType as CanvasNode['type'])
+      const nodeData = createDefaultNodeData(canvasNodeType)
       const tempNode: Node<CanvasNodeData> = {
         id: `temp-${Date.now()}`,
-        type: nodeType as CanvasNode['type'],
+        type: canvasNodeType,
         position,
         data: nodeData,
         className: 'canvas-node animate-canvas-node'
@@ -348,7 +446,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
       setNodes((current) => current.concat(tempNode))
       addNode.mutate(
         {
-          type: tempNode.type,
+          type: canvasNodeType,
           position,
           data: nodeData
         },
@@ -368,8 +466,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
       const tempEdge: Edge = {
         id: `temp-edge-${Date.now()}`,
         source: connection.source,
-        target: connection.target,
-        label: connection.label ?? undefined
+        target: connection.target
       }
 
       setEdges((curr) => curr.concat(tempEdge))
@@ -377,7 +474,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
         {
           source: connection.source,
           target: connection.target,
-          label: connection.label ?? null
+          label: null
         },
         {
           onError: () => {
@@ -431,62 +528,59 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
 
   const generateAnalysis = useCallback(
     async (question: string) => {
-      let rootNodeId = selectedNodeId ?? mainNodeIdRef.current
-      let rootNode = rootNodeId ? reactFlow.getNode(rootNodeId) : null
-
       const activeTaskId = taskId ?? `${workspaceId}-default`
       if (!taskId) {
         setTaskId(activeTaskId)
       }
 
-      if (!rootNode) {
-        const created = await createMainNode('任务规划', question)
-        rootNodeId = created?.id ?? null
-        rootNode = created as CanvasNode | null
+      const client = getGraphQLClient()
+      const response = await client.request<StartConversationResult>(START_CONVERSATION_MUTATION, {
+        workspaceId,
+        question
+      })
+
+      const conversationId = response.startConversation.metadata.id
+      let latestGraph = response.startConversation.graph
+
+      syncTimeline(toTimelinePayload(latestGraph), { progressive: false })
+
+      const watcher = watchConversation({
+        conversationId,
+        onGraphAppended: (payload) => {
+          latestGraph = payload as WorkspaceGraphResponse
+          syncTimeline(toTimelinePayload(latestGraph))
+        },
+        onGraphDiff: (payload) => {
+          latestGraph = applyGraphDelta(
+            latestGraph,
+            payload as {
+              nodes?: CanvasNode[]
+              edges?: CanvasEdge[]
+            }
+          )
+          syncTimeline(toTimelinePayload(latestGraph))
+        }
+      })
+
+      await watcher.done
+
+      const nextVersion = iterations.reduce((max, item) => Math.max(max, item.version), 0) + 1
+      const timeline = toTimelinePayload(latestGraph)
+      const iteration: TimelineIteration = {
+        id: conversationId,
+        version: nextVersion,
+        summary: question,
+        createdAt: new Date().toISOString(),
+        nodes: timeline.nodes,
+        edges: timeline.edges
       }
-
-      if (!rootNode || rootNode.type !== 'note') {
-        throw new Error('请先选择或创建任务节点。')
-      }
-
-      mainNodeIdRef.current = rootNode.id
-      setSelectedNodeId(rootNode.id)
-
-      const payload = {
-        tenantId: workspaceId,
-        userId: 'demo-user',
-        taskId: activeTaskId,
-        question,
-        timeline: reactFlow.getNodes().map((node) => ({
-          id: node.id,
-          type: node.type,
-          position: node.position,
-          data: node.data as Record<string, unknown>
-        })),
-        edges: reactFlow.getEdges().map((edge) => ({
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label as string | null | undefined
-        }))
-      }
-
-      const result = await analyzeQuestion.mutateAsync(payload)
-
-      syncTimeline(result)
-      if (result.iteration) {
-        addIterationToStore(result.iteration)
-        saveTimelineIteration(workspaceId, activeTaskId, result.iteration)
-      }
+      addIterationToStore(iteration)
+      saveTimelineIteration(workspaceId, activeTaskId, iteration)
     },
     [
       addIterationToStore,
-      analyzeQuestion,
-      createMainNode,
-      reactFlow,
-      selectedNodeId,
+      iterations,
       setTaskId,
-      setSelectedNodeId,
       syncTimeline,
       taskId,
       workspaceId
@@ -569,7 +663,7 @@ type OptimisticNodeInput = {
 
 const createNodeWithOptimistic = async (
   input: OptimisticNodeInput,
-  setNodes: ReturnType<typeof useNodesState>[1],
+  setNodes: Dispatch<SetStateAction<Node<CanvasNodeData>[]>>,
   addNode: UseMutationResult<CanvasNode, unknown, OptimisticNodeInput, unknown>
 ) => {
   const tempNode: Node<CanvasNodeData> = {

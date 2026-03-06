@@ -1,20 +1,20 @@
-import { PubSub } from 'graphql-subscriptions';
-import type { CanvasEdge, CanvasGraph, CanvasNode, ConversationEvent, ConversationMetadata } from '@branching-chat/shared';
+import type { CanvasEdge, CanvasGraph, CanvasNode, ConversationEvent } from '@starlink/shared';
+import type { ConversationEventBus } from './conversation-event-bus.js';
+import type { ConversationRecord, ConversationRuntimeRepository } from './conversation-runtime-repository.js';
 export type ConversationStoreDeps = {
-    pubSub: PubSub;
-};
-type ConversationRecord = {
-    metadata: ConversationMetadata;
-    graph: CanvasGraph;
+    eventBus: ConversationEventBus;
+    runtimeRepository: ConversationRuntimeRepository;
 };
 export declare class ConversationStore {
-    private readonly conversations;
-    private readonly workspaceGraphs;
-    private readonly pubSub;
-    constructor({ pubSub }: ConversationStoreDeps);
+    private readonly eventBus;
+    private readonly runtimeRepository;
+    private readonly pendingDecisionApprovals;
+    private readonly hitlEnabled;
+    private readonly hitlApprovalTimeoutMs;
+    constructor({ eventBus, runtimeRepository }: ConversationStoreDeps);
     startConversation(workspaceId: string, userId: string, question: string): Promise<ConversationRecord>;
-    getConversation(id: string): ConversationRecord | null;
-    getGraph(workspaceId: string): CanvasGraph;
+    getConversation(id: string): Promise<ConversationRecord | null>;
+    getGraph(workspaceId: string): Promise<CanvasGraph>;
     addNode(workspaceId: string, input: {
         id?: string;
         type: string;
@@ -23,15 +23,20 @@ export declare class ConversationStore {
             y: number;
         };
         data: unknown;
-    }): CanvasNode;
+    }): Promise<CanvasNode>;
     connectNodes(workspaceId: string, input: {
         id?: string;
         source: string;
         target: string;
         label?: string | null;
-    }): CanvasEdge;
-    getEventIterator(): import("graphql-subscriptions/dist/pubsub-async-iterable-iterator.js").PubSubAsyncIterableIterator<{
+    }): Promise<CanvasEdge>;
+    private persistGraphState;
+    getEventIterator(): AsyncIterable<{
         conversationProgress: ConversationEvent;
     }>;
+    close(): Promise<void>;
+    approveDecision(conversationId: string, decision?: string): Promise<boolean>;
+    private runConversationStream;
+    private publishEvent;
+    private waitForDecisionApproval;
 }
-export {};

@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import type { Message, Insight, Resource } from '../types'
 
 interface SessionData {

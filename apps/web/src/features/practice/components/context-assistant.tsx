@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import type { Insight, Resource, Scenario } from '../types'
+import type { FailureCase, Insight, Resource, Scenario } from '../types'
 import type { ScoreBreakdown } from '../hooks'
 import { ScoreCard } from './score-card'
 import { getFailureCasesByScenario } from '../data/failure-cases'
-import { useTheme, cn, bgToText } from '@/lib/theme'
+import { useTheme, cn, bgToText, type Theme } from '@/lib/theme'
 
 type ContextAssistantProps = {
   scenario?: Scenario
@@ -126,7 +126,7 @@ export function ContextAssistant({ scenario, insights, resources, score }: Conte
 
 function InsightCard({ insight }: { insight: Insight }) {
   const { theme } = useTheme()
-  const { icon, color, bg, borderColor } = getInsightStyles(insight.title, theme)
+  const { icon, bg } = getInsightStyles(insight.title, theme)
 
   return (
     <div
@@ -147,7 +147,7 @@ function InsightCard({ insight }: { insight: Insight }) {
   )
 }
 
-function getInsightStyles(title: string, theme: any) {
+function getInsightStyles(title: string, theme: Theme) {
   // Cultural Etiquette
   if (title.includes('Cultural') || title.includes('Etiquette') || title.includes('文化')) {
     return {
@@ -210,7 +210,7 @@ function ResourceCard({ resource }: { resource: Resource }) {
   )
 }
 
-function FailureCaseCard({ failureCase }: { failureCase: any }) {
+function FailureCaseCard({ failureCase }: { failureCase: FailureCase }) {
   const [expanded, setExpanded] = useState(false)
 
   const severityConfig = {

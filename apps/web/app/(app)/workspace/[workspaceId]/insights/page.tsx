@@ -156,7 +156,7 @@ function SimpleChart({
                 cx="50%"
                 cy="50%"
                 labelLine
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent = 0 }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                 outerRadius={100}
                 dataKey="value"
                 style={{ fontSize: '11px' }}
@@ -390,7 +390,7 @@ export default function InsightsPage({ params }: { params: { workspaceId: string
             <ul className="mt-2 space-y-1">
               <li>• 支持 <span className={cn('font-medium', theme.colors.text.primary)}>Excel (.xlsx, .xls)</span> 和 CSV 文件上传</li>
               <li>• 文件大小限制：<span className={cn('font-medium', theme.colors.text.primary)}>5MB</span></li>
-              <li>• 点击"<span className={cn('font-medium', theme.colors.text.primary)}>加载示例数据</span>"快速体验</li>
+              <li>• 点击 &quot;<span className={cn('font-medium', theme.colors.text.primary)}>加载示例数据</span>&quot; 快速体验</li>
               <li>• 柱状图/折线图/面积图最多显示 <span className={cn('font-medium', theme.colors.text.primary)}>8 行</span></li>
               <li>• 饼图最多显示 <span className={cn('font-medium', theme.colors.text.primary)}>6 行</span>（避免标签重叠）</li>
               <li>• 可切换图表类型、调整分类/数值列</li>

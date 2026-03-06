@@ -5,12 +5,12 @@ import { BaseEdge, getBezierPath, type EdgeProps } from 'reactflow'
 import clsx from 'clsx'
 
 export const DashedEdge = memo(function DashedEdge(props: EdgeProps) {
-  const { id, sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, markerEnd, className } = props
+  const { id, sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, markerEnd } = props
 
   const [path] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
 
   return (
-    <g className={clsx('react-flow__edge-dashed', className)} data-edgeid={id}>
+    <g className={clsx('react-flow__edge-dashed')} data-edgeid={id}>
       <BaseEdge
         path={path}
         markerEnd={markerEnd}

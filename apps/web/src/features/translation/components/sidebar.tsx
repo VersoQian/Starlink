@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import type { Route } from 'next'
 import {
     LayoutDashboard,
     Languages,
@@ -43,7 +44,7 @@ export function Sidebar() {
                         return (
                             <Link
                                 key={item.name}
-                                href={item.href}
+                                href={item.href as Route}
                                 className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
                                         ? 'bg-blue-50 text-blue-600'
                                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -63,7 +64,7 @@ export function Sidebar() {
             <div className="border-t border-slate-200 p-3">
                 <nav className="space-y-1">
                     <Link
-                        href="/help"
+                        href={'/community' as Route}
                         className="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
                     >
                         <HelpCircle className="h-5 w-5 text-slate-400 group-hover:text-slate-500" />

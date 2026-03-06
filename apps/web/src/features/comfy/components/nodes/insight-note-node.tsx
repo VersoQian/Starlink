@@ -2,8 +2,6 @@
 
 import { useState, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
-import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
-import { Badge } from '@/shared/components/ui/badge'
 import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
 import { Lightbulb, Edit3, Check, X, Sparkles } from 'lucide-react'

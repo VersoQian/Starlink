@@ -10,7 +10,10 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "clean": "rimraf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "smoke:task-events": "pnpm run build && node dist/scripts/smoke-task-event-store.js",
+    "smoke:conversation-runtime": "pnpm run build && node dist/scripts/smoke-conversation-runtime-store.js",
+    "smoke:all": "pnpm run build && node dist/scripts/smoke-task-event-store.js && node dist/scripts/smoke-conversation-runtime-store.js"
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",
@@ -28,6 +31,7 @@
     "graphql-type-json": "^0.3.2",
     "graphql-ws": "^6.0.6",
     "helmet": "^7.0.0",
+    "ioredis": "^5.10.0",
     "morgan": "^1.10.0",
     "nanoid": "^5.0.7",
     "pg": "^8.14.0",

@@ -1,3 +1,3 @@
 'use client'
 
-export { Providers } from '../../components/providers'
+export { Providers } from '../shared/components/providers'

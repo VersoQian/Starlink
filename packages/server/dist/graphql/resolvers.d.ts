@@ -67,7 +67,7 @@ export declare const resolvers: {
             metadata: {
                 createdAt: string;
                 updatedAt: string;
-                status: "idle" | "running" | "failed" | "completed";
+                status: "idle" | "running" | "paused" | "failed" | "completed";
                 id: string;
                 latestQuestion?: string | undefined;
             };
@@ -127,7 +127,23 @@ export declare const resolvers: {
                     label?: string | null | undefined;
                 }[];
             };
+            knowledgeEvidence: {
+                docId: string;
+                snippet: string;
+                score: number;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
         } | null>;
+        kbTaskStatus: (_: unknown, args: {
+            kbId: string;
+        }, ctx: GraphQLContext) => Promise<import("../application/task-event-store.js").TaskStatusSnapshot[]>;
+        knowledgeBases: () => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase[]>;
+        knowledgeBaseStatus: (_: unknown, args: {
+            kbId: string;
+        }) => Promise<{
+            knowledgeBase: import("../services/kb-task-service.js").GatewayKnowledgeBase;
+            tasks: import("../services/kb-task-service.js").GatewayKbTask[];
+        }>;
     };
     Mutation: {
         startConversation: (_: unknown, args: {
@@ -137,7 +153,7 @@ export declare const resolvers: {
             metadata: {
                 createdAt: string;
                 updatedAt: string;
-                status: "idle" | "running" | "failed" | "completed";
+                status: "idle" | "running" | "paused" | "failed" | "completed";
                 id: string;
                 latestQuestion?: string | undefined;
             };
@@ -197,7 +213,17 @@ export declare const resolvers: {
                     label?: string | null | undefined;
                 }[];
             };
+            knowledgeEvidence: {
+                docId: string;
+                snippet: string;
+                score: number;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
         }>;
+        approveDecision: (_: unknown, args: {
+            conversationId: string;
+            decision?: string | null;
+        }, ctx: GraphQLContext) => Promise<boolean>;
         addNode: (_: unknown, args: {
             workspaceId: string;
             input: {
@@ -270,11 +296,23 @@ export declare const resolvers: {
             target: string;
             label?: string | null | undefined;
         }>;
+        createKnowledgeBase: () => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
+        publishKnowledgeBase: (_: unknown, args: {
+            kbId: string;
+        }) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
+        addKnowledgeSeed: (_: unknown, args: {
+            kbId: string;
+            text: string;
+        }) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
+        importKnowledgeUrl: (_: unknown, args: {
+            kbId: string;
+            url: string;
+        }) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
     };
     Subscription: {
         conversationProgress: {
-            subscribe: (_: unknown, __: unknown, ctx: GraphQLContext) => import("graphql-subscriptions/dist/pubsub-async-iterable-iterator.js").PubSubAsyncIterableIterator<{
-                conversationProgress: import("@branching-chat/shared").ConversationEvent;
+            subscribe: (_: unknown, __: unknown, ctx: GraphQLContext) => AsyncIterable<{
+                conversationProgress: import("@starlink/shared").ConversationEvent;
             }>;
             resolve: (payload: {
                 conversationProgress: unknown;

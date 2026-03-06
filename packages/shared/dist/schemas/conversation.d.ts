@@ -1,5 +1,82 @@
 import { z } from 'zod';
-export declare const conversationStatusSchema: z.ZodEnum<["idle", "running", "failed", "completed"]>;
+export declare const conversationStatusSchema: z.ZodEnum<["idle", "running", "paused", "failed", "completed"]>;
+export declare const seminarPhaseSchema: z.ZodEnum<["planning", "execution", "review", "decision"]>;
+export declare const phaseChangedPayloadSchema: z.ZodObject<{
+    workspaceId: z.ZodString;
+    phase: z.ZodEnum<["planning", "execution", "review", "decision"]>;
+    reason: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    occurredAt: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    workspaceId: string;
+    phase: "planning" | "execution" | "review" | "decision";
+    occurredAt: string;
+    reason?: string | null | undefined;
+}, {
+    workspaceId: string;
+    phase: "planning" | "execution" | "review" | "decision";
+    occurredAt: string;
+    reason?: string | null | undefined;
+}>;
+export declare const seminarTurnCompletedPayloadSchema: z.ZodObject<{
+    workspaceId: z.ZodString;
+    phase: z.ZodEnum<["planning", "execution", "review", "decision"]>;
+    agentId: z.ZodString;
+    agentName: z.ZodString;
+    nodeId: z.ZodString;
+    title: z.ZodString;
+    summary: z.ZodString;
+    occurredAt: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    title: string;
+    summary: string;
+    workspaceId: string;
+    phase: "planning" | "execution" | "review" | "decision";
+    occurredAt: string;
+    agentId: string;
+    agentName: string;
+    nodeId: string;
+}, {
+    title: string;
+    summary: string;
+    workspaceId: string;
+    phase: "planning" | "execution" | "review" | "decision";
+    occurredAt: string;
+    agentId: string;
+    agentName: string;
+    nodeId: string;
+}>;
+export declare const seminarDecisionPayloadSchema: z.ZodObject<{
+    workspaceId: z.ZodString;
+    phase: z.ZodLiteral<"decision">;
+    decision: z.ZodString;
+    occurredAt: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    workspaceId: string;
+    decision: string;
+    phase: "decision";
+    occurredAt: string;
+}, {
+    workspaceId: string;
+    decision: string;
+    phase: "decision";
+    occurredAt: string;
+}>;
+export declare const seminarDecisionRequestedPayloadSchema: z.ZodObject<{
+    workspaceId: z.ZodString;
+    phase: z.ZodLiteral<"decision">;
+    decision: z.ZodString;
+    occurredAt: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    workspaceId: string;
+    decision: string;
+    phase: "decision";
+    occurredAt: string;
+}, {
+    workspaceId: string;
+    decision: string;
+    phase: "decision";
+    occurredAt: string;
+}>;
 export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z.ZodObject<{
     type: z.ZodLiteral<"graph/appended">;
     conversationId: z.ZodString;
@@ -940,33 +1017,201 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
 }>, z.ZodObject<{
     type: z.ZodLiteral<"status">;
     conversationId: z.ZodString;
-    status: z.ZodEnum<["idle", "running", "failed", "completed"]>;
+    status: z.ZodEnum<["idle", "running", "paused", "failed", "completed"]>;
     message: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     type: "status";
-    status: "idle" | "running" | "failed" | "completed";
+    status: "idle" | "running" | "paused" | "failed" | "completed";
     conversationId: string;
     message?: string | undefined;
 }, {
     type: "status";
-    status: "idle" | "running" | "failed" | "completed";
+    status: "idle" | "running" | "paused" | "failed" | "completed";
     conversationId: string;
     message?: string | undefined;
+}>, z.ZodObject<{
+    type: z.ZodLiteral<"phase.changed">;
+    conversationId: z.ZodString;
+    payload: z.ZodObject<{
+        workspaceId: z.ZodString;
+        phase: z.ZodEnum<["planning", "execution", "review", "decision"]>;
+        reason: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        occurredAt: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        reason?: string | null | undefined;
+    }, {
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        reason?: string | null | undefined;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    type: "phase.changed";
+    conversationId: string;
+    payload: {
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        reason?: string | null | undefined;
+    };
+}, {
+    type: "phase.changed";
+    conversationId: string;
+    payload: {
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        reason?: string | null | undefined;
+    };
+}>, z.ZodObject<{
+    type: z.ZodLiteral<"seminar.turn.completed">;
+    conversationId: z.ZodString;
+    payload: z.ZodObject<{
+        workspaceId: z.ZodString;
+        phase: z.ZodEnum<["planning", "execution", "review", "decision"]>;
+        agentId: z.ZodString;
+        agentName: z.ZodString;
+        nodeId: z.ZodString;
+        title: z.ZodString;
+        summary: z.ZodString;
+        occurredAt: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        title: string;
+        summary: string;
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        agentId: string;
+        agentName: string;
+        nodeId: string;
+    }, {
+        title: string;
+        summary: string;
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        agentId: string;
+        agentName: string;
+        nodeId: string;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    type: "seminar.turn.completed";
+    conversationId: string;
+    payload: {
+        title: string;
+        summary: string;
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        agentId: string;
+        agentName: string;
+        nodeId: string;
+    };
+}, {
+    type: "seminar.turn.completed";
+    conversationId: string;
+    payload: {
+        title: string;
+        summary: string;
+        workspaceId: string;
+        phase: "planning" | "execution" | "review" | "decision";
+        occurredAt: string;
+        agentId: string;
+        agentName: string;
+        nodeId: string;
+    };
+}>, z.ZodObject<{
+    type: z.ZodLiteral<"seminar.decision.made">;
+    conversationId: z.ZodString;
+    payload: z.ZodObject<{
+        workspaceId: z.ZodString;
+        phase: z.ZodLiteral<"decision">;
+        decision: z.ZodString;
+        occurredAt: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    }, {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    type: "seminar.decision.made";
+    conversationId: string;
+    payload: {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    };
+}, {
+    type: "seminar.decision.made";
+    conversationId: string;
+    payload: {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    };
+}>, z.ZodObject<{
+    type: z.ZodLiteral<"seminar.decision.requested">;
+    conversationId: z.ZodString;
+    payload: z.ZodObject<{
+        workspaceId: z.ZodString;
+        phase: z.ZodLiteral<"decision">;
+        decision: z.ZodString;
+        occurredAt: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    }, {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    type: "seminar.decision.requested";
+    conversationId: string;
+    payload: {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    };
+}, {
+    type: "seminar.decision.requested";
+    conversationId: string;
+    payload: {
+        workspaceId: string;
+        decision: string;
+        phase: "decision";
+        occurredAt: string;
+    };
 }>]>;
 export declare const conversationMetadataSchema: z.ZodObject<{
     id: z.ZodString;
     createdAt: z.ZodDate;
     updatedAt: z.ZodDate;
-    status: z.ZodEnum<["idle", "running", "failed", "completed"]>;
+    status: z.ZodEnum<["idle", "running", "paused", "failed", "completed"]>;
     latestQuestion: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    status: "idle" | "running" | "failed" | "completed";
+    status: "idle" | "running" | "paused" | "failed" | "completed";
     id: string;
     createdAt: Date;
     updatedAt: Date;
     latestQuestion?: string | undefined;
 }, {
-    status: "idle" | "running" | "failed" | "completed";
+    status: "idle" | "running" | "paused" | "failed" | "completed";
     id: string;
     createdAt: Date;
     updatedAt: Date;
@@ -989,6 +1234,11 @@ export declare const knowledgeEvidenceSchema: z.ZodObject<{
     metadata?: Record<string, unknown> | undefined;
 }>;
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
+export type SeminarPhase = z.infer<typeof seminarPhaseSchema>;
+export type PhaseChangedPayload = z.infer<typeof phaseChangedPayloadSchema>;
+export type SeminarTurnCompletedPayload = z.infer<typeof seminarTurnCompletedPayloadSchema>;
+export type SeminarDecisionPayload = z.infer<typeof seminarDecisionPayloadSchema>;
+export type SeminarDecisionRequestedPayload = z.infer<typeof seminarDecisionRequestedPayloadSchema>;
 export type ConversationEvent = z.infer<typeof conversationEventSchema>;
 export type ConversationMetadata = z.infer<typeof conversationMetadataSchema>;
 export type KnowledgeEvidence = z.infer<typeof knowledgeEvidenceSchema>;

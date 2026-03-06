@@ -108,10 +108,10 @@ export function AssistantPanel({ onAnalyze }: AssistantPanelProps) {
               <p>尝试输入：</p>
               <div className="space-y-2 text-xs">
                 <p className="rounded-lg border border-canvas-border bg-canvas-panel px-3 py-2">
-                  "我想开发一个 AI Agent 产品"
+                  &quot;我想开发一个 AI Agent 产品&quot;
                 </p>
                 <p className="rounded-lg border border-canvas-border bg-canvas-panel px-3 py-2">
-                  "如何提升团队协作效率？"
+                  &quot;如何提升团队协作效率？&quot;
                 </p>
               </div>
             </div>

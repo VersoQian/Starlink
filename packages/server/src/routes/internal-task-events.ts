@@ -11,7 +11,7 @@ function isAuthorized(tokenHeader: string | undefined): boolean {
   return tokenHeader === expected
 }
 
-router.post('/task-events', (req, res) => {
+router.post('/task-events', async (req, res) => {
   const tokenHeader = typeof req.headers['x-internal-token'] === 'string'
     ? req.headers['x-internal-token']
     : undefined
@@ -27,7 +27,7 @@ router.post('/task-events', (req, res) => {
   }
 
   try {
-    const result = taskEventStore.ingest(req.body)
+    const result = await taskEventStore.ingest(req.body)
     if (result.duplicate) {
       return res.status(200).json({
         ok: true,

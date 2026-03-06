@@ -20,6 +20,7 @@ type QuizPanelProps = {
 }
 
 export function QuizPanel({ nodeId, nodeLabel, domain, onGenerateQuiz }: QuizPanelProps) {
+  void nodeId
   const [questions, setQuestions] = useState<QuizQuestion[]>([])
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)

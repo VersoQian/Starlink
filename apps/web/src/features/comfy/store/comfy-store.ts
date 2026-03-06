@@ -1,13 +1,12 @@
 import { create } from 'zustand'
-import type { Node, Edge } from 'reactflow'
-import { createClient } from 'graphql-ws'
+import { addEdge, applyEdgeChanges, applyNodeChanges } from 'reactflow'
+import type { Node, Edge, Connection, NodeChange, EdgeChange } from 'reactflow'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
+import { watchConversation } from '@/shared/lib/conversation-sync-engine'
 import type {
   MacraNodeData,
   MacraEdgeData,
   CanvasAction,
-  OrchestratorRequest,
-  OrchestratorResponse,
   CriticRequest,
   CriticResponse
 } from '@/types/macra'
@@ -31,12 +30,14 @@ export interface NodeData {
   error?: string
 }
 
-type ConversationProgressEvent = {
-  type: 'graph/appended' | 'graph/diff' | 'status'
-  conversationId: string
-  status?: 'idle' | 'running' | 'failed' | 'completed'
-  message?: string | null
-  payload?: unknown
+type KnowledgeEvidence = {
+  docId?: string
+  snippet?: string
+  id?: string
+  title?: string
+  content?: string
+  source?: string
+  score?: number
 }
 
 const START_CONVERSATION_MUTATION = /* GraphQL */ `
@@ -67,33 +68,33 @@ const START_CONVERSATION_MUTATION = /* GraphQL */ `
   }
 `
 
-const CONVERSATION_PROGRESS_SUBSCRIPTION = /* GraphQL */ `
-  subscription ConversationProgress {
-    conversationProgress {
-      type
-      conversationId
-      status
-      message
-      payload
-    }
-  }
-`
-
-let graphWsClient: ReturnType<typeof createClient> | null = null
 let activeSubscription: (() => void) | null = null
 
-const getGraphQLWsClient = () => {
-  if (graphWsClient) return graphWsClient
-  const endpoint = process.env.NEXT_PUBLIC_GRAPHQL_URL ?? 'http://localhost:4000/graphql'
-  const wsUrl = endpoint.startsWith('https')
-    ? endpoint.replace(/^https/, 'wss')
-    : endpoint.replace(/^http/, 'ws')
-  graphWsClient = createClient({ url: wsUrl, lazy: true })
-  return graphWsClient
-}
+const MACRA_NODE_TYPES = new Set([
+  'agent-avatar',
+  'cc-bmc-card',
+  'insight-note',
+  'conflict-alert',
+  'data-source'
+])
 
 const mapCanvasNodeToReactFlow = (node: CanvasNode): Node => {
-  const type = node.type === 'image' ? 'canvas-image' : 'canvas-note'
+  const meta = (node.data as { meta?: { macraType?: string } } | undefined)?.meta
+  const macraType = meta?.macraType
+
+  const type = (() => {
+    if (typeof macraType === 'string' && MACRA_NODE_TYPES.has(macraType)) {
+      return macraType
+    }
+    if (MACRA_NODE_TYPES.has(node.type)) {
+      return node.type
+    }
+    if (node.type === 'image') {
+      return 'canvas-image'
+    }
+    return 'canvas-note'
+  })()
+
   return {
     id: node.id,
     type,
@@ -154,9 +155,9 @@ interface MacraState {
   // 操作方法
   setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void
   setEdges: (edges: Edge[] | ((edges: Edge[]) => Edge[])) => void
-  onNodesChange: (changes: any[]) => void
-  onEdgesChange: (changes: any[]) => void
-  onConnect: (connection: any) => void
+  onNodesChange: (changes: NodeChange[]) => void
+  onEdgesChange: (changes: EdgeChange[]) => void
+  onConnect: (connection: Connection) => void
 
   // 节点数据操作（兼容旧版本）
   getNodeData: (nodeId: string) => NodeData | undefined
@@ -229,19 +230,16 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
   onNodesChange: (changes) => {
     const { nodes } = get()
-    const applyChanges = require('reactflow').applyNodeChanges
-    set({ nodes: applyChanges(changes, nodes) })
+    set({ nodes: applyNodeChanges(changes, nodes) })
   },
 
   onEdgesChange: (changes) => {
     const { edges } = get()
-    const applyChanges = require('reactflow').applyEdgeChanges
-    set({ edges: applyChanges(changes, edges) })
+    set({ edges: applyEdgeChanges(changes, edges) })
   },
 
   onConnect: (connection) => {
     const { edges } = get()
-    const addEdge = require('reactflow').addEdge
     set({ edges: addEdge(connection, edges) })
   },
 
@@ -300,7 +298,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       type: node.type,
       position: node.position || { x: Math.random() * 500, y: Math.random() * 500 },
       data: {
-        label: node.label,
         ...node
       }
     }
@@ -415,7 +412,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       const conversationId = response.startConversation.metadata.id
 
       const extractMacraNodeData = (canvasNode: CanvasNode): MacraNodeData | null => {
-        const meta = canvasNode.data?.meta
+        const data = (canvasNode.data ?? {}) as Record<string, unknown>
+        const meta = data.meta as Record<string, unknown> | undefined
         if (!meta) {
           console.warn('[extractMacraNodeData] No meta found for node:', canvasNode.id)
           return null
@@ -423,17 +421,21 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
         const macraData: MacraNodeData = {
           id: canvasNode.id,
-          type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as any,
-          label: canvasNode.data?.title || '未命名',
-          content: canvasNode.data?.content || '',
-          summary: meta.summary || canvasNode.data?.content || '',
-          fullContent: meta.fullContent || canvasNode.data?.content || '',
-          domain: meta.domain,
-          metadata: meta.metadata || {},
-          agentType: meta.agentType,
-          severity: meta.severity,
-          conflictType: meta.conflictType,
-          isInteractive: meta.isInteractive,
+          type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as MacraNodeData['type'],
+          label: typeof data.title === 'string' ? data.title : '未命名',
+          content: typeof data.content === 'string' ? data.content : '',
+          summary: typeof meta.summary === 'string'
+            ? meta.summary
+            : (typeof data.content === 'string' ? data.content : ''),
+          fullContent: typeof meta.fullContent === 'string'
+            ? meta.fullContent
+            : (typeof data.content === 'string' ? data.content : ''),
+          domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
+          metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+          agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
+          severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
+          conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
+          isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
           position: canvasNode.position
         }
 
@@ -507,57 +509,20 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         applyGraph(response.startConversation.graph)
       }
 
-      await new Promise<void>((resolve, reject) => {
-        const wsClient = getGraphQLWsClient()
-        const dispose = wsClient.subscribe(
-          { query: CONVERSATION_PROGRESS_SUBSCRIPTION },
-          {
-            next: ({ data }) => {
-              const event = (data as { conversationProgress?: ConversationProgressEvent })?.conversationProgress
-              if (!event || event.conversationId !== conversationId) return
-
-              if (event.type === 'graph/appended' && event.payload) {
-                applyGraph(event.payload as WorkspaceGraphResponse)
-              }
-
-              if (event.type === 'graph/diff' && event.payload) {
-                applyDelta(event.payload as { nodes?: CanvasNode[]; edges?: CanvasEdge[] })
-              }
-
-              if (event.type === 'status') {
-                if (event.status === 'completed') {
-                  if (activeSubscription) {
-                    activeSubscription()
-                    activeSubscription = null
-                  }
-                  resolve()
-                }
-                if (event.status === 'failed') {
-                  if (activeSubscription) {
-                    activeSubscription()
-                    activeSubscription = null
-                  }
-                  reject(new Error(event.message ?? '生成失败'))
-                }
-              }
-            },
-            error: (error) => {
-              if (activeSubscription) {
-                activeSubscription()
-                activeSubscription = null
-              }
-              reject(error)
-            },
-            complete: () => {
-              if (activeSubscription) {
-                activeSubscription()
-                activeSubscription = null
-              }
-              resolve()
-            }
-          }
-        )
-        activeSubscription = () => dispose()
+      const watcher = watchConversation({
+        conversationId,
+        onGraphAppended: (payload) => {
+          applyGraph(payload as WorkspaceGraphResponse)
+        },
+        onGraphDiff: (payload) => {
+          applyDelta(payload as { nodes?: CanvasNode[]; edges?: CanvasEdge[] })
+        }
+      })
+      activeSubscription = watcher.cancel
+      await watcher.done.finally(() => {
+        if (activeSubscription === watcher.cancel) {
+          activeSubscription = null
+        }
       })
 
       set({ isOrchestratorProcessing: false })
@@ -591,14 +556,14 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       const request: CriticRequest = {
         canvas_data: {
           nodes: Array.from(macraNodes.values()),
-          edges: edges.map(e => ({
-            source: e.source,
-            target: e.target,
-            label: e.label as string,
-            type: (e.type as any) || 'default'
-          }))
-        }
-      }
+              edges: edges.map(e => ({
+                source: e.source,
+                target: e.target,
+                label: e.label as string,
+                type: (e.type as MacraEdgeData['type']) || 'default'
+              }))
+            }
+          }
 
       const response = await fetch('/api/macra/critic', {
         method: 'POST',
@@ -730,13 +695,16 @@ export const useComfyStore = create<MacraState>((set, get) => ({
           }
 
           const data = await response.json()
-          const result = `# 分析结果\n\n${data.summary || '分析完成'}\n\n## 详细信息\n\n${data.actionItems?.map((item: any, i: number) => `${i + 1}. ${item}`).join('\n') || ''}`
+          const actionItems = Array.isArray(data.actionItems)
+            ? data.actionItems.map((item: unknown, i: number) => `${i + 1}. ${String(item)}`).join('\n')
+            : ''
+          const result = `# 分析结果\n\n${data.summary || '分析完成'}\n\n## 详细信息\n\n${actionItems}`
 
           get().updateNodeData(nodeId, {
             agentResult: result,
             status: 'done'
           })
-        } catch (apiError) {
+        } catch {
           const result = `# 分析结果 (Mock)\n\n## 输入分析\n\n输入内容: ${inputContent || '无'}\n\n## Agent信息\n\n- **Agent类型**: ${nodeData?.agentType || 'data-analyst'}\n- **系统指令**: ${nodeData?.systemInstruction || '无'}\n\n## 分析建议\n\n1. 建议进行进一步的数据收集\n2. 考虑多维度分析\n3. 与相关专家咨询\n\n**注意**: 这是模拟数据，实际API暂不可用。`
 
           get().updateNodeData(nodeId, {
@@ -808,3 +776,5 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     })
   }
 }))
+
+export type ComfyStore = MacraState

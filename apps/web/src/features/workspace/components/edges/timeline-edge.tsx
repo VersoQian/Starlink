@@ -5,14 +5,14 @@ import { EdgeLabelRenderer, type EdgeProps } from 'reactflow'
 import clsx from 'clsx'
 
 export const TimelineEdge = memo(function TimelineEdge(props: EdgeProps) {
-  const { id, sourceX, sourceY, targetX, targetY, label, className } = props
+  const { id, sourceX, sourceY, targetX, targetY, label } = props
 
   const path = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`
   const labelX = (sourceX + targetX) / 2
   const labelY = (sourceY + targetY) / 2
 
   return (
-    <g className={clsx(className)} data-edgeid={id}>
+    <g className={clsx('react-flow__edge-timeline')} data-edgeid={id}>
       <path
         d={path}
         stroke="hsl(var(--canvas-primary))"

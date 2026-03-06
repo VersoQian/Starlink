@@ -1,5 +1,3 @@
-import type { Theme } from './types'
-
 /**
  * 将theme对象转换为可用的className字符串
  */

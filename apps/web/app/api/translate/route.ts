@@ -3,8 +3,6 @@
 import { NextResponse } from 'next/server'
 import { callLLMWithRetry } from '@/shared/lib/llm'
 
-type TranslateMode = 'standard' | 'formal' | 'casual' | 'professional'
-
 export async function POST(request: Request) {
   try {
     const body = await request.json()
@@ -12,8 +10,7 @@ export async function POST(request: Request) {
       text,
       sourceLanguage,
       targetLanguage,
-      mode = 'standard',
-      workspaceId
+      mode = 'standard'
     } = body
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {

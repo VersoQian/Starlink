@@ -54,17 +54,29 @@ export function WarmButton({
     className
   )
 
-  const Component = href ? motion.a : motion.button
+  if (href) {
+    return (
+      <motion.a
+        {...(props as unknown as HTMLMotionProps<'a'>)}
+        href={href}
+        className={baseStyles}
+        whileHover={{ scale: 1.05, y: -2 }}
+        whileTap={{ scale: 0.95 }}
+      >
+        {children}
+      </motion.a>
+    )
+  }
 
   return (
-    <Component
-      {...(props as any)}
-      {...(href ? { href } : { type: 'button' })}
+    <motion.button
+      {...props}
+      type="button"
       className={baseStyles}
       whileHover={{ scale: 1.05, y: -2 }}
       whileTap={{ scale: 0.95 }}
     >
       {children}
-    </Component>
+    </motion.button>
   )
 }

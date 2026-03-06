@@ -17,7 +17,7 @@ export const resolvers = {
       return await ctx.conversationStore.getGraph(args.workspaceId)
     },
     conversation: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
-      const record = ctx.conversationStore.getConversation(args.id)
+      const record = await ctx.conversationStore.getConversation(args.id)
       if (!record) return null
       return {
         metadata: {
@@ -30,7 +30,7 @@ export const resolvers = {
       }
     },
     kbTaskStatus: async (_: unknown, args: { kbId: string }, ctx: GraphQLContext) => {
-      return ctx.taskEventStore.getTaskStatuses(args.kbId)
+      return await ctx.taskEventStore.getTaskStatuses(args.kbId)
     },
     knowledgeBases: async () => {
       return await listKnowledgeBases()
@@ -60,6 +60,16 @@ export const resolvers = {
         graph: record.graph,
         knowledgeEvidence: record.knowledgeEvidence ?? []
       }
+    },
+    approveDecision: async (
+      _: unknown,
+      args: { conversationId: string; decision?: string | null },
+      ctx: GraphQLContext
+    ) => {
+      return await ctx.conversationStore.approveDecision(
+        args.conversationId,
+        args.decision ?? undefined
+      )
     },
     addNode: async (
       _: unknown,

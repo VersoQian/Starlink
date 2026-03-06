@@ -11,7 +11,6 @@ import { getDifyWorkflow } from '../../../config/dify'
 
 const service = new DifyService()
 const auditLogger = createAuditLogger('frontend:api:dify')
-const rateLimiter = new InMemoryRateLimiter()
 
 type DifyRequestPayload = DifyWorkflowExecutionRequest & {
   stream?: boolean
@@ -225,3 +224,5 @@ class InMemoryRateLimiter {
     return { allowed: true, retryAfterMs: bucket.expiresAt - now }
   }
 }
+
+const rateLimiter = new InMemoryRateLimiter()

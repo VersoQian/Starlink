@@ -1,4 +1,4 @@
-import { ComfyCanvas } from '@/features/comfy'
+import { ComfyCanvas } from '@/features/comfy/components/canvas'
 
 type ComfyPageProps = {
   params: { workspaceId: string }

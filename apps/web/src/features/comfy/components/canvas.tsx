@@ -93,9 +93,8 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
       isOrchestratorProcessing,
       callCritic,
       isCriticProcessing,
-    setWorkspaceId,
-    knowledgeEvidence,
-    setKnowledgeEvidence
+      setWorkspaceId,
+      knowledgeEvidence
   } = useComfyStore()
 
   const [seedInput, setSeedInput] = useState('')
@@ -230,6 +229,7 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
       {/* Google Fonts Import */}
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
       <style jsx global>{`

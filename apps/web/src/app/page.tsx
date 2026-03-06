@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import type { Route } from 'next'
 
 export default function LandingPage() {
   return (
@@ -23,7 +24,7 @@ export default function LandingPage() {
           进入旧版工作台
         </Link>
         <Link
-          href="/lesson/demo"
+          href={'/lesson/demo' as Route}
           className="rounded-full border border-white/10 px-6 py-2 hover:bg-white/10"
         >
           预览 Lesson 编辑器

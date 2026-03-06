@@ -24,7 +24,8 @@ export function ContentGenerationToolbar({ lessonId }: ContentGenerationToolbarP
       setStreamBuffer((current) => current.concat(event.data))
     }
     if (event.type === 'message' && typeof event.data === 'string') {
-      setStreamBuffer((current) => current.concat(event.data))
+      const message = event.data
+      setStreamBuffer((current) => current.concat(message))
     }
     if (event.type === 'completed') {
       setResult((current) => {

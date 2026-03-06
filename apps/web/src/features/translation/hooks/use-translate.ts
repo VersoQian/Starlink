@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { translateText, TranslatePayload, TranslateResponse } from '../lib/api/translate'
+import { translateText, type TranslatePayload, type TranslateResponse } from '@/shared/lib/api/translate'
 
 export function useTranslate(initialText = '', initialTargetLanguage = 'en') {
   const [text, setText] = useState(initialText)

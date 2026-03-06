@@ -5,6 +5,7 @@ import cors from 'cors'
 import path from 'node:path'
 import { kbRouter } from './routes/kb'
 import { errorHandler } from './middleware/error'
+import { TaskRunner } from './services/TaskRunner'
 
 const app = express()
 
@@ -33,9 +34,21 @@ app.use(errorHandler)
 const port = Number(process.env.PORT ?? 4001)
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Knowledge Base API listening on http://localhost:${port}`)
+    TaskRunner.start()
   })
+
+  const shutdown = (signal: string) => {
+    console.log(`[server] received ${signal}, shutting down`)
+    TaskRunner.stop()
+    server.close(() => {
+      process.exit(0)
+    })
+  }
+
+  process.once('SIGINT', () => shutdown('SIGINT'))
+  process.once('SIGTERM', () => shutdown('SIGTERM'))
 }
 
 export default app

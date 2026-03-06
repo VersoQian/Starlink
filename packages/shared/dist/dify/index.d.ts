@@ -27,6 +27,7 @@ export type DifyWorkflowConfig = {
     fallback?: DifyFallbackPlan;
     rateLimit?: DifyRateLimitRule[];
     defaultPriority?: DifyPriority;
+    metricsTag?: string;
     auditChannel?: string;
     metadata?: Record<string, string>;
 };

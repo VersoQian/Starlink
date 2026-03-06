@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { CC_BMC_DOMAINS, type CCBMCDomain, type MacraNodeData } from '@/types/macra'
-import { Edit3, Check, X, Info, ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
+import { Edit3, Check, X, Info, ChevronDown, Maximize2, Minimize2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
 // 新配色方案 - Tech-Luxe Gradient
@@ -61,10 +61,12 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
 
   const domain = nodeData?.domain || CC_BMC_DOMAINS.VALUE_PROPOSITIONS
   const colors = DOMAIN_COLORS[domain]
+  const rawData = data as Record<string, unknown>
+  const meta = rawData.meta as { summary?: string; fullContent?: string } | undefined
 
   // 从 meta 中获取 summary 和 fullContent
-  const summary = (data as any)?.meta?.summary || nodeData?.content || ''
-  const fullContent = (data as any)?.meta?.fullContent || nodeData?.content || ''
+  const summary = meta?.summary || nodeData?.content || ''
+  const fullContent = meta?.fullContent || nodeData?.content || ''
   const hasExtendedContent = summary !== fullContent && fullContent.length > summary.length
 
   const handleSave = useCallback(() => {

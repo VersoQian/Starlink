@@ -3,7 +3,7 @@
 import { useRef, useEffect } from 'react'
 import type { Message } from '../types'
 import { MessageBubble } from './message-bubble'
-import { useTheme, cn, bgToText } from '@/lib/theme'
+import { useTheme, cn } from '@/lib/theme'
 
 type ChatInterfaceProps = {
   messages: Message[]
@@ -147,7 +147,7 @@ export function ChatInterface({
                     'hover:border-cyan-400'
                   )}
                 >
-                  "{reply}"
+                  &quot;{reply}&quot;
                 </button>
               ))}
             </div>

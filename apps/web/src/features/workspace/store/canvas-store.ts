@@ -46,3 +46,5 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       return { iterations: [...state.iterations, iteration] }
     })
 }))
+
+export type CanvasStore = CanvasState

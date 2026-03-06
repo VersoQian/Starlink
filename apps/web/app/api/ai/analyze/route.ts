@@ -124,7 +124,6 @@ export async function POST(request: Request) {
     }
 
     const question = payload.question.trim()
-    const userId = payload.userId ?? 'anonymous'
     const tenantId = payload.tenantId ?? 'default-tenant'
 
     // 调用 LLM 进行分析
@@ -141,7 +140,7 @@ export async function POST(request: Request) {
       const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/```\s*([\s\S]*?)\s*```/)
       const jsonString = jsonMatch ? jsonMatch[1] : content
       analysisResult = JSON.parse(jsonString)
-    } catch (error) {
+    } catch {
       console.error('Failed to parse LLM response:', llmResponse.content)
       return NextResponse.json(
         {
@@ -156,7 +155,6 @@ export async function POST(request: Request) {
     const graph = buildTimelineGraph({
       question,
       tenantId,
-      userId,
       analysis: analysisResult
     })
 
@@ -190,12 +188,10 @@ export async function POST(request: Request) {
 function buildTimelineGraph({
   question,
   tenantId,
-  userId,
   analysis
 }: {
   question: string
   tenantId: string
-  userId: string
   analysis: {
     summary: string
     subQuestions: Array<{ title: string; bullets: string[] }>

@@ -1198,7 +1198,7 @@ export default function LandingPage() {
               viewport={{ once: true }}
               className="grid gap-8 lg:grid-cols-3"
             >
-              {integrationHighlights.map((highlight, index) => (
+              {integrationHighlights.map((highlight) => (
                 <motion.div
                   key={highlight.title}
                   variants={fadeInUp}
@@ -1284,7 +1284,7 @@ export default function LandingPage() {
                     准备把你的议题搬进画布了吗？
                   </h3>
                   <p className="mt-2 text-base text-neutral-600">
-                    预约导览或直接进入 Demo，与 Branching Chat 一起体验"对话即画布"的工作方式。
+                    预约导览或直接进入 Demo，与 Branching Chat 一起体验&quot;对话即画布&quot;的工作方式。
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 text-sm">

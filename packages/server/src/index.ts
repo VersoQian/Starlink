@@ -10,7 +10,7 @@ import { WebSocketServer } from 'ws'
 import { useServer } from 'graphql-ws/use/ws'
 import { typeDefs } from './graphql/type-defs.js'
 import { resolvers } from './graphql/resolvers.js'
-import { createContext, createWsContext } from './context/index.js'
+import { createContext, createWsContext, shutdownContextServices } from './context/index.js'
 import { internalRouter } from './routes/internal-task-events.js'
 import { kbProxyRouter } from './routes/kb-proxy.js'
 
@@ -48,6 +48,22 @@ async function start() {
       console.log(`Branching Chat GraphQL server running on http://localhost:${PORT}/graphql`)
       resolve()
     })
+  })
+
+  const shutdown = async (signal: string) => {
+    console.log(`[server] received ${signal}, shutting down`)
+    await shutdownContextServices()
+    wsServer.close()
+    server.close(() => {
+      process.exit(0)
+    })
+  }
+
+  process.once('SIGINT', () => {
+    void shutdown('SIGINT')
+  })
+  process.once('SIGTERM', () => {
+    void shutdown('SIGTERM')
   })
 }
 

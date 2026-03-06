@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import clsx from 'clsx'
-import { Copy, Check, History, Sparkles, ChevronDown } from 'lucide-react'
+import { Copy, Check, History, Sparkles } from 'lucide-react'
 import { useTheme, cn } from '@/lib/theme'
 
 type TranslateMode = 'standard' | 'formal' | 'casual' | 'professional' | 'simplified-traditional' | 'traditional-simplified'
@@ -51,8 +51,6 @@ export default function TranslatePage({ params }: { params: { workspaceId: strin
   const [history, setHistory] = useState<TranslationHistory[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [activeTab, setActiveTab] = useState<'translate' | 'convert'>('translate')
-
-  const targetTextRef = useRef<HTMLTextAreaElement>(null)
 
   const handleTranslate = async () => {
     if (!sourceText.trim()) return

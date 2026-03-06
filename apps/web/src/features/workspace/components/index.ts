@@ -1,5 +1,6 @@
 // Workspace components
 export { CanvasViewport } from './canvas-viewport'
+export type { CanvasViewportHandle } from './canvas-viewport'
 export { AssistantPanel } from './assistant-panel'
 export { CanvasToolbar } from './canvas-toolbar'
 export { NodePalette } from './node-palette'

@@ -9,7 +9,15 @@ interface Message {
   type: 'user' | 'assistant'
   content: string
   timestamp: Date
-  researchData?: any
+  researchData?: ResearchResult
+}
+
+type ResearchResult = {
+  summary?: string
+  keyPoints?: string[]
+  detailedAnalysis?: string
+  sources?: string[]
+  recommendations?: string[]
 }
 
 const researchHighlights = [
@@ -50,7 +58,7 @@ const starterPrompts = [
   }
 ]
 
-export default function DeepResearchPage({ params }: { params: { workspaceId: string } }) {
+export default function DeepResearchPage() {
   const { theme } = useTheme()
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -151,7 +159,7 @@ export default function DeepResearchPage({ params }: { params: { workspaceId: st
     }
   }
 
-  const formatResearchResponse = (result: any): string => {
+  const formatResearchResponse = (result: ResearchResult): string => {
     let response = ''
 
     if (result.summary) {

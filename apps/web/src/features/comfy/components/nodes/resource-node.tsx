@@ -1,13 +1,14 @@
 'use client'
 
+import Image from 'next/image'
 import { useCallback, useState } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
 import { Badge } from '@/shared/components/ui/badge'
 import { useComfyStore } from '../../store'
-import { FileIcon, ImageIcon, Upload } from 'lucide-react'
+import { FileIcon, Upload } from 'lucide-react'
 
-export function ResourceNode({ id, data }: NodeProps) {
+export function ResourceNode({ id }: NodeProps) {
   const { updateNodeData, getNodeData } = useComfyStore()
   const nodeData = getNodeData(id)
   const [isDragging, setIsDragging] = useState(false)
@@ -96,10 +97,13 @@ export function ResourceNode({ id, data }: NodeProps) {
             <div className="space-y-2">
               {nodeData.resourceType === 'image' && nodeData.resourceContent instanceof File ? (
                 <div className="rounded-xl overflow-hidden border-2 border-purple-100 shadow-md">
-                  <img
+                  <Image
                     src={URL.createObjectURL(nodeData.resourceContent)}
                     alt="Preview"
+                    width={640}
+                    height={256}
                     className="w-full h-32 object-cover"
+                    unoptimized
                   />
                 </div>
               ) : (

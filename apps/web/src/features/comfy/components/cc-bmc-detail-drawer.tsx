@@ -4,7 +4,6 @@ import { useComfyStore } from '../store'
 import { X, FileText, MessageSquare, Edit3, Link2, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import type { MacraNodeData } from '@/types/macra'
 import { QuizPanel, type QuizQuestion } from './quiz-panel'
 
 type TabType = 'overview' | 'quiz' | 'edit' | 'resources'
@@ -23,14 +22,15 @@ export function CCBMCDetailDrawer() {
   }
 
   const nodeData = getMacraNode(detailPanel.nodeId)
+  const nodeWithDetails = nodeData as (typeof nodeData & { summary?: string; fullContent?: string }) | null
   console.log('[CCBMCDetailDrawer] Node data:', {
     nodeId: detailPanel.nodeId,
     nodeData: nodeData ? {
       id: nodeData.id,
       type: nodeData.type,
       label: nodeData.label,
-      hasSummary: !!(nodeData as any).summary,
-      hasFullContent: !!(nodeData as any).fullContent
+      hasSummary: !!nodeWithDetails?.summary,
+      hasFullContent: !!nodeWithDetails?.fullContent
     } : null
   })
 
@@ -39,8 +39,8 @@ export function CCBMCDetailDrawer() {
     return null
   }
 
-  const fullContent = (nodeData as any).fullContent || nodeData.content || ''
-  const summary = (nodeData as any).summary || nodeData.content || ''
+  const fullContent = nodeWithDetails?.fullContent || nodeData.content || ''
+  const summary = nodeWithDetails?.summary || nodeData.content || ''
 
   // Quiz 生成处理函数 - 调用真实的 AI API
   const handleGenerateQuiz = async (): Promise<QuizQuestion[]> => {

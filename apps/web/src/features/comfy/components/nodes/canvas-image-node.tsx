@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
 import type { CanvasNodeData } from '@/types/graph'
@@ -18,7 +19,14 @@ export function CanvasImageNode({ data }: NodeProps<ImageNodeData>) {
         </CardHeader>
         <CardContent>
           <div className="overflow-hidden rounded-xl border border-zinc-700">
-            <img src={data.url} alt={data.title} className="w-full object-cover" />
+            <Image
+              src={data.url}
+              alt={data.title}
+              width={640}
+              height={360}
+              className="w-full h-auto object-cover"
+              unoptimized
+            />
           </div>
           <a
             href={data.url}

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { callLLMWithRetry } from '@/shared/lib/llm'
-import type { CriticRequest, CriticResponse, ConflictDetection } from '@/types/macra'
+import type { CriticRequest, CriticResponse } from '@/types/macra'
 
 /**
  * MACRA Adversarial Critic System Prompt
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
       const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/```\s*([\s\S]*?)\s*```/)
       const jsonString = jsonMatch ? jsonMatch[1] : content
       criticResult = JSON.parse(jsonString)
-    } catch (error) {
+    } catch {
       console.error('Failed to parse Critic LLM response:', llmResponse.content)
 
       // Fallback: 返回无冲突

@@ -1,9 +1,13 @@
+import { type DifyPriority, type DifyRetryConfig, type DifyWorkflowMode } from '@starlink/shared';
 type RunWorkflowOptions = {
     workflowId?: string;
     inputs: Record<string, unknown>;
     user?: string;
-    responseMode?: 'blocking' | 'streaming';
+    responseMode?: DifyWorkflowMode;
     signal?: AbortSignal;
+    priority?: DifyPriority;
+    metricsTag?: string;
+    retry?: DifyRetryConfig;
 };
 type BlockingResult = {
     answer?: string;

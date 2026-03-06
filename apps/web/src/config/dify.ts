@@ -1,33 +1,5 @@
 import { readEnv } from '../lib/env'
-
-export type DifyWorkflowMode = 'blocking' | 'streaming'
-
-export type DifyWorkflowConfig = {
-  /**
-   * 逻辑工作流 ID，用于前端引用。
-   */
-  id: string
-  /**
-   * Dify 应用 ID（App ID）。
-   */
-  appId: string
-  /**
-   * 对应的 API Key。
-   */
-  apiKey: string
-  /**
-   * 请求模式：阻塞或流式。
-   */
-  mode: DifyWorkflowMode
-  /**
-   * 可选的自定义 Base URL，默认使用全局配置。
-   */
-  baseUrl?: string
-  /**
-   * 额外描述信息，方便 UI 提示。
-   */
-  description?: string
-}
+import type { DifyWorkflowConfig, DifyWorkflowMode } from '@starlink/shared'
 
 const DEFAULT_BASE_URL = readEnv('DIFY_API_BASE_URL', {
   defaultValue: 'https://api.dify.ai/v1'

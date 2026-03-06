@@ -1,6 +1,6 @@
 'use client'
 
-import { ComfyCanvas } from '@/features/comfy'
+import { ComfyCanvas } from '@/features/comfy/components/canvas'
 
 export default function ComfyStandalonePage() {
   return (

@@ -26,7 +26,7 @@ export const knowledgeEntries: KnowledgeEntry[] = [
     references: 8,
     owner: 'Jade',
     source: 'docs/q4-market-plan.pdf',
-    nextActions: ['生成画布节点', '同步社群共创']
+    nextActions: ['create-nodes', 'share-community']
   },
   {
     id: 'kb-202',
@@ -50,7 +50,7 @@ export const knowledgeEntries: KnowledgeEntry[] = [
     references: 5,
     owner: 'Mina',
     source: 'https://share.branching.chat/competitive',
-    nextActions: ['发布模板']
+    nextActions: ['publish-template']
   },
   {
     id: 'kb-204',

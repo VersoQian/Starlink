@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { callLLMWithRetry } from '@/shared/lib/llm'
-import type { OrchestratorRequest, OrchestratorResponse, CanvasAction, MacraNodeData, MacraEdgeData } from '@/types/macra'
+import type { OrchestratorRequest, OrchestratorResponse, MacraNodeData, MacraEdgeData } from '@/types/macra'
 import { CC_BMC_DOMAINS, AGENT_TYPES } from '@/types/macra'
 
 /**
@@ -144,7 +144,7 @@ export async function POST(request: Request) {
       const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/```\s*([\s\S]*?)\s*```/)
       const jsonString = jsonMatch ? jsonMatch[1] : content
       orchestratorResult = JSON.parse(jsonString)
-    } catch (error) {
+    } catch {
       console.error('Failed to parse Orchestrator LLM response:', llmResponse.content)
 
       // Fallback: 返回模拟数据

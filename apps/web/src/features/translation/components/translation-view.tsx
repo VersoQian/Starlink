@@ -4,8 +4,6 @@ import { useState } from 'react'
 import {
     ArrowRight,
     Layout,
-    Maximize2,
-    Minimize2,
     Save,
     Sparkles,
     Type,
@@ -125,7 +123,7 @@ export function TranslationView() {
                         ) : (
                             <div className="flex h-full flex-col items-center justify-center text-slate-400">
                                 <Sparkles className="mb-4 h-12 w-12 opacity-20" />
-                                <p>Click "Translate" to generate the translation</p>
+                                <p>Click &quot;Translate&quot; to generate the translation</p>
                             </div>
                         )}
                     </div>

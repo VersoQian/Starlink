@@ -2,11 +2,9 @@
 
 import { useState, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
-import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
-import { Badge } from '@/shared/components/ui/badge'
 import { useComfyStore } from '../../store'
 import { AGENT_TYPES, type AgentType, type MacraNodeData } from '@/types/macra'
-import { Bot, MessageCircle, X, Send, Loader2, Sparkles } from 'lucide-react'
+import { MessageCircle, X, Send, Loader2, Sparkles } from 'lucide-react'
 
 // Agent 配色方案 - Tech-Luxe Gradient
 const AGENT_CONFIG: Record<AgentType, { gradient: string; avatar: string; name: string; description: string; accentColor: string }> = {
@@ -337,7 +335,7 @@ export function AgentAvatarNode({ id, data }: NodeProps) {
                   placeholder="输入你的问题..."
                   className="flex-1 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:border-transparent shadow-inner placeholder-slate-500 text-slate-200 backdrop-blur-sm"
                   style={{
-                    focusRing: `0 0 0 2px ${config.accentColor}50`
+                    boxShadow: `inset 0 1px 2px rgba(0, 0, 0, 0.2), 0 0 0 1px ${config.accentColor}33`
                   }}
                   rows={2}
                   disabled={isProcessing}

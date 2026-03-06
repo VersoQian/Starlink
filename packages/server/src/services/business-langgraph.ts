@@ -71,6 +71,7 @@ type Intent = z.infer<typeof IntentSchema>
 
 // ============== LangGraph State ==============
 const BusinessState = Annotation.Root({
+  traceId: Annotation<string>(),
   workspaceId: Annotation<string>(),
   userId: Annotation<string>(),
   question: Annotation<string>(),
@@ -104,12 +105,45 @@ export class BusinessLangGraphService {
     this.model = createLLMModel()
   }
 
+  private logTrace(params: {
+    step: string
+    traceId: string
+    workspaceId: string
+    userId: string
+    status: 'started' | 'received' | 'completed' | 'failed'
+    durationMs?: number
+    metadata?: Record<string, unknown>
+  }) {
+    auditLogger.info({
+      action: `business-langgraph.${params.step}`,
+      requestId: params.traceId,
+      workflowId: params.workspaceId,
+      userId: params.userId,
+      durationMs: params.durationMs,
+      metadata: {
+        status: params.status,
+        ...params.metadata
+      }
+    })
+  }
+
   async *streamConversation(context: {
     workspaceId: string
     userId: string
     question: string
+    traceId?: string
   }): AsyncGenerator<BusinessStreamUpdate> {
+    const traceId = context.traceId ?? nanoid(10)
+    const streamStartedAt = Date.now()
     const builder = new BusinessCanvasBuilder(context.workspaceId, context.userId, context.question)
+
+    this.logTrace({
+      step: 'streamConversation',
+      traceId,
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      status: 'started'
+    })
 
     // 1. 初始化画布（发送 init 事件）
     yield { type: 'init', graph: builder.getGraph() }
@@ -118,6 +152,9 @@ export class BusinessLangGraphService {
     if (!this.model) {
       auditLogger.warn({
         action: 'business-langgraph.streamConversation',
+        requestId: traceId,
+        workflowId: context.workspaceId,
+        userId: context.userId,
         metadata: { message: 'LLM not configured, returning fallback node' }
       })
       yield {
@@ -135,6 +172,7 @@ export class BusinessLangGraphService {
       // 4. 执行 LangGraph（流式模式）
       const stream = await graph.stream(
         {
+          traceId,
           workspaceId: context.workspaceId,
           userId: context.userId,
           question: context.question,
@@ -154,6 +192,26 @@ export class BusinessLangGraphService {
         const entries = Object.entries(update as Record<string, Record<string, unknown>>)
 
         for (const [nodeName, payload] of entries) {
+          this.logTrace({
+            step: 'streamConversation.update',
+            traceId,
+            workspaceId: context.workspaceId,
+            userId: context.userId,
+            status: 'received',
+            metadata: {
+              nodeName,
+              payloadKeys: Object.keys(payload),
+              deltaNodeCount: Array.isArray((payload as { marketNodes?: unknown }).marketNodes)
+                ? ((payload as { marketNodes: unknown[] }).marketNodes.length)
+                : Array.isArray((payload as { productNodes?: unknown }).productNodes)
+                  ? ((payload as { productNodes: unknown[] }).productNodes.length)
+                  : Array.isArray((payload as { financeNodes?: unknown }).financeNodes)
+                    ? ((payload as { financeNodes: unknown[] }).financeNodes.length)
+                    : Array.isArray((payload as { conflicts?: unknown }).conflicts)
+                      ? ((payload as { conflicts: unknown[] }).conflicts.length)
+                      : 0
+            }
+          })
           // Debug log (commented out for production)
           // console.log('business-langgraph.nodeUpdate', { nodeName, payload })
 
@@ -217,11 +275,32 @@ export class BusinessLangGraphService {
         }
       }
 
+      this.logTrace({
+        step: 'streamConversation',
+        traceId,
+        workspaceId: context.workspaceId,
+        userId: context.userId,
+        status: 'completed',
+        durationMs: Date.now() - streamStartedAt
+      })
       yield { type: 'status', status: 'completed' }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       auditLogger.error({
         action: 'business-langgraph.streamConversation',
+        requestId: traceId,
+        workflowId: context.workspaceId,
+        userId: context.userId,
+        metadata: { error: message },
+        error
+      })
+      this.logTrace({
+        step: 'streamConversation',
+        traceId,
+        workspaceId: context.workspaceId,
+        userId: context.userId,
+        status: 'failed',
+        durationMs: Date.now() - streamStartedAt,
         metadata: { error: message }
       })
       yield {
@@ -260,7 +339,17 @@ export class BusinessLangGraphService {
   // ============== Agent Nodes ==============
 
   private async routeIntent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const startedAt = Date.now()
     if (!this.model) {
+      this.logTrace({
+        step: 'routerAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: { reason: 'model-not-configured' }
+      })
       return { intent: { intent: 'general', reasoning: 'LLM not configured' } }
     }
 
@@ -287,10 +376,34 @@ export class BusinessLangGraphService {
         strict: true
       })
       const result = await structured.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
+      this.logTrace({
+        step: 'routerAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          intent: result.intent
+        }
+      })
       return { intent: result }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.routeIntent',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: { error: String(error) },
+        error
+      })
+      this.logTrace({
+        step: 'routerAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
         metadata: { error: String(error) }
       })
       return { intent: { intent: 'generate_bmc', reasoning: 'Failed to classify intent, defaulting to generate_bmc' } }
@@ -298,7 +411,19 @@ export class BusinessLangGraphService {
   }
 
   private async runMarketAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { marketNodes: [] }
+    const startedAt = Date.now()
+    if (!this.model) {
+      this.logTrace({
+        step: 'marketAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: { reason: 'model-not-configured' }
+      })
+      return { marketNodes: [] }
+    }
 
     const prompt = `你是 Market_Agent（市场分析专家），负责生成 CC-BMC 商业模型画布中的三个维度：
 
@@ -356,10 +481,35 @@ export class BusinessLangGraphService {
         }
       }))
 
+      this.logTrace({
+        step: 'marketAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          nodeCount: validatedNodes.length,
+          usage: extractUsageMetadata(response)
+        }
+      })
       return { marketNodes: validatedNodes }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runMarketAgent',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: { error: String(error) },
+        error
+      })
+      this.logTrace({
+        step: 'marketAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
         metadata: { error: String(error) }
       })
       return { marketNodes: [] }
@@ -367,7 +517,19 @@ export class BusinessLangGraphService {
   }
 
   private async runProductAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { productNodes: [] }
+    const startedAt = Date.now()
+    if (!this.model) {
+      this.logTrace({
+        step: 'productAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: { reason: 'model-not-configured' }
+      })
+      return { productNodes: [] }
+    }
 
     const prompt = `你是 Product_Agent（产品策略专家），负责生成 CC-BMC 商业模型画布中的三个维度：
 
@@ -426,10 +588,35 @@ export class BusinessLangGraphService {
         }
       }))
 
+      this.logTrace({
+        step: 'productAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          nodeCount: validatedNodes.length,
+          usage: extractUsageMetadata(response)
+        }
+      })
       return { productNodes: validatedNodes }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runProductAgent',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: { error: String(error) },
+        error
+      })
+      this.logTrace({
+        step: 'productAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
         metadata: { error: String(error) }
       })
       return { productNodes: [] }
@@ -437,7 +624,19 @@ export class BusinessLangGraphService {
   }
 
   private async runFinanceAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
-    if (!this.model) return { financeNodes: [] }
+    const startedAt = Date.now()
+    if (!this.model) {
+      this.logTrace({
+        step: 'financeAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: { reason: 'model-not-configured' }
+      })
+      return { financeNodes: [] }
+    }
 
     const prompt = `你是 Finance_Agent（财务分析专家），负责生成 CC-BMC 商业模型画布中的两个维度：
 
@@ -493,10 +692,35 @@ export class BusinessLangGraphService {
         }
       }))
 
+      this.logTrace({
+        step: 'financeAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          nodeCount: validatedNodes.length,
+          usage: extractUsageMetadata(response)
+        }
+      })
       return { financeNodes: validatedNodes }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runFinanceAgent',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: { error: String(error) },
+        error
+      })
+      this.logTrace({
+        step: 'financeAgent',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
         metadata: { error: String(error) }
       })
       return { financeNodes: [] }
@@ -504,6 +728,7 @@ export class BusinessLangGraphService {
   }
 
   private async orchestrate(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const startedAt = Date.now()
     // 1. 生成 Agent Avatar 节点
     const agentAvatars: MacraNodeData[] = []
 
@@ -664,10 +889,23 @@ export class BusinessLangGraphService {
       })
     }
 
+    this.logTrace({
+      step: 'orchestrator',
+      traceId: state.traceId,
+      workspaceId: state.workspaceId,
+      userId: state.userId,
+      status: 'completed',
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        avatarCount: agentAvatars.length,
+        edgeCount: edges.length
+      }
+    })
     return { agentAvatars, edges }
   }
 
   private async runCritic(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const startedAt = Date.now()
     // 简化版 Critic：检查是否有明显矛盾
     // 未来可以调用 LLM 进行深度分析
     const conflicts: MacraNodeData[] = []
@@ -697,6 +935,17 @@ export class BusinessLangGraphService {
       })
     }
 
+    this.logTrace({
+      step: 'critic',
+      traceId: state.traceId,
+      workspaceId: state.workspaceId,
+      userId: state.userId,
+      status: 'completed',
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        conflictCount: conflicts.length
+      }
+    })
     return { conflicts }
   }
 }
@@ -796,6 +1045,40 @@ class BusinessCanvasBuilder {
 }
 
 // ============== Helper Functions ==============
+function extractUsageMetadata(response: unknown): Record<string, number> | undefined {
+  const raw = response as {
+    usage_metadata?: Record<string, unknown>
+    response_metadata?: {
+      tokenUsage?: Record<string, unknown>
+      usage?: Record<string, unknown>
+    }
+  }
+
+  const usage = raw?.usage_metadata ?? raw?.response_metadata?.tokenUsage ?? raw?.response_metadata?.usage
+
+  if (!usage) return undefined
+
+  const inputTokens = readNumber(usage, ['input_tokens', 'promptTokens', 'prompt_tokens']) ?? 0
+  const outputTokens = readNumber(usage, ['output_tokens', 'completionTokens', 'completion_tokens']) ?? 0
+  const totalTokens = readNumber(usage, ['total_tokens', 'totalTokens']) ?? inputTokens + outputTokens
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens
+  }
+}
+
+function readNumber(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value
+    }
+  }
+  return undefined
+}
+
 function extractAndParseJSON(content: string, agentName: string): MacraNodeData[] {
   try {
     // 1. 移除 Markdown 代码块标记

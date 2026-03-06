@@ -1,17 +1,21 @@
 import type { ExpressContextFunctionArgument } from '@apollo/server/express4'
-import { PubSub } from 'graphql-subscriptions'
 import { ConversationStore } from '../application/conversation-store.js'
 import { TaskEventStore } from '../application/task-event-store.js'
+import { createConversationEventBus } from '../application/conversation-event-bus.js'
+import { createConversationRuntimeRepository } from '../application/conversation-runtime-repository.js'
 
 export type GraphQLContext = {
   conversationStore: ConversationStore
   taskEventStore: TaskEventStore
-  pubSub: PubSub
   userId: string
 }
 
-const pubSub = new PubSub()
-const conversationStore = new ConversationStore({ pubSub })
+const conversationEventBus = createConversationEventBus()
+const conversationRuntimeRepository = createConversationRuntimeRepository()
+const conversationStore = new ConversationStore({
+  eventBus: conversationEventBus,
+  runtimeRepository: conversationRuntimeRepository
+})
 const taskEventStore = new TaskEventStore()
 
 export async function createContext(
@@ -21,7 +25,6 @@ export async function createContext(
   return {
     conversationStore,
     taskEventStore,
-    pubSub,
     userId
   }
 }
@@ -32,11 +35,15 @@ export async function createWsContext(connectionParams?: Record<string, unknown>
   return {
     conversationStore,
     taskEventStore,
-    pubSub,
     userId
   }
 }
 
 export function getTaskEventStore() {
   return taskEventStore
+}
+
+export async function shutdownContextServices() {
+  await taskEventStore.close()
+  await conversationStore.close()
 }
