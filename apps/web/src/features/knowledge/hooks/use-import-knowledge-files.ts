@@ -1,6 +1,7 @@
 'use client'
 
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
+import { knowledgeKeys, taskKeys } from '@/core/query/keys'
 import { getGatewayBaseUrl } from '@/shared/lib/graphql-client'
 import type { KnowledgeTask } from '@/types/knowledge'
 
@@ -18,16 +19,18 @@ type ImportKnowledgeFilesVariables = {
 const DEFAULT_RETRY_COUNT = 2
 
 function uploadKnowledgeFiles({
+  workspaceId,
   kbId,
   files,
   onProgress
 }: {
+  workspaceId: string
   kbId: string
   files: File[]
   onProgress?: (percentage: number) => void
 }) {
   return new Promise<KnowledgeTask[]>((resolve, reject) => {
-    const endpoint = `${getGatewayBaseUrl()}/kb/${kbId}/import/file`
+    const endpoint = `${getGatewayBaseUrl()}/kb/${kbId}/import/file?workspaceId=${encodeURIComponent(workspaceId)}`
     const formData = new FormData()
     files.forEach((file) => {
       formData.append('files', file)
@@ -66,7 +69,7 @@ function uploadKnowledgeFiles({
   })
 }
 
-export function useImportKnowledgeFiles(): UseMutationResult<
+export function useImportKnowledgeFiles(workspaceId: string): UseMutationResult<
   KnowledgeTask[],
   Error,
   ImportKnowledgeFilesVariables
@@ -80,7 +83,7 @@ export function useImportKnowledgeFiles(): UseMutationResult<
 
       for (let attempt = 0; attempt <= retries; attempt += 1) {
         try {
-          return await uploadKnowledgeFiles({ kbId, files, onProgress })
+          return await uploadKnowledgeFiles({ workspaceId, kbId, files, onProgress })
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error))
           if (attempt === retries) {
@@ -93,8 +96,8 @@ export function useImportKnowledgeFiles(): UseMutationResult<
       throw lastError ?? new Error('Failed to import files')
     },
     onSuccess: async (_, variables) => {
-      await queryClient.invalidateQueries({ queryKey: ['kb-task-status', variables.kbId] })
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-base-status', variables.kbId] })
+      await queryClient.invalidateQueries({ queryKey: taskKeys.byKnowledgeBase(workspaceId, variables.kbId) })
+      await queryClient.invalidateQueries({ queryKey: knowledgeKeys.status(workspaceId, variables.kbId) })
     }
   })
 }

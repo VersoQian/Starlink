@@ -123,12 +123,12 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
     data: knowledgeBases = [],
     isLoading: isKnowledgeBasesLoading,
     isError: isKnowledgeBasesError
-  } = useKnowledgeBases()
-  const createKnowledgeBaseMutation = useCreateKnowledgeBase()
-  const publishKnowledgeBaseMutation = usePublishKnowledgeBase()
-  const addKnowledgeSeedMutation = useAddKnowledgeSeed()
-  const importKnowledgeUrlMutation = useImportKnowledgeUrl()
-  const importKnowledgeFilesMutation = useImportKnowledgeFiles()
+  } = useKnowledgeBases(params.workspaceId)
+  const createKnowledgeBaseMutation = useCreateKnowledgeBase(params.workspaceId)
+  const publishKnowledgeBaseMutation = usePublishKnowledgeBase(params.workspaceId)
+  const addKnowledgeSeedMutation = useAddKnowledgeSeed(params.workspaceId)
+  const importKnowledgeUrlMutation = useImportKnowledgeUrl(params.workspaceId)
+  const importKnowledgeFilesMutation = useImportKnowledgeFiles(params.workspaceId)
 
   useEffect(() => {
     if (knowledgeBases.length === 0) return
@@ -146,8 +146,8 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
     data: knowledgeBaseStatus,
     isLoading: isKnowledgeBaseStatusLoading,
     isError: isKnowledgeBaseStatusError
-  } = useKnowledgeBaseStatus(activeBaseId)
-  const { data: taskStatuses = [], isLoading: isTaskLoading, isError: isTaskError } = useKbTaskStatus(activeBaseId)
+  } = useKnowledgeBaseStatus(params.workspaceId, activeBaseId)
+  const { data: taskStatuses = [], isLoading: isTaskLoading, isError: isTaskError } = useKbTaskStatus(params.workspaceId, activeBaseId)
   const mergedTasks = useMemo<MergedTask[]>(() => {
     const byId = new Map<string, MergedTask>()
 
@@ -181,6 +181,7 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
 
       byId.set(eventTask.taskId, {
         id: eventTask.taskId,
+        workspaceId: eventTask.workspaceId,
         kbId: eventTask.kbId,
         type: eventTask.taskType,
         status: eventTask.status,

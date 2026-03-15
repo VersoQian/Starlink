@@ -1,5 +1,14 @@
 import GraphQLJSON from 'graphql-type-json'
-import { conversationMetadataSchema } from '@starlink/shared'
+import { GraphQLError } from 'graphql'
+import {
+  communityPostInputSchema,
+  conversationMetadataSchema,
+  practiceSessionInputSchema,
+  workspaceAssetSchema,
+  workspaceDirectoryItemSchema,
+  workspaceMetadataHistoryEntrySchema,
+  workspaceMetadataUpdateInputSchema
+} from '@starlink/shared'
 import type { GraphQLContext } from '../context/index.js'
 import {
   addKnowledgeSeed,
@@ -29,14 +38,30 @@ export const resolvers = {
         knowledgeEvidence: record.knowledgeEvidence ?? []
       }
     },
-    kbTaskStatus: async (_: unknown, args: { kbId: string }, ctx: GraphQLContext) => {
-      return await ctx.taskEventStore.getTaskStatuses(args.kbId)
+    kbTaskStatus: async (_: unknown, args: { workspaceId: string; kbId: string }, ctx: GraphQLContext) => {
+      const statuses = await ctx.taskEventStore.getTaskStatuses(args.kbId)
+      return statuses.map((status) => ({
+        ...status,
+        workspaceId: args.workspaceId
+      }))
     },
-    knowledgeBases: async () => {
-      return await listKnowledgeBases()
+    knowledgeBases: async (_: unknown, args: { workspaceId: string }) => {
+      return await listKnowledgeBases(args.workspaceId)
     },
-    knowledgeBaseStatus: async (_: unknown, args: { kbId: string }) => {
-      return await getKnowledgeBaseStatus(args.kbId)
+    knowledgeBaseStatus: async (_: unknown, args: { workspaceId: string; kbId: string }) => {
+      return await getKnowledgeBaseStatus(args.workspaceId, args.kbId)
+    },
+    workspaces: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const workspaces = await ctx.conversationStore.listWorkspaces(ctx.userId)
+      return workspaces.map((workspace) => workspaceDirectoryItemSchema.parse(workspace))
+    },
+    workspaceAssets: async (_: unknown, args: { workspaceId: string }, ctx: GraphQLContext) => {
+      const assets = await ctx.conversationStore.listWorkspaceAssets(args.workspaceId)
+      return assets.map((asset) => workspaceAssetSchema.parse(asset))
+    },
+    workspaceMetadataHistory: async (_: unknown, args: { workspaceId: string }, ctx: GraphQLContext) => {
+      const history = await ctx.conversationStore.listWorkspaceHistory(args.workspaceId)
+      return history.map((entry) => workspaceMetadataHistoryEntrySchema.parse(entry))
     }
   },
   Mutation: {
@@ -93,17 +118,116 @@ export const resolvers = {
       const edge = await ctx.conversationStore.connectNodes(args.workspaceId, args.input)
       return edge
     },
-    createKnowledgeBase: async () => {
-      return await createKnowledgeBase()
+    createKnowledgeBase: async (_: unknown, args: { workspaceId: string }) => {
+      return await createKnowledgeBase(args.workspaceId)
     },
-    publishKnowledgeBase: async (_: unknown, args: { kbId: string }) => {
-      return await publishKnowledgeBase(args.kbId)
+    publishKnowledgeBase: async (_: unknown, args: { workspaceId: string; kbId: string }) => {
+      return await publishKnowledgeBase(args.workspaceId, args.kbId)
     },
-    addKnowledgeSeed: async (_: unknown, args: { kbId: string; text: string }) => {
-      return await addKnowledgeSeed(args.kbId, args.text)
+    addKnowledgeSeed: async (_: unknown, args: { workspaceId: string; kbId: string; text: string }) => {
+      return await addKnowledgeSeed(args.workspaceId, args.kbId, args.text)
     },
-    importKnowledgeUrl: async (_: unknown, args: { kbId: string; url: string }) => {
-      return await importKnowledgeUrl(args.kbId, args.url)
+    importKnowledgeUrl: async (_: unknown, args: { workspaceId: string; kbId: string; url: string }) => {
+      return await importKnowledgeUrl(args.workspaceId, args.kbId, args.url)
+    },
+    saveCommunityPost: async (
+      _: unknown,
+      args: {
+        input: {
+          workspaceId: string
+          title: string
+          body: string
+          tags: string[]
+          authorName: string
+          authorRole?: string | null
+        }
+      },
+      ctx: GraphQLContext
+    ) => {
+      const input = communityPostInputSchema.parse(args.input)
+      const asset = await ctx.conversationStore.saveCommunityPost(input, ctx.userId)
+      return workspaceAssetSchema.parse(asset)
+    },
+    savePracticeSession: async (
+      _: unknown,
+      args: {
+        input: {
+          workspaceId: string
+          scenarioId: string
+          scenarioTitle?: string | null
+          messages: Array<{
+            id: string
+            role: string
+            content: string
+            timestamp: number
+            feedback?: string | null
+          }>
+          insights?: Array<{ title: string; detail: string }>
+          resources?: Array<{ title: string; url?: string | null }>
+          quickReplies?: string[]
+          lastUpdated?: string | null
+        }
+      },
+      ctx: GraphQLContext
+    ) => {
+      const input = practiceSessionInputSchema.parse({
+        ...args.input,
+        scenarioTitle: args.input.scenarioTitle ?? undefined,
+        insights: args.input.insights ?? [],
+        resources: (args.input.resources ?? []).map((resource) => ({
+          ...resource,
+          url: resource.url ?? undefined
+        })),
+        quickReplies: args.input.quickReplies ?? [],
+        lastUpdated: args.input.lastUpdated ?? undefined,
+        messages: args.input.messages.map((message) => ({
+          ...message,
+          feedback: message.feedback ?? undefined
+        }))
+      })
+      const asset = await ctx.conversationStore.savePracticeSession(input, ctx.userId)
+      return workspaceAssetSchema.parse(asset)
+    },
+    updateWorkspaceMetadata: async (
+      _: unknown,
+      args: {
+        input: {
+          workspaceId: string
+          name: string
+          type: string
+          focus: string
+          ownerId: string
+          ownerName: string
+          members: Array<{
+            id: string
+            name: string
+            role?: string | null
+            permissions: string[]
+          }>
+        }
+      },
+      ctx: GraphQLContext
+    ) => {
+      const input = workspaceMetadataUpdateInputSchema.parse({
+        ...args.input,
+        members: args.input.members.map((member) => ({
+          ...member,
+          role: member.role ?? undefined
+        }))
+      })
+      try {
+        const workspace = await ctx.conversationStore.updateWorkspace(input, ctx.userId)
+        return workspaceDirectoryItemSchema.parse(workspace)
+      } catch (error) {
+        if (error instanceof Error && error.message === 'FORBIDDEN_WORKSPACE_METADATA') {
+          throw new GraphQLError('You do not have permission to manage this workspace.', {
+            extensions: {
+              code: 'FORBIDDEN'
+            }
+          })
+        }
+        throw error
+      }
     }
   },
   Subscription: {

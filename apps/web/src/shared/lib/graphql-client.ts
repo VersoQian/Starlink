@@ -1,6 +1,6 @@
 import { GraphQLClient } from 'graphql-request'
+import { getCurrentViewerId } from './viewer-identity'
 
-let client: GraphQLClient | null = null
 const DEFAULT_GRAPHQL_URL = 'http://localhost:4000/graphql'
 
 export function getGraphQLHttpUrl() {
@@ -15,14 +15,12 @@ export function getGraphQLWsUrl() {
 }
 
 export function getGraphQLClient() {
-  if (!client) {
-    client = new GraphQLClient(getGraphQLHttpUrl(), {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    })
-  }
-  return client
+  return new GraphQLClient(getGraphQLHttpUrl(), {
+    headers: {
+      'Content-Type': 'application/json',
+      'x-user-id': getCurrentViewerId()
+    }
+  })
 }
 
 export function getGatewayBaseUrl() {

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 type KnowledgeBase = {
   id: string
+  workspaceId: string
   name: string
   status: string
   createdAt: string
@@ -11,6 +12,7 @@ type KnowledgeBase = {
 
 type KnowledgeTask = {
   id: string
+  workspaceId: string
   kbId: string
   type: 'seed' | 'file' | 'url'
   status: 'pending' | 'processing' | 'succeeded' | 'failed'
@@ -22,6 +24,7 @@ type KnowledgeTask = {
 
 type KbTaskStatus = {
   taskId: string
+  workspaceId: string
   kbId: string
   status: 'pending' | 'processing' | 'succeeded' | 'failed'
   taskType: 'seed' | 'file' | 'url'
@@ -35,12 +38,14 @@ const graphqlEndpoint = 'http://localhost:4000/graphql'
 test.describe('Knowledge workspace', () => {
   test('@kb-flow supports kb creation and import flow in task center', async ({ page }) => {
     const now = new Date().toISOString()
+    const workspaceId = 'demo'
     let idCounter = 1
     let eventCounter = 1
 
     const knowledgeBases: KnowledgeBase[] = [
       {
         id: 'kb-initial',
+        workspaceId,
         name: '初始知识库',
         status: 'draft',
         createdAt: now,
@@ -63,6 +68,7 @@ test.describe('Knowledge workspace', () => {
       snapshotsByKb.set(task.kbId, [
         {
           taskId: task.id,
+          workspaceId: task.workspaceId,
           kbId: task.kbId,
           status: task.status,
           taskType: task.type,
@@ -120,6 +126,7 @@ test.describe('Knowledge workspace', () => {
         const createdAt = new Date().toISOString()
         const kb: KnowledgeBase = {
           id: `kb-${idCounter++}`,
+          workspaceId,
           name: '新建 Knowledge Base',
           status: 'draft',
           createdAt,
@@ -137,6 +144,7 @@ test.describe('Knowledge workspace', () => {
         const createdAt = new Date().toISOString()
         const task: KnowledgeTask = {
           id: `task-seed-${idCounter++}`,
+          workspaceId,
           kbId,
           type: 'seed',
           status: 'pending',
@@ -155,6 +163,7 @@ test.describe('Knowledge workspace', () => {
         const createdAt = new Date().toISOString()
         const task: KnowledgeTask = {
           id: `task-url-${idCounter++}`,
+          workspaceId,
           kbId,
           type: 'url',
           status: 'pending',
@@ -185,6 +194,7 @@ test.describe('Knowledge workspace', () => {
       const createdAt = new Date().toISOString()
       const task: KnowledgeTask = {
         id: `task-file-${idCounter++}`,
+        workspaceId,
         kbId,
         type: 'file',
         status: 'pending',
@@ -234,10 +244,12 @@ test.describe('Knowledge workspace', () => {
     const older = new Date(baseTime - 60_000).toISOString()
     const newer = new Date(baseTime - 10_000).toISOString()
 
+    const workspaceId = 'demo'
     const kbId = 'kb-recovery'
     const knowledgeBases: KnowledgeBase[] = [
       {
         id: kbId,
+        workspaceId,
         name: '恢复验证库',
         status: 'processing',
         createdAt: older,
@@ -249,6 +261,7 @@ test.describe('Knowledge workspace', () => {
     const historyTasks: KnowledgeTask[] = [
       {
         id: 'task-recover-1',
+        workspaceId,
         kbId,
         type: 'url',
         status: 'failed',
@@ -259,6 +272,7 @@ test.describe('Knowledge workspace', () => {
       },
       {
         id: 'task-failed-1',
+        workspaceId,
         kbId,
         type: 'file',
         status: 'failed',
@@ -272,6 +286,7 @@ test.describe('Knowledge workspace', () => {
     const realtimeStatuses: KbTaskStatus[] = [
       {
         taskId: 'task-recover-1',
+        workspaceId,
         kbId,
         status: 'succeeded',
         taskType: 'url',
@@ -281,6 +296,7 @@ test.describe('Knowledge workspace', () => {
       },
       {
         taskId: 'task-failed-1',
+        workspaceId,
         kbId,
         status: 'failed',
         taskType: 'file',

@@ -1,13 +1,15 @@
 'use client'
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
+import { taskKeys } from '@/core/query/keys'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import type { KbTaskStatus } from '@/types/knowledge'
 
 const KB_TASK_STATUS_QUERY = /* GraphQL */ `
-  query KbTaskStatus($kbId: ID!) {
-    kbTaskStatus(kbId: $kbId) {
+  query KbTaskStatus($workspaceId: ID!, $kbId: ID!) {
+    kbTaskStatus(workspaceId: $workspaceId, kbId: $kbId) {
       taskId
+      workspaceId
       kbId
       status
       taskType
@@ -18,14 +20,17 @@ const KB_TASK_STATUS_QUERY = /* GraphQL */ `
   }
 `
 
-export function useKbTaskStatus(kbId: string): UseQueryResult<KbTaskStatus[]> {
+export function useKbTaskStatus(workspaceId: string, kbId: string): UseQueryResult<KbTaskStatus[]> {
   return useQuery({
-    queryKey: ['kb-task-status', kbId],
+    queryKey: taskKeys.byKnowledgeBase(workspaceId, kbId),
     enabled: kbId.length > 0,
     refetchInterval: 5000,
     queryFn: async () => {
       const client = getGraphQLClient()
-      const response = await client.request<{ kbTaskStatus: KbTaskStatus[] }>(KB_TASK_STATUS_QUERY, { kbId })
+      const response = await client.request<{ kbTaskStatus: KbTaskStatus[] }>(
+        KB_TASK_STATUS_QUERY,
+        { workspaceId, kbId }
+      )
       return response.kbTaskStatus
     }
   })

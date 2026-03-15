@@ -1,13 +1,15 @@
 'use client'
 
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
+import { knowledgeKeys } from '@/core/query/keys'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import type { KnowledgeBaseSummary } from '@/types/knowledge'
 
 const CREATE_KNOWLEDGE_BASE_MUTATION = /* GraphQL */ `
-  mutation CreateKnowledgeBase {
-    createKnowledgeBase {
+  mutation CreateKnowledgeBase($workspaceId: ID!) {
+    createKnowledgeBase(workspaceId: $workspaceId) {
       id
+      workspaceId
       name
       status
       createdAt
@@ -17,20 +19,21 @@ const CREATE_KNOWLEDGE_BASE_MUTATION = /* GraphQL */ `
   }
 `
 
-export function useCreateKnowledgeBase(): UseMutationResult<KnowledgeBaseSummary, Error, void> {
+export function useCreateKnowledgeBase(workspaceId: string): UseMutationResult<KnowledgeBaseSummary, Error, void> {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async () => {
       const client = getGraphQLClient()
       const response = await client.request<{ createKnowledgeBase: KnowledgeBaseSummary }>(
-        CREATE_KNOWLEDGE_BASE_MUTATION
+        CREATE_KNOWLEDGE_BASE_MUTATION,
+        { workspaceId }
       )
       return response.createKnowledgeBase
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] })
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-base-status'] })
+      await queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists(workspaceId) })
+      await queryClient.invalidateQueries({ queryKey: knowledgeKeys.statusRoot(workspaceId) })
     }
   })
 }

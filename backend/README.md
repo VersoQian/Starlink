@@ -41,15 +41,15 @@ TASK_RUNNER_FORCE_FAILURE=false
 
 ## API Summary
 
-- `GET /kb` — list knowledge bases
-- `POST /kb` — create knowledge base
-- `GET /kb/:id` — fetch knowledge base
+- `GET /kb?workspaceId=:workspaceId` — list workspace-scoped knowledge bases
+- `POST /kb` — create knowledge base (`{ workspaceId }`)
+- `GET /kb/:id?workspaceId=:workspaceId` — fetch workspace-scoped knowledge base
 - `PUT /kb/:id` — update knowledge base fields
-- `POST /kb/:id/seed` — add text seed and queue task
-- `POST /kb/:id/import/file` — upload files (multipart)
-- `POST /kb/:id/import/url` — import from URL
-- `GET /kb/:id/status` — aggregated status and tasks
-- `POST /kb/:id/publish` — publish knowledge base
+- `POST /kb/:id/seed` — add text seed and queue task (`{ workspaceId, text }`)
+- `POST /kb/:id/import/file?workspaceId=:workspaceId` — upload files (multipart)
+- `POST /kb/:id/import/url` — import from URL (`{ workspaceId, url }`)
+- `GET /kb/:id/status?workspaceId=:workspaceId` — aggregated status and tasks
+- `POST /kb/:id/publish?workspaceId=:workspaceId` — publish knowledge base
 - `GET /usage` — usage counters
 
 The service emits task status events (`created/processing/succeeded/failed`) to gateway via `GATEWAY_TASK_EVENT_URL`.

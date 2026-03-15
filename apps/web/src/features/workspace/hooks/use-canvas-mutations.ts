@@ -1,6 +1,7 @@
 'use client'
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { workspaceKeys } from '@/core/query/keys'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import type { CanvasEdge, CanvasNode, CanvasNodeData, WorkspaceGraphResponse } from '@/types/graph'
 
@@ -60,7 +61,7 @@ export function useCanvasMutations(workspaceId: string) {
       return payload.addNode
     },
     onSuccess: (node) => {
-      queryClient.setQueryData<WorkspaceGraphResponse>(['workspace-graph', workspaceId], (previous) => {
+      queryClient.setQueryData<WorkspaceGraphResponse>(workspaceKeys.graph(workspaceId), (previous) => {
         if (!previous) return previous
         return {
           ...previous,
@@ -79,7 +80,7 @@ export function useCanvasMutations(workspaceId: string) {
       return payload.connectNodes
     },
     onSuccess: (edge) => {
-      queryClient.setQueryData<WorkspaceGraphResponse>(['workspace-graph', workspaceId], (previous) => {
+      queryClient.setQueryData<WorkspaceGraphResponse>(workspaceKeys.graph(workspaceId), (previous) => {
         if (!previous) return previous
         return {
           ...previous,

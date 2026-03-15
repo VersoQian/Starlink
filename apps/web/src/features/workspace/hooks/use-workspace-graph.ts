@@ -1,6 +1,7 @@
 'use client'
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
+import { workspaceKeys } from '@/core/query/keys'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import { type WorkspaceGraphResponse } from '@/types/graph'
 
@@ -29,7 +30,7 @@ const WORKSPACE_GRAPH_QUERY = /* GraphQL */ `
 
 export function useWorkspaceGraph(workspaceId: string): UseQueryResult<WorkspaceGraphResponse> {
   return useQuery({
-    queryKey: ['workspace-graph', workspaceId],
+    queryKey: workspaceKeys.graph(workspaceId),
     queryFn: async () => {
       const client = getGraphQLClient()
       const data = await client.request<{ workspaceGraph: WorkspaceGraphResponse }>(WORKSPACE_GRAPH_QUERY, {

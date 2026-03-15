@@ -135,15 +135,73 @@ export declare const resolvers: {
             }[];
         } | null>;
         kbTaskStatus: (_: unknown, args: {
+            workspaceId: string;
             kbId: string;
-        }, ctx: GraphQLContext) => Promise<import("../application/task-event-store.js").TaskStatusSnapshot[]>;
-        knowledgeBases: () => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            workspaceId: string;
+            taskId: string;
+            kbId: string;
+            status: import("@starlink/shared").TaskEvent["status"];
+            taskType: import("@starlink/shared").TaskEvent["payload"]["taskType"];
+            error?: string;
+            updatedAt: string;
+            lastEventId: string;
+        }[]>;
+        knowledgeBases: (_: unknown, args: {
+            workspaceId: string;
+        }) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase[]>;
         knowledgeBaseStatus: (_: unknown, args: {
+            workspaceId: string;
             kbId: string;
         }) => Promise<{
             knowledgeBase: import("../services/kb-task-service.js").GatewayKnowledgeBase;
             tasks: import("../services/kb-task-service.js").GatewayKbTask[];
         }>;
+        workspaces: (_: unknown, __: unknown, ctx: GraphQLContext) => Promise<{
+            type: string;
+            status: "error" | "draft" | "active" | "archived" | "provisioning";
+            workspaceId: string;
+            updatedAt: string;
+            name: string;
+            focus: string;
+            ownerId: string;
+            ownerName: string;
+            members: {
+                id: string;
+                name: string;
+                permissions: string[];
+                role?: string | undefined;
+            }[];
+            viewerPermissions: string[];
+            canManage: boolean;
+        }[]>;
+        workspaceAssets: (_: unknown, args: {
+            workspaceId: string;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "error" | "processing" | "draft" | "ready" | "archived" | "published";
+            title: string;
+            workspaceId: string;
+            createdAt: string;
+            updatedAt: string;
+            metadata: Record<string, unknown>;
+            version: number;
+            assetId: string;
+            assetType: string;
+            sourceModule: string;
+            createdBy: string;
+            content?: unknown;
+            sourceTaskId?: string | null | undefined;
+        }[]>;
+        workspaceMetadataHistory: (_: unknown, args: {
+            workspaceId: string;
+        }, ctx: GraphQLContext) => Promise<{
+            summary: string;
+            workspaceId: string;
+            version: number;
+            historyId: string;
+            changedBy: string;
+            changedAt: string;
+        }[]>;
     };
     Mutation: {
         startConversation: (_: unknown, args: {
@@ -296,18 +354,118 @@ export declare const resolvers: {
             target: string;
             label?: string | null | undefined;
         }>;
-        createKnowledgeBase: () => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
+        createKnowledgeBase: (_: unknown, args: {
+            workspaceId: string;
+        }) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
         publishKnowledgeBase: (_: unknown, args: {
+            workspaceId: string;
             kbId: string;
         }) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
         addKnowledgeSeed: (_: unknown, args: {
+            workspaceId: string;
             kbId: string;
             text: string;
         }) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
         importKnowledgeUrl: (_: unknown, args: {
+            workspaceId: string;
             kbId: string;
             url: string;
         }) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
+        saveCommunityPost: (_: unknown, args: {
+            input: {
+                workspaceId: string;
+                title: string;
+                body: string;
+                tags: string[];
+                authorName: string;
+                authorRole?: string | null;
+            };
+        }, ctx: GraphQLContext) => Promise<{
+            status: "error" | "processing" | "draft" | "ready" | "archived" | "published";
+            title: string;
+            workspaceId: string;
+            createdAt: string;
+            updatedAt: string;
+            metadata: Record<string, unknown>;
+            version: number;
+            assetId: string;
+            assetType: string;
+            sourceModule: string;
+            createdBy: string;
+            content?: unknown;
+            sourceTaskId?: string | null | undefined;
+        }>;
+        savePracticeSession: (_: unknown, args: {
+            input: {
+                workspaceId: string;
+                scenarioId: string;
+                scenarioTitle?: string | null;
+                messages: Array<{
+                    id: string;
+                    role: string;
+                    content: string;
+                    timestamp: number;
+                    feedback?: string | null;
+                }>;
+                insights?: Array<{
+                    title: string;
+                    detail: string;
+                }>;
+                resources?: Array<{
+                    title: string;
+                    url?: string | null;
+                }>;
+                quickReplies?: string[];
+                lastUpdated?: string | null;
+            };
+        }, ctx: GraphQLContext) => Promise<{
+            status: "error" | "processing" | "draft" | "ready" | "archived" | "published";
+            title: string;
+            workspaceId: string;
+            createdAt: string;
+            updatedAt: string;
+            metadata: Record<string, unknown>;
+            version: number;
+            assetId: string;
+            assetType: string;
+            sourceModule: string;
+            createdBy: string;
+            content?: unknown;
+            sourceTaskId?: string | null | undefined;
+        }>;
+        updateWorkspaceMetadata: (_: unknown, args: {
+            input: {
+                workspaceId: string;
+                name: string;
+                type: string;
+                focus: string;
+                ownerId: string;
+                ownerName: string;
+                members: Array<{
+                    id: string;
+                    name: string;
+                    role?: string | null;
+                    permissions: string[];
+                }>;
+            };
+        }, ctx: GraphQLContext) => Promise<{
+            type: string;
+            status: "error" | "draft" | "active" | "archived" | "provisioning";
+            workspaceId: string;
+            updatedAt: string;
+            name: string;
+            focus: string;
+            ownerId: string;
+            ownerName: string;
+            members: {
+                id: string;
+                name: string;
+                permissions: string[];
+                role?: string | undefined;
+            }[];
+            viewerPermissions: string[];
+            canManage: boolean;
+        }>;
     };
     Subscription: {
         conversationProgress: {

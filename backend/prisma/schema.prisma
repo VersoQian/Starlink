@@ -17,6 +17,7 @@ model User {
 
 model KnowledgeBase {
   id                String        @id @default(uuid())
+  workspaceId       String?
   name              String
   aiChunkingEnabled Boolean       @default(true)
   status            KbStatus      @default(draft)
@@ -28,6 +29,8 @@ model KnowledgeBase {
   seeds             Seed[]
   documents         Document[]
   tasks             ImportTask[]
+
+  @@index([workspaceId])
 }
 
 model Seed {
@@ -91,4 +94,3 @@ enum DocumentSourceType {
   file
   url
 }
-

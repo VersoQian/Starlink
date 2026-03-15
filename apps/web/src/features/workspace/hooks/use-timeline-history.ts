@@ -1,6 +1,7 @@
 'use client'
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
+import { workflowKeys } from '@/core/query/keys'
 import type { TimelineIteration } from '@/types/timeline'
 import { loadTimelineHistory } from '../lib/timeline-history-storage'
 
@@ -13,7 +14,7 @@ export function useTimelineHistory(
   taskId?: string | null
 ): UseQueryResult<TimelineHistoryResponse> {
   return useQuery({
-    queryKey: ['timeline-history', workspaceId, taskId ?? null],
+    queryKey: workflowKeys.timelineHistory(workspaceId, taskId),
     enabled: Boolean(workspaceId && taskId),
     queryFn: async () => {
       if (!workspaceId || !taskId) {

@@ -6,8 +6,12 @@ const router = Router()
 
 router.post('/:kbId/import/file', async (req, res) => {
   const { kbId } = req.params
+  const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId.trim() : ''
   const baseUrl = process.env.KB_TASK_SERVICE_URL ?? DEFAULT_TASK_SERVICE_BASE_URL
   const endpoint = new URL(`/kb/${kbId}/import/file`, baseUrl)
+  if (workspaceId) {
+    endpoint.searchParams.set('workspaceId', workspaceId)
+  }
 
   const contentType = req.headers['content-type']
   if (!contentType) {

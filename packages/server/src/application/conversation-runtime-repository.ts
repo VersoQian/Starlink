@@ -2,7 +2,8 @@ import { Redis } from 'ioredis'
 import type {
   CanvasGraph,
   ConversationMetadata,
-  KnowledgeEvidence
+  KnowledgeEvidence,
+  WorkspaceAsset
 } from '@starlink/shared'
 
 export type ConversationRecord = {
@@ -17,6 +18,9 @@ export type ConversationRuntimeRepository = {
   touchConversation: (id: string) => Promise<void>
   getConversation: (id: string) => Promise<ConversationRecord | null>
   getConversationsByWorkspace: (workspaceId: string) => Promise<Array<{ id: string; record: ConversationRecord }>>
+  listWorkspaces: () => Promise<Array<{ workspaceId: string; updatedAt: string; status: 'draft' | 'active' | 'error' }>>
+  upsertWorkspaceAsset: (asset: WorkspaceAsset) => Promise<void>
+  listWorkspaceAssets: (workspaceId: string) => Promise<WorkspaceAsset[]>
   setWorkspaceGraph: (workspaceId: string, graph: CanvasGraph) => Promise<void>
   getWorkspaceGraph: (workspaceId: string) => Promise<CanvasGraph | null>
   close: () => Promise<void>
@@ -36,10 +40,13 @@ type RepositoryConfig = {
   conversationTtlMs: number
 }
 
+type WorkspaceRuntimeStatus = 'draft' | 'active' | 'error'
+
 class InMemoryConversationRuntimeRepository implements ConversationRuntimeRepository {
   private readonly conversations = new Map<string, ConversationRecord>()
   private readonly touchedAt = new Map<string, number>()
   private readonly workspaceGraphs = new Map<string, CanvasGraph>()
+  private readonly workspaceAssets = new Map<string, Map<string, WorkspaceAsset>>()
   private readonly maxConversations: number
   private readonly conversationTtlMs: number
 
@@ -79,6 +86,47 @@ class InMemoryConversationRuntimeRepository implements ConversationRuntimeReposi
       results.push({ id, record: cloneRecord(record) })
     }
     return results
+  }
+
+  async listWorkspaces(): Promise<Array<{ workspaceId: string; updatedAt: string; status: WorkspaceRuntimeStatus }>> {
+    const workspaceIds = new Set<string>(this.workspaceGraphs.keys())
+    for (const record of this.conversations.values()) {
+      workspaceIds.add(record.graph.workspaceId)
+    }
+    for (const workspaceId of this.workspaceAssets.keys()) {
+      workspaceIds.add(workspaceId)
+    }
+
+    return [...workspaceIds].map((workspaceId) => {
+      const records = [...this.conversations.values()].filter((item) => item.graph.workspaceId === workspaceId)
+      const assets = [...(this.workspaceAssets.get(workspaceId)?.values() ?? [])]
+      const latest = records
+        .map((item) => item.metadata.updatedAt.toISOString())
+        .concat(assets.map((item) => item.updatedAt))
+        .sort((a, b) => b.localeCompare(a))[0]
+      const hasRunning = records.some((item) => item.metadata.status === 'running')
+      const hasFailed = records.some((item) => item.metadata.status === 'failed')
+
+      const status: WorkspaceRuntimeStatus =
+        hasFailed ? 'error' : hasRunning || records.length > 0 || assets.length > 0 ? 'active' : 'draft'
+      return {
+        workspaceId,
+        updatedAt: latest ?? new Date().toISOString(),
+        status
+      }
+    })
+  }
+
+  async upsertWorkspaceAsset(asset: WorkspaceAsset) {
+    const byWorkspace = this.workspaceAssets.get(asset.workspaceId) ?? new Map<string, WorkspaceAsset>()
+    byWorkspace.set(asset.assetId, cloneAsset(asset))
+    this.workspaceAssets.set(asset.workspaceId, byWorkspace)
+  }
+
+  async listWorkspaceAssets(workspaceId: string) {
+    return [...(this.workspaceAssets.get(workspaceId)?.values() ?? [])]
+      .map((asset) => cloneAsset(asset))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }
 
   async setWorkspaceGraph(workspaceId: string, graph: CanvasGraph) {
@@ -172,6 +220,9 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
         .set(this.recordKey(id), JSON.stringify(serialized), 'EX', this.ttlSeconds)
         .sadd(this.workspaceConversationSetKey(record.graph.workspaceId), id)
         .expire(this.workspaceConversationSetKey(record.graph.workspaceId), this.ttlSeconds)
+        .sadd(this.workspaceIndexKey(), record.graph.workspaceId)
+        .expire(this.workspaceIndexKey(), this.ttlSeconds)
+        .zadd(this.workspaceUpdatedSetKey(), Date.now(), record.graph.workspaceId)
         .zadd(this.touchedSetKey(), Date.now(), id)
         .exec()
     })
@@ -186,6 +237,9 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
         .set(this.recordKey(id), JSON.stringify(serialized), 'EX', this.ttlSeconds)
         .sadd(this.workspaceConversationSetKey(record.graph.workspaceId), id)
         .expire(this.workspaceConversationSetKey(record.graph.workspaceId), this.ttlSeconds)
+        .sadd(this.workspaceIndexKey(), record.graph.workspaceId)
+        .expire(this.workspaceIndexKey(), this.ttlSeconds)
+        .zadd(this.workspaceUpdatedSetKey(), Date.now(), record.graph.workspaceId)
         .zadd(this.touchedSetKey(), Date.now(), id)
         .exec()
     })
@@ -249,15 +303,98 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
     return records ?? this.fallback.getConversationsByWorkspace(workspaceId)
   }
 
+  async listWorkspaces(): Promise<Array<{ workspaceId: string; updatedAt: string; status: WorkspaceRuntimeStatus }>> {
+    const records = await this.tryRead(async () => {
+      const workspaceIds = await this.redis.smembers(this.workspaceIndexKey())
+      if (workspaceIds.length === 0) return null
+
+      const pipeline = this.redis.pipeline()
+      workspaceIds.forEach((workspaceId) => {
+        pipeline.zscore(this.workspaceUpdatedSetKey(), workspaceId)
+        pipeline.scard(this.workspaceConversationSetKey(workspaceId))
+        pipeline.scard(this.workspaceAssetSetKey(workspaceId))
+      })
+      const responses = await pipeline.exec()
+      if (!responses) return []
+
+      return workspaceIds.map((workspaceId, index) => {
+        const score = responses[index * 3]?.[1]
+        const conversationCount = Number(responses[index * 3 + 1]?.[1] ?? 0)
+        const assetCount = Number(responses[index * 3 + 2]?.[1] ?? 0)
+        const status: WorkspaceRuntimeStatus = conversationCount > 0 || assetCount > 0 ? 'active' : 'draft'
+        return {
+          workspaceId,
+          updatedAt: typeof score === 'string' ? new Date(Number(score)).toISOString() : new Date().toISOString(),
+          status
+        }
+      })
+    })
+
+    return records ?? this.fallback.listWorkspaces()
+  }
+
+  async upsertWorkspaceAsset(asset: WorkspaceAsset) {
+    await this.fallback.upsertWorkspaceAsset(asset)
+    await this.tryWrite(async () => {
+      const payload = JSON.stringify(cloneAsset(asset))
+      await this.redis
+        .multi()
+        .set(this.workspaceAssetKey(asset.workspaceId, asset.assetId), payload, 'EX', this.ttlSeconds)
+        .sadd(this.workspaceAssetSetKey(asset.workspaceId), asset.assetId)
+        .expire(this.workspaceAssetSetKey(asset.workspaceId), this.ttlSeconds)
+        .sadd(this.workspaceIndexKey(), asset.workspaceId)
+        .expire(this.workspaceIndexKey(), this.ttlSeconds)
+        .zadd(this.workspaceUpdatedSetKey(), Date.now(), asset.workspaceId)
+        .exec()
+    })
+  }
+
+  async listWorkspaceAssets(workspaceId: string) {
+    const assets = await this.tryRead(async () => {
+      const ids = await this.redis.smembers(this.workspaceAssetSetKey(workspaceId))
+      if (ids.length === 0) return null
+
+      const pipeline = this.redis.pipeline()
+      ids.forEach((assetId) => {
+        pipeline.get(this.workspaceAssetKey(workspaceId, assetId))
+      })
+      const responses = await pipeline.exec()
+      if (!responses) return []
+
+      const result: WorkspaceAsset[] = []
+      for (let index = 0; index < ids.length; index += 1) {
+        const item = responses[index]
+        if (!item || item[0]) continue
+        const payload = item[1]
+        if (typeof payload !== 'string') continue
+        try {
+          const asset = JSON.parse(payload) as WorkspaceAsset
+          await this.fallback.upsertWorkspaceAsset(asset)
+          result.push(cloneAsset(asset))
+        } catch (error) {
+          console.error('[conversation-runtime-repository] invalid redis asset payload', {
+            assetId: ids[index],
+            error: String(error)
+          })
+        }
+      }
+
+      return result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    })
+
+    return assets ?? this.fallback.listWorkspaceAssets(workspaceId)
+  }
+
   async setWorkspaceGraph(workspaceId: string, graph: CanvasGraph) {
     await this.fallback.setWorkspaceGraph(workspaceId, graph)
     await this.tryWrite(async () => {
-      await this.redis.set(
-        this.workspaceGraphKey(workspaceId),
-        JSON.stringify(graph),
-        'EX',
-        this.ttlSeconds
-      )
+      await this.redis
+        .multi()
+        .set(this.workspaceGraphKey(workspaceId), JSON.stringify(graph), 'EX', this.ttlSeconds)
+        .sadd(this.workspaceIndexKey(), workspaceId)
+        .expire(this.workspaceIndexKey(), this.ttlSeconds)
+        .zadd(this.workspaceUpdatedSetKey(), Date.now(), workspaceId)
+        .exec()
     })
   }
 
@@ -323,6 +460,22 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
 
   private workspaceConversationSetKey(workspaceId: string) {
     return `${this.keyPrefix}:workspace:${workspaceId}:conversations`
+  }
+
+  private workspaceAssetKey(workspaceId: string, assetId: string) {
+    return `${this.keyPrefix}:workspace:${workspaceId}:asset:${encodeURIComponent(assetId)}`
+  }
+
+  private workspaceAssetSetKey(workspaceId: string) {
+    return `${this.keyPrefix}:workspace:${workspaceId}:assets`
+  }
+
+  private workspaceIndexKey() {
+    return `${this.keyPrefix}:workspaces`
+  }
+
+  private workspaceUpdatedSetKey() {
+    return `${this.keyPrefix}:workspace-updated`
   }
 
   private touchedSetKey() {
@@ -394,4 +547,8 @@ function cloneKnowledgeEvidence(knowledgeEvidence: KnowledgeEvidence[]) {
     ...item,
     metadata: item.metadata ? { ...item.metadata } : undefined
   }))
+}
+
+function cloneAsset(asset: WorkspaceAsset): WorkspaceAsset {
+  return JSON.parse(JSON.stringify(asset)) as WorkspaceAsset
 }

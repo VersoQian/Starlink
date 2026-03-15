@@ -5,3 +5,5 @@ export * from './logging/index.js';
 export * from './contracts/common.js';
 export * from './contracts/task-events.js';
 export * from './contracts/knowledge.js';
+export * from './contracts/workspace.js';
+export * from './contracts/asset.js';

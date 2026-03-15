@@ -1,13 +1,15 @@
 'use client'
 
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
+import { knowledgeKeys, taskKeys } from '@/core/query/keys'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import type { KnowledgeTask } from '@/types/knowledge'
 
 const IMPORT_KNOWLEDGE_URL_MUTATION = /* GraphQL */ `
-  mutation ImportKnowledgeUrl($kbId: ID!, $url: String!) {
-    importKnowledgeUrl(kbId: $kbId, url: $url) {
+  mutation ImportKnowledgeUrl($workspaceId: ID!, $kbId: ID!, $url: String!) {
+    importKnowledgeUrl(workspaceId: $workspaceId, kbId: $kbId, url: $url) {
       id
+      workspaceId
       kbId
       type
       status
@@ -19,7 +21,7 @@ const IMPORT_KNOWLEDGE_URL_MUTATION = /* GraphQL */ `
   }
 `
 
-export function useImportKnowledgeUrl(): UseMutationResult<
+export function useImportKnowledgeUrl(workspaceId: string): UseMutationResult<
   KnowledgeTask,
   Error,
   { kbId: string; url: string }
@@ -31,13 +33,13 @@ export function useImportKnowledgeUrl(): UseMutationResult<
       const client = getGraphQLClient()
       const response = await client.request<{ importKnowledgeUrl: KnowledgeTask }>(
         IMPORT_KNOWLEDGE_URL_MUTATION,
-        { kbId, url }
+        { workspaceId, kbId, url }
       )
       return response.importKnowledgeUrl
     },
     onSuccess: async (task) => {
-      await queryClient.invalidateQueries({ queryKey: ['kb-task-status', task.kbId] })
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-base-status', task.kbId] })
+      await queryClient.invalidateQueries({ queryKey: taskKeys.byKnowledgeBase(workspaceId, task.kbId) })
+      await queryClient.invalidateQueries({ queryKey: knowledgeKeys.status(workspaceId, task.kbId) })
     }
   })
 }

@@ -42,9 +42,9 @@ KB_TASK_SERVICE_URL="http://localhost:4001"
 - `POST /kb/:kbId/import/file` — proxy multipart file upload to task service
 
 The gateway keeps task status projections in memory and exposes:
-- `kbTaskStatus(kbId: ID!)`
-- `knowledgeBases`
-- `createKnowledgeBase`
-- `publishKnowledgeBase(kbId: ID!)`
-- `addKnowledgeSeed(kbId: ID!, text: String!)`
-- `importKnowledgeUrl(kbId: ID!, url: String!)`
+- `kbTaskStatus(workspaceId: ID!, kbId: ID!)`
+- `knowledgeBases(workspaceId: ID!)`
+- `createKnowledgeBase(workspaceId: ID!)`
+- `publishKnowledgeBase(workspaceId: ID!, kbId: ID!)`
+- `addKnowledgeSeed(workspaceId: ID!, kbId: ID!, text: String!)`
+- `importKnowledgeUrl(workspaceId: ID!, kbId: ID!, url: String!)`

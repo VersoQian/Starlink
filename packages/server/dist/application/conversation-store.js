@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@starlink/shared';
 import { BusinessLangGraphService } from '../services/business-langgraph.js';
 import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js';
+import { getWorkspaceMetadata, listWorkspaceMetadata, listWorkspaceMetadataHistory, resolveViewerPermissions, updateWorkspaceMetadata } from './workspace-metadata-store.js';
 const businessLangGraphService = new BusinessLangGraphService();
 export class ConversationStore {
     constructor({ eventBus, runtimeRepository }) {
@@ -129,6 +130,132 @@ export class ConversationStore {
         };
         await this.runtimeRepository.setWorkspaceGraph(workspaceId, emptyGraph);
         return emptyGraph;
+    }
+    async listWorkspaces(userId) {
+        const workspaces = await this.runtimeRepository.listWorkspaces();
+        const metadataRecords = await listWorkspaceMetadata();
+        const runtimeById = new Map(workspaces.map((workspace) => [workspace.workspaceId, workspace]));
+        const knownIds = new Set([
+            ...metadataRecords.map((item) => item.workspaceId),
+            ...workspaces.map((item) => item.workspaceId)
+        ]);
+        return await Promise.all([...knownIds].map(async (workspaceId) => {
+            const metadata = await getWorkspaceMetadata(workspaceId);
+            const runtime = runtimeById.get(workspaceId);
+            const viewerPermissions = resolveViewerPermissions(userId, metadata.members);
+            return {
+                workspaceId,
+                name: metadata.name,
+                type: metadata.type,
+                focus: metadata.focus,
+                ownerId: metadata.ownerId,
+                ownerName: metadata.ownerName,
+                members: metadata.members,
+                viewerPermissions,
+                canManage: viewerPermissions.includes('workspace.manage'),
+                status: runtime?.status ?? 'draft',
+                updatedAt: runtime?.updatedAt ?? new Date().toISOString()
+            };
+        }));
+    }
+    async listWorkspaceHistory(workspaceId) {
+        return await listWorkspaceMetadataHistory(workspaceId);
+    }
+    async updateWorkspace(input, userId) {
+        const currentMetadata = await getWorkspaceMetadata(input.workspaceId);
+        const viewerPermissions = resolveViewerPermissions(userId, currentMetadata.members);
+        if (!viewerPermissions.includes('workspace.manage')) {
+            throw new Error('FORBIDDEN_WORKSPACE_METADATA');
+        }
+        const { workspace: metadata } = await updateWorkspaceMetadata(input, userId);
+        const runtime = (await this.runtimeRepository.listWorkspaces()).find((workspace) => workspace.workspaceId === input.workspaceId);
+        const nextViewerPermissions = resolveViewerPermissions(userId, metadata.members);
+        return {
+            workspaceId: metadata.workspaceId,
+            name: metadata.name,
+            type: metadata.type,
+            focus: metadata.focus,
+            ownerId: metadata.ownerId,
+            ownerName: metadata.ownerName,
+            members: metadata.members,
+            viewerPermissions: nextViewerPermissions,
+            canManage: nextViewerPermissions.includes('workspace.manage'),
+            status: runtime?.status ?? 'draft',
+            updatedAt: runtime?.updatedAt ?? new Date().toISOString()
+        };
+    }
+    async listWorkspaceAssets(workspaceId) {
+        return await this.runtimeRepository.listWorkspaceAssets(workspaceId);
+    }
+    async saveCommunityPost(input, userId) {
+        const createdAt = new Date().toISOString();
+        const postId = nanoid();
+        const asset = {
+            assetId: `community:${postId}`,
+            workspaceId: input.workspaceId,
+            assetType: 'community-post',
+            title: input.title,
+            sourceModule: 'community',
+            sourceTaskId: null,
+            metadata: {
+                tags: input.tags,
+                authorName: input.authorName,
+                authorRole: input.authorRole ?? null
+            },
+            content: {
+                id: postId,
+                workspaceId: input.workspaceId,
+                title: input.title,
+                body: input.body,
+                tags: input.tags,
+                authorName: input.authorName,
+                authorRole: input.authorRole ?? null,
+                createdAt
+            },
+            version: 1,
+            status: 'published',
+            createdBy: userId,
+            createdAt,
+            updatedAt: createdAt
+        };
+        await this.runtimeRepository.upsertWorkspaceAsset(asset);
+        return asset;
+    }
+    async savePracticeSession(input, userId) {
+        const updatedAt = input.lastUpdated ?? new Date().toISOString();
+        const assetId = `practice:${input.workspaceId}:${input.scenarioId}`;
+        const current = (await this.runtimeRepository.listWorkspaceAssets(input.workspaceId))
+            .find((asset) => asset.assetId === assetId);
+        const asset = {
+            assetId,
+            workspaceId: input.workspaceId,
+            assetType: 'practice-output',
+            title: input.scenarioTitle?.trim() ? `Practice Session · ${input.scenarioTitle}` : `Practice Session · ${input.scenarioId}`,
+            sourceModule: 'practice',
+            sourceTaskId: null,
+            metadata: {
+                scenarioId: input.scenarioId,
+                messageCount: input.messages.length,
+                insightCount: input.insights.length,
+                resourceCount: input.resources.length
+            },
+            content: {
+                scenarioId: input.scenarioId,
+                scenarioTitle: input.scenarioTitle ?? null,
+                messages: input.messages,
+                insights: input.insights,
+                resources: input.resources,
+                quickReplies: input.quickReplies,
+                lastUpdated: updatedAt
+            },
+            version: Math.max(current?.version ?? 0, input.messages.length),
+            status: input.messages.length > 1 ? 'ready' : 'draft',
+            createdBy: current?.createdBy ?? userId,
+            createdAt: current?.createdAt ?? updatedAt,
+            updatedAt
+        };
+        await this.runtimeRepository.upsertWorkspaceAsset(asset);
+        return asset;
     }
     async addNode(workspaceId, input) {
         const id = input.id ?? nanoid();

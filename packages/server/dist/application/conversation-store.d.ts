@@ -1,4 +1,4 @@
-import type { CanvasEdge, CanvasGraph, CanvasNode, ConversationEvent } from '@starlink/shared';
+import type { CanvasEdge, CanvasGraph, WorkspaceMetadataUpdateInput, CanvasNode, CommunityPostInput, ConversationEvent, PracticeSessionInput, WorkspaceDirectoryItem, WorkspaceMetadataHistoryEntry, WorkspaceAsset } from '@starlink/shared';
 import type { ConversationEventBus } from './conversation-event-bus.js';
 import type { ConversationRecord, ConversationRuntimeRepository } from './conversation-runtime-repository.js';
 export type ConversationStoreDeps = {
@@ -15,6 +15,12 @@ export declare class ConversationStore {
     startConversation(workspaceId: string, userId: string, question: string): Promise<ConversationRecord>;
     getConversation(id: string): Promise<ConversationRecord | null>;
     getGraph(workspaceId: string): Promise<CanvasGraph>;
+    listWorkspaces(userId: string): Promise<WorkspaceDirectoryItem[]>;
+    listWorkspaceHistory(workspaceId: string): Promise<WorkspaceMetadataHistoryEntry[]>;
+    updateWorkspace(input: WorkspaceMetadataUpdateInput, userId: string): Promise<WorkspaceDirectoryItem>;
+    listWorkspaceAssets(workspaceId: string): Promise<WorkspaceAsset[]>;
+    saveCommunityPost(input: CommunityPostInput, userId: string): Promise<WorkspaceAsset>;
+    savePracticeSession(input: PracticeSessionInput, userId: string): Promise<WorkspaceAsset>;
     addNode(workspaceId: string, input: {
         id?: string;
         type: string;

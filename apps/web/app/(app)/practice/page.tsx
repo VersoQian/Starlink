@@ -1,17 +1,24 @@
 'use client'
 
+import Link from 'next/link'
+import type { Route } from 'next'
 import { useEffect, useState } from 'react'
 import { ScenarioList } from '@/features/practice'
 import type { Scenario } from '@/features/practice'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { useWorkspaceDirectory } from '@/entities'
+import { getPracticeActiveWorkspaceId, setPracticeActiveWorkspaceId } from '@/entities/asset/local-source'
 import { useTheme, cn, bgToText, bgToBorder } from '@/lib/theme'
 
 export default function PracticePage() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState('proj-001')
+  const workspaceDirectory = useWorkspaceDirectory({ activeWorkspaceId })
   const { theme } = useTheme()
 
   useEffect(() => {
+    setActiveWorkspaceId(getPracticeActiveWorkspaceId())
     fetchScenarios()
   }, [])
 
@@ -40,10 +47,40 @@ export default function PracticePage() {
 
   return (
     <div className={cn('flex flex-col h-screen', theme.colors.background.primary)}>
-      {/* Header with Theme Toggle */}
-      <div className={cn('shrink-0 flex items-center justify-between px-6 py-4 border-b backdrop-blur-sm', theme.colors.border.default, theme.colors.background.secondary)}>
-        <h1 className={cn('text-xl font-bold', theme.colors.text.primary)}>跨文化商业沟通模拟</h1>
-        <ThemeToggle />
+      <div className={cn('shrink-0 flex items-center justify-between gap-4 px-6 py-4 border-b backdrop-blur-sm', theme.colors.border.default, theme.colors.background.secondary)}>
+        <div>
+          <p className={cn('text-[11px] font-semibold uppercase tracking-[0.28em]', theme.colors.text.muted)}>Practice</p>
+          <h1 className={cn('mt-1 text-xl font-bold', theme.colors.text.primary)}>跨文化商业沟通模拟</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={activeWorkspaceId}
+            onChange={(event) => {
+              setActiveWorkspaceId(event.target.value)
+              setPracticeActiveWorkspaceId(event.target.value)
+            }}
+            className={cn('h-10 rounded-full border px-4 text-sm font-medium outline-none transition', theme.colors.border.default, theme.colors.background.card, theme.colors.text.primary)}
+          >
+            {workspaceDirectory.map((workspace) => (
+              <option key={workspace.workspaceId} value={workspace.workspaceId}>
+                {workspace.name}
+              </option>
+            ))}
+          </select>
+          <Link
+            href={'/dashboard' as Route}
+            className={cn('rounded-full border px-4 py-2 text-sm transition', theme.colors.border.default, theme.colors.text.secondary, theme.colors.interactive.hover)}
+          >
+            回到主界面
+          </Link>
+          <Link
+            href={'/community' as Route}
+            className={cn('rounded-full border px-4 py-2 text-sm transition', theme.colors.border.default, theme.colors.text.secondary, theme.colors.interactive.hover)}
+          >
+            社区中心
+          </Link>
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* Main Content */}

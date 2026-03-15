@@ -168,7 +168,7 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                           </p>
                           <div className="mt-3 flex flex-wrap items-center gap-2">
                             <Link
-                              href={`/workspace/${params.workspaceId}?focusNodeId=${encodeURIComponent(item.nodeId)}`}
+                              href={`/workspace/${params.workspaceId}/canvas?focusNodeId=${encodeURIComponent(item.nodeId)}`}
                               className={cn('rounded-lg border px-2.5 py-1 text-xs', theme.colors.border.default, theme.colors.interactive.hover)}
                             >
                               在画布定位

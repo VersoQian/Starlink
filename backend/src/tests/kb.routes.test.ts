@@ -86,18 +86,18 @@ describe('kb routes (unit)', () => {
     const handler = getHandler('get', '/kb')
     const res = createMockRes()
     ;(kbServiceMock.list as jest.Mock).mockResolvedValue([
-      { id: 'kb-1', name: 'KB1' },
-      { id: 'kb-2', name: 'KB2' }
+      { id: 'kb-1', workspaceId: 'demo', name: 'KB1' },
+      { id: 'kb-2', workspaceId: 'demo', name: 'KB2' }
     ])
 
-    await handler({} as Request, res, jest.fn())
+    await handler({ query: { workspaceId: 'demo' } } as unknown as Request, res, jest.fn())
 
-    expect(kbServiceMock.list).toHaveBeenCalled()
+    expect(kbServiceMock.list).toHaveBeenCalledWith('demo')
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         knowledgeBases: expect.arrayContaining([
-          expect.objectContaining({ id: 'kb-1' }),
-          expect.objectContaining({ id: 'kb-2' })
+          expect.objectContaining({ id: 'kb-1', workspaceId: 'demo' }),
+          expect.objectContaining({ id: 'kb-2', workspaceId: 'demo' })
         ])
       })
     )
@@ -106,28 +106,42 @@ describe('kb routes (unit)', () => {
   it('POST /kb should create knowledge base', async () => {
     const handler = getHandler('post', '/kb')
     const res = createMockRes()
-    ;(kbServiceMock.create as jest.Mock).mockResolvedValue({ id: 'kb-1', name: '新建 Knowledge Base' })
+    ;(kbServiceMock.create as jest.Mock).mockResolvedValue({
+      id: 'kb-1',
+      workspaceId: 'demo',
+      name: '新建 Knowledge Base'
+    })
 
-    await handler({} as Request, res, jest.fn())
+    await handler({ body: { workspaceId: 'demo' } } as unknown as Request, res, jest.fn())
 
-    expect(kbServiceMock.create).toHaveBeenCalled()
+    expect(kbServiceMock.create).toHaveBeenCalledWith({ workspaceId: 'demo' })
     expect(res.status).toHaveBeenCalledWith(201)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ id: 'kb-1' }))
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ id: 'kb-1', workspaceId: 'demo' }))
   })
 
   it('GET /kb/:id/status should return kb and tasks', async () => {
     const handler = getHandler('get', '/kb/:id/status')
     const res = createMockRes()
-    ;(kbServiceMock.getById as jest.Mock).mockResolvedValue({ id: 'kb-1', name: 'KB', status: 'draft', aiChunkingEnabled: true })
+    ;(kbServiceMock.getById as jest.Mock).mockResolvedValue({
+      id: 'kb-1',
+      workspaceId: 'demo',
+      name: 'KB',
+      status: 'draft',
+      aiChunkingEnabled: true
+    })
     ;(prismaMock.importTask.findMany as jest.Mock).mockResolvedValue([{ id: 'task-1', status: 'succeeded' }])
 
-    await handler({ params: { id: 'kb-1' } } as unknown as Request, res, jest.fn())
+    await handler(
+      { params: { id: 'kb-1' }, query: { workspaceId: 'demo' } } as unknown as Request,
+      res,
+      jest.fn()
+    )
 
-    expect(kbServiceMock.getById).toHaveBeenCalledWith('kb-1')
+    expect(kbServiceMock.getById).toHaveBeenCalledWith('kb-1', 'demo')
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        knowledgeBase: expect.objectContaining({ id: 'kb-1' }),
-        tasks: expect.arrayContaining([expect.objectContaining({ id: 'task-1' })]),
+        knowledgeBase: expect.objectContaining({ id: 'kb-1', workspaceId: 'demo' }),
+        tasks: expect.arrayContaining([expect.objectContaining({ id: 'task-1', workspaceId: 'demo' })]),
       })
     )
   })
@@ -136,13 +150,15 @@ describe('kb routes (unit)', () => {
     const handler = getHandler('post', '/kb/:id/seed')
     const res = createMockRes()
     ;(importServiceMock.addSeed as jest.Mock).mockResolvedValue({ id: 'task-1' })
+    ;(kbServiceMock.getById as jest.Mock).mockResolvedValue({ id: 'kb-1', workspaceId: 'demo' })
 
     await handler(
-      { params: { id: 'kb-1' }, body: { text: 'Hello' } } as unknown as Request,
+      { params: { id: 'kb-1' }, body: { text: 'Hello', workspaceId: 'demo' } } as unknown as Request,
       res,
       jest.fn()
     )
 
+    expect(kbServiceMock.getById).toHaveBeenCalledWith('kb-1', 'demo')
     expect(importServiceMock.addSeed).toHaveBeenCalledWith('kb-1', 'Hello')
     expect(res.status).toHaveBeenCalledWith(202)
   })

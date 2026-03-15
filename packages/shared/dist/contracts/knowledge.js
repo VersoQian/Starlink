@@ -4,6 +4,7 @@ const isoDateTimeString = z.string().datetime();
 export const kbStatusSchema = z.enum(['draft', 'processing', 'ready']);
 export const knowledgeBaseSchema = z.object({
     id: z.string().min(1),
+    workspaceId: z.string().min(1),
     name: z.string().min(1),
     status: kbStatusSchema,
     createdAt: isoDateTimeString,
@@ -13,6 +14,7 @@ export const knowledgeBaseSchema = z.object({
 export const knowledgeTaskPayloadSchema = z.record(z.unknown());
 export const knowledgeTaskSchema = z.object({
     id: z.string().min(1),
+    workspaceId: z.string().min(1),
     kbId: z.string().min(1),
     type: taskTypeSchema,
     status: taskStatusSchema,
@@ -23,6 +25,7 @@ export const knowledgeTaskSchema = z.object({
 });
 export const kbTaskStatusSnapshotSchema = z.object({
     taskId: z.string().min(1),
+    workspaceId: z.string().min(1),
     kbId: z.string().min(1),
     status: taskStatusSchema,
     taskType: taskTypeSchema,

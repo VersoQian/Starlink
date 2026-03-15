@@ -2,10 +2,16 @@ import { nanoid } from 'nanoid'
 import type {
   CanvasEdge,
   CanvasGraph,
+  WorkspaceMetadataUpdateInput,
   CanvasNode,
+  CommunityPostInput,
   ConversationEvent,
   ConversationMetadata,
   KnowledgeEvidence,
+  PracticeSessionInput,
+  WorkspaceDirectoryItem,
+  WorkspaceMetadataHistoryEntry,
+  WorkspaceAsset,
   SeminarPhase
 } from '@starlink/shared'
 import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@starlink/shared'
@@ -16,6 +22,13 @@ import type {
   ConversationRecord,
   ConversationRuntimeRepository
 } from './conversation-runtime-repository.js'
+import {
+  getWorkspaceMetadata,
+  listWorkspaceMetadata,
+  listWorkspaceMetadataHistory,
+  resolveViewerPermissions,
+  updateWorkspaceMetadata
+} from './workspace-metadata-store.js'
 export type ConversationStoreDeps = {
   eventBus: ConversationEventBus
   runtimeRepository: ConversationRuntimeRepository
@@ -169,6 +182,145 @@ export class ConversationStore {
     }
     await this.runtimeRepository.setWorkspaceGraph(workspaceId, emptyGraph)
     return emptyGraph
+  }
+
+  async listWorkspaces(userId: string): Promise<WorkspaceDirectoryItem[]> {
+    const workspaces = await this.runtimeRepository.listWorkspaces()
+    const metadataRecords = await listWorkspaceMetadata()
+    const runtimeById = new Map(workspaces.map((workspace) => [workspace.workspaceId, workspace] as const))
+    const knownIds = new Set<string>([
+      ...metadataRecords.map((item) => item.workspaceId),
+      ...workspaces.map((item) => item.workspaceId)
+    ])
+
+    return await Promise.all([...knownIds].map(async (workspaceId) => {
+      const metadata = await getWorkspaceMetadata(workspaceId)
+      const runtime = runtimeById.get(workspaceId)
+      const viewerPermissions = resolveViewerPermissions(userId, metadata.members)
+      return {
+        workspaceId,
+        name: metadata.name,
+        type: metadata.type,
+        focus: metadata.focus,
+        ownerId: metadata.ownerId,
+        ownerName: metadata.ownerName,
+        members: metadata.members,
+        viewerPermissions,
+        canManage: viewerPermissions.includes('workspace.manage'),
+        status: runtime?.status ?? 'draft',
+        updatedAt: runtime?.updatedAt ?? new Date().toISOString()
+      }
+    }))
+  }
+
+  async listWorkspaceHistory(workspaceId: string): Promise<WorkspaceMetadataHistoryEntry[]> {
+    return await listWorkspaceMetadataHistory(workspaceId)
+  }
+
+  async updateWorkspace(input: WorkspaceMetadataUpdateInput, userId: string): Promise<WorkspaceDirectoryItem> {
+    const currentMetadata = await getWorkspaceMetadata(input.workspaceId)
+    const viewerPermissions = resolveViewerPermissions(userId, currentMetadata.members)
+    if (!viewerPermissions.includes('workspace.manage')) {
+      throw new Error('FORBIDDEN_WORKSPACE_METADATA')
+    }
+
+    const { workspace: metadata } = await updateWorkspaceMetadata(input, userId)
+    const runtime = (await this.runtimeRepository.listWorkspaces()).find(
+      (workspace) => workspace.workspaceId === input.workspaceId
+    )
+    const nextViewerPermissions = resolveViewerPermissions(userId, metadata.members)
+
+    return {
+      workspaceId: metadata.workspaceId,
+      name: metadata.name,
+      type: metadata.type,
+      focus: metadata.focus,
+      ownerId: metadata.ownerId,
+      ownerName: metadata.ownerName,
+      members: metadata.members,
+      viewerPermissions: nextViewerPermissions,
+      canManage: nextViewerPermissions.includes('workspace.manage'),
+      status: runtime?.status ?? 'draft',
+      updatedAt: runtime?.updatedAt ?? new Date().toISOString()
+    }
+  }
+
+  async listWorkspaceAssets(workspaceId: string): Promise<WorkspaceAsset[]> {
+    return await this.runtimeRepository.listWorkspaceAssets(workspaceId)
+  }
+
+  async saveCommunityPost(input: CommunityPostInput, userId: string): Promise<WorkspaceAsset> {
+    const createdAt = new Date().toISOString()
+    const postId = nanoid()
+    const asset: WorkspaceAsset = {
+      assetId: `community:${postId}`,
+      workspaceId: input.workspaceId,
+      assetType: 'community-post',
+      title: input.title,
+      sourceModule: 'community',
+      sourceTaskId: null,
+      metadata: {
+        tags: input.tags,
+        authorName: input.authorName,
+        authorRole: input.authorRole ?? null
+      },
+      content: {
+        id: postId,
+        workspaceId: input.workspaceId,
+        title: input.title,
+        body: input.body,
+        tags: input.tags,
+        authorName: input.authorName,
+        authorRole: input.authorRole ?? null,
+        createdAt
+      },
+      version: 1,
+      status: 'published',
+      createdBy: userId,
+      createdAt,
+      updatedAt: createdAt
+    }
+
+    await this.runtimeRepository.upsertWorkspaceAsset(asset)
+    return asset
+  }
+
+  async savePracticeSession(input: PracticeSessionInput, userId: string): Promise<WorkspaceAsset> {
+    const updatedAt = input.lastUpdated ?? new Date().toISOString()
+    const assetId = `practice:${input.workspaceId}:${input.scenarioId}`
+    const current = (await this.runtimeRepository.listWorkspaceAssets(input.workspaceId))
+      .find((asset) => asset.assetId === assetId)
+    const asset: WorkspaceAsset = {
+      assetId,
+      workspaceId: input.workspaceId,
+      assetType: 'practice-output',
+      title: input.scenarioTitle?.trim() ? `Practice Session · ${input.scenarioTitle}` : `Practice Session · ${input.scenarioId}`,
+      sourceModule: 'practice',
+      sourceTaskId: null,
+      metadata: {
+        scenarioId: input.scenarioId,
+        messageCount: input.messages.length,
+        insightCount: input.insights.length,
+        resourceCount: input.resources.length
+      },
+      content: {
+        scenarioId: input.scenarioId,
+        scenarioTitle: input.scenarioTitle ?? null,
+        messages: input.messages,
+        insights: input.insights,
+        resources: input.resources,
+        quickReplies: input.quickReplies,
+        lastUpdated: updatedAt
+      },
+      version: Math.max(current?.version ?? 0, input.messages.length),
+      status: input.messages.length > 1 ? 'ready' : 'draft',
+      createdBy: current?.createdBy ?? userId,
+      createdAt: current?.createdAt ?? updatedAt,
+      updatedAt
+    }
+
+    await this.runtimeRepository.upsertWorkspaceAsset(asset)
+    return asset
   }
 
   async addNode(

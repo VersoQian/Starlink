@@ -1,4 +1,5 @@
 import type { Message, Insight, Resource } from '../types'
+import { notifyAssetFeedChanged } from '@/entities/asset/local-source'
 
 interface SessionData {
   messages: Message[]
@@ -8,8 +9,9 @@ interface SessionData {
   lastUpdated: number
 }
 
-export function useSessionStorage(scenarioId: string) {
-  const storageKey = `practice-session-${scenarioId}`
+export function useSessionStorage(scenarioId: string, workspaceId = 'proj-001') {
+  const storageKey = `practice-session-${workspaceId}-${scenarioId}`
+  const legacyStorageKey = `practice-session-${scenarioId}`
 
   // 加载会话
   function loadSession(): SessionData | null {
@@ -17,9 +19,10 @@ export function useSessionStorage(scenarioId: string) {
 
     try {
       const saved = localStorage.getItem(storageKey)
-      if (!saved) return null
+      const legacy = localStorage.getItem(legacyStorageKey)
+      if (!saved && !legacy) return null
 
-      const data = JSON.parse(saved) as SessionData
+      const data = JSON.parse(saved ?? legacy ?? 'null') as SessionData
       // 检查是否过期（24小时）
       const isExpired = Date.now() - data.lastUpdated > 24 * 60 * 60 * 1000
       if (isExpired) {
@@ -44,6 +47,7 @@ export function useSessionStorage(scenarioId: string) {
         lastUpdated: Date.now()
       }
       localStorage.setItem(storageKey, JSON.stringify(sessionData))
+      notifyAssetFeedChanged()
     } catch (error) {
       console.error('Failed to save session:', error)
     }
@@ -55,6 +59,8 @@ export function useSessionStorage(scenarioId: string) {
 
     try {
       localStorage.removeItem(storageKey)
+      localStorage.removeItem(legacyStorageKey)
+      notifyAssetFeedChanged()
     } catch (error) {
       console.error('Failed to clear session:', error)
     }

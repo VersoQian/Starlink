@@ -1,11 +1,15 @@
 'use client'
 
+import Link from 'next/link'
+import type { Route } from 'next'
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { ScenarioList, ChatInterface, ContextAssistant, useSessionStorage, useScoring } from '@/features/practice'
 import type { Scenario, Message, Insight, Resource } from '@/features/practice'
 import { nanoid } from 'nanoid'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { useSavePracticeSessionMutation, useWorkspaceDirectory } from '@/entities'
+import { getPracticeActiveWorkspaceId, setPracticeActiveWorkspaceId } from '@/entities/asset/local-source'
 import { useTheme, cn, bgToBorder } from '@/lib/theme'
 
 export default function ScenarioPage() {
@@ -13,9 +17,12 @@ export default function ScenarioPage() {
   const router = useRouter()
   const scenarioId = params.scenarioId as string
   const { theme } = useTheme()
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState('proj-001')
+  const workspaceDirectory = useWorkspaceDirectory({ activeWorkspaceId })
+  const savePracticeSessionMutation = useSavePracticeSessionMutation()
 
   // 会话存储
-  const { loadSession, saveSession, clearSession } = useSessionStorage(scenarioId)
+  const { loadSession, saveSession, clearSession } = useSessionStorage(scenarioId, activeWorkspaceId)
 
   // State
   const [scenarios, setScenarios] = useState<Scenario[]>([])
@@ -34,6 +41,7 @@ export default function ScenarioPage() {
 
   // Load scenarios
   useEffect(() => {
+    setActiveWorkspaceId(getPracticeActiveWorkspaceId())
     fetchScenarios()
   }, [])
 
@@ -78,8 +86,31 @@ export default function ScenarioPage() {
         resources,
         quickReplies
       })
+      void savePracticeSessionMutation.mutateAsync({
+        workspaceId: activeWorkspaceId,
+        scenarioId,
+        scenarioTitle: currentScenario?.title,
+        messages,
+        insights,
+        resources,
+        quickReplies,
+        lastUpdated: new Date().toISOString()
+      }).catch(() => {
+        // local session remains the fallback source
+      })
     }
-  }, [messages, insights, resources, quickReplies, sessionLoaded, saveSession])
+  }, [
+    activeWorkspaceId,
+    currentScenario?.title,
+    insights,
+    messages,
+    quickReplies,
+    resources,
+    savePracticeSessionMutation,
+    saveSession,
+    scenarioId,
+    sessionLoaded
+  ])
 
   async function fetchScenarios() {
     try {
@@ -191,10 +222,40 @@ export default function ScenarioPage() {
 
   return (
     <div className={cn('flex flex-col h-screen', theme.colors.background.primary)}>
-      {/* Header with Theme Toggle */}
-      <div className={cn('shrink-0 flex items-center justify-between px-6 py-4 border-b backdrop-blur-sm', theme.colors.border.default, theme.colors.background.secondary)}>
-        <h1 className={cn('text-xl font-bold', theme.colors.text.primary)}>{currentScenario.title}</h1>
-        <ThemeToggle />
+      <div className={cn('shrink-0 flex items-center justify-between gap-4 px-6 py-4 border-b backdrop-blur-sm', theme.colors.border.default, theme.colors.background.secondary)}>
+        <div>
+          <p className={cn('text-[11px] font-semibold uppercase tracking-[0.28em]', theme.colors.text.muted)}>Practice Session</p>
+          <h1 className={cn('mt-1 text-xl font-bold', theme.colors.text.primary)}>{currentScenario.title}</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={activeWorkspaceId}
+            onChange={(event) => {
+              setActiveWorkspaceId(event.target.value)
+              setPracticeActiveWorkspaceId(event.target.value)
+            }}
+            className={cn('h-10 rounded-full border px-4 text-sm font-medium outline-none transition', theme.colors.border.default, theme.colors.background.card, theme.colors.text.primary)}
+          >
+            {workspaceDirectory.map((workspace) => (
+              <option key={workspace.workspaceId} value={workspace.workspaceId}>
+                {workspace.name}
+              </option>
+            ))}
+          </select>
+          <Link
+            href={'/practice' as Route}
+            className={cn('rounded-full border px-4 py-2 text-sm transition', theme.colors.border.default, theme.colors.text.secondary, theme.colors.interactive.hover)}
+          >
+            返回场景列表
+          </Link>
+          <Link
+            href={'/dashboard' as Route}
+            className={cn('rounded-full border px-4 py-2 text-sm transition', theme.colors.border.default, theme.colors.text.secondary, theme.colors.interactive.hover)}
+          >
+            主界面
+          </Link>
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* Main Content */}

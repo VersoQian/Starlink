@@ -59,6 +59,7 @@ export const typeDefs = gql`
 
   type KbTaskStatus {
     taskId: ID!
+    workspaceId: ID!
     kbId: ID!
     status: String!
     taskType: String!
@@ -69,6 +70,7 @@ export const typeDefs = gql`
 
   type KnowledgeBase {
     id: ID!
+    workspaceId: ID!
     name: String!
     status: String!
     createdAt: String!
@@ -78,6 +80,7 @@ export const typeDefs = gql`
 
   type KbTask {
     id: ID!
+    workspaceId: ID!
     kbId: ID!
     type: String!
     status: String!
@@ -90,6 +93,52 @@ export const typeDefs = gql`
   type KnowledgeBaseStatus {
     knowledgeBase: KnowledgeBase!
     tasks: [KbTask!]!
+  }
+
+  type WorkspaceDirectoryItem {
+    workspaceId: ID!
+    name: String!
+    type: String!
+    focus: String!
+    ownerId: ID!
+    ownerName: String!
+    members: [WorkspaceMember!]!
+    viewerPermissions: [String!]!
+    canManage: Boolean!
+    status: String!
+    updatedAt: String!
+  }
+
+  type WorkspaceMember {
+    id: ID!
+    name: String!
+    role: String
+    permissions: [String!]!
+  }
+
+  type WorkspaceMetadataHistoryEntry {
+    historyId: ID!
+    workspaceId: ID!
+    changedBy: String!
+    changedAt: String!
+    summary: String!
+    version: Int!
+  }
+
+  type WorkspaceAsset {
+    assetId: ID!
+    workspaceId: ID!
+    assetType: String!
+    title: String!
+    sourceModule: String!
+    sourceTaskId: String
+    metadata: JSON!
+    content: JSON!
+    version: Int!
+    status: String!
+    createdBy: String!
+    createdAt: String!
+    updatedAt: String!
   }
 
   input CanvasPositionInput {
@@ -111,12 +160,70 @@ export const typeDefs = gql`
     label: String
   }
 
+  input CommunityPostInput {
+    workspaceId: ID!
+    title: String!
+    body: String!
+    tags: [String!]!
+    authorName: String!
+    authorRole: String
+  }
+
+  input PracticeMessageInput {
+    id: ID!
+    role: String!
+    content: String!
+    timestamp: Float!
+    feedback: String
+  }
+
+  input PracticeInsightInput {
+    title: String!
+    detail: String!
+  }
+
+  input PracticeResourceInput {
+    title: String!
+    url: String
+  }
+
+  input WorkspaceMemberInput {
+    id: ID!
+    name: String!
+    role: String
+    permissions: [String!]!
+  }
+
+  input SavePracticeSessionInput {
+    workspaceId: ID!
+    scenarioId: ID!
+    scenarioTitle: String
+    messages: [PracticeMessageInput!]!
+    insights: [PracticeInsightInput!]!
+    resources: [PracticeResourceInput!]!
+    quickReplies: [String!]!
+    lastUpdated: String
+  }
+
+  input UpdateWorkspaceMetadataInput {
+    workspaceId: ID!
+    name: String!
+    type: String!
+    focus: String!
+    ownerId: ID!
+    ownerName: String!
+    members: [WorkspaceMemberInput!]!
+  }
+
   type Query {
     workspaceGraph(workspaceId: ID!): CanvasGraph!
     conversation(id: ID!): StartConversationPayload
-    kbTaskStatus(kbId: ID!): [KbTaskStatus!]!
-    knowledgeBases: [KnowledgeBase!]!
-    knowledgeBaseStatus(kbId: ID!): KnowledgeBaseStatus!
+    kbTaskStatus(workspaceId: ID!, kbId: ID!): [KbTaskStatus!]!
+    knowledgeBases(workspaceId: ID!): [KnowledgeBase!]!
+    knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!
+    workspaces: [WorkspaceDirectoryItem!]!
+    workspaceAssets(workspaceId: ID!): [WorkspaceAsset!]!
+    workspaceMetadataHistory(workspaceId: ID!): [WorkspaceMetadataHistoryEntry!]!
   }
 
   type Mutation {
@@ -124,10 +231,13 @@ export const typeDefs = gql`
     approveDecision(conversationId: ID!, decision: String): Boolean!
     addNode(workspaceId: ID!, input: NodeInput!): CanvasNode!
     connectNodes(workspaceId: ID!, input: EdgeInput!): CanvasEdge!
-    createKnowledgeBase: KnowledgeBase!
-    publishKnowledgeBase(kbId: ID!): KnowledgeBase!
-    addKnowledgeSeed(kbId: ID!, text: String!): KbTask!
-    importKnowledgeUrl(kbId: ID!, url: String!): KbTask!
+    createKnowledgeBase(workspaceId: ID!): KnowledgeBase!
+    publishKnowledgeBase(workspaceId: ID!, kbId: ID!): KnowledgeBase!
+    addKnowledgeSeed(workspaceId: ID!, kbId: ID!, text: String!): KbTask!
+    importKnowledgeUrl(workspaceId: ID!, kbId: ID!, url: String!): KbTask!
+    saveCommunityPost(input: CommunityPostInput!): WorkspaceAsset!
+    savePracticeSession(input: SavePracticeSessionInput!): WorkspaceAsset!
+    updateWorkspaceMetadata(input: UpdateWorkspaceMetadataInput!): WorkspaceDirectoryItem!
   }
 
   type Subscription {

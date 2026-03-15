@@ -42,6 +42,7 @@ export type InsightLog = {
 
 export type KbTaskStatus = {
   taskId: string
+  workspaceId: string
   kbId: string
   status: 'pending' | 'processing' | 'succeeded' | 'failed'
   taskType: 'seed' | 'file' | 'url'
@@ -52,6 +53,7 @@ export type KbTaskStatus = {
 
 export type KnowledgeTask = {
   id: string
+  workspaceId: string
   kbId: string
   type: 'seed' | 'file' | 'url'
   status: 'pending' | 'processing' | 'succeeded' | 'failed'
@@ -63,6 +65,7 @@ export type KnowledgeTask = {
 
 export type KnowledgeBaseSummary = {
   id: string
+  workspaceId: string
   name: string
   status: string
   createdAt: string
