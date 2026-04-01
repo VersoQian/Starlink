@@ -452,14 +452,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
           position: canvasNode.position
         }
 
-        console.log('[extractMacraNodeData] Extracted:', {
-          id: macraData.id,
-          type: macraData.type,
-          label: macraData.label,
-          hasSummary: !!macraData.summary,
-          hasFullContent: !!macraData.fullContent
-        })
-
         return macraData
       }
 
@@ -539,7 +531,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
     // 避免频繁调用（至少间隔5秒）
     if (lastCriticRun && Date.now() - lastCriticRun < 5000) {
-      console.log('⏳ Critic 冷却中，跳过本次调用')
       return
     }
 
@@ -578,8 +569,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       const data: CriticResponse = await response.json()
 
       if (data.conflicts && data.conflicts.length > 0) {
-        console.log('⚠️  发现冲突:', data.conflicts)
-
         // 创建冲突可视化
         for (const conflict of data.conflicts) {
           const conflictAction: CanvasAction = {
@@ -619,8 +608,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
           get().createMacraNode(alertNode)
         }
-      } else {
-        console.log('✅ 未发现冲突')
       }
 
       set({ isCriticProcessing: false })

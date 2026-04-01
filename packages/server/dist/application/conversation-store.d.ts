@@ -8,7 +8,8 @@ export type ConversationStoreDeps = {
 export declare class ConversationStore {
     private readonly eventBus;
     private readonly runtimeRepository;
-    private readonly pendingDecisionApprovals;
+    private readonly pendingDecisionTimeouts;
+    private readonly pendingDecisionResolvers;
     private readonly hitlEnabled;
     private readonly hitlApprovalTimeoutMs;
     constructor({ eventBus, runtimeRepository }: ConversationStoreDeps);

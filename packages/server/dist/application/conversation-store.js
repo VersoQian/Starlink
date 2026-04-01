@@ -2,11 +2,19 @@ import { nanoid } from 'nanoid';
 import { canvasEdgeSchema, canvasNodeSchema, conversationEventSchema, conversationMetadataSchema } from '@starlink/shared';
 import { BusinessLangGraphService } from '../services/business-langgraph.js';
 import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js';
-import { getWorkspaceMetadata, listWorkspaceMetadata, listWorkspaceMetadataHistory, resolveViewerPermissions, updateWorkspaceMetadata } from './workspace-metadata-store.js';
+import { getWorkspaceMetadata as getWorkspaceMetadataPg, listWorkspaceMetadata as listWorkspaceMetadataPg, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryPg, resolveViewerPermissions as resolveViewerPermissionsPg, updateWorkspaceMetadata as updateWorkspaceMetadataPg } from './workspace-metadata-pg-store.js';
+import { getWorkspaceMetadata as getWorkspaceMetadataFile, listWorkspaceMetadata as listWorkspaceMetadataFile, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryFile, resolveViewerPermissions as resolveViewerPermissionsFile, updateWorkspaceMetadata as updateWorkspaceMetadataFile } from './workspace-metadata-store.js';
+const usePg = (process.env.WORKSPACE_METADATA_DRIVER ?? 'pg') === 'pg';
+const getWorkspaceMetadata = usePg ? getWorkspaceMetadataPg : getWorkspaceMetadataFile;
+const listWorkspaceMetadata = usePg ? listWorkspaceMetadataPg : listWorkspaceMetadataFile;
+const listWorkspaceMetadataHistory = usePg ? listWorkspaceMetadataHistoryPg : listWorkspaceMetadataHistoryFile;
+const resolveViewerPermissions = usePg ? resolveViewerPermissionsPg : resolveViewerPermissionsFile;
+const updateWorkspaceMetadata = usePg ? updateWorkspaceMetadataPg : updateWorkspaceMetadataFile;
 const businessLangGraphService = new BusinessLangGraphService();
 export class ConversationStore {
     constructor({ eventBus, runtimeRepository }) {
-        this.pendingDecisionApprovals = new Map();
+        this.pendingDecisionTimeouts = new Map();
+        this.pendingDecisionResolvers = new Map();
         this.hitlEnabled = process.env.HITL_ENABLED === 'true';
         this.hitlApprovalTimeoutMs = Number(process.env.HITL_APPROVAL_TIMEOUT_MS ?? '600000');
         this.eventBus = eventBus;
@@ -333,22 +341,24 @@ export class ConversationStore {
         return this.eventBus.getEventIterator();
     }
     async close() {
-        for (const approval of this.pendingDecisionApprovals.values()) {
-            if (approval.timeout) {
-                clearTimeout(approval.timeout);
-            }
+        for (const timeout of this.pendingDecisionTimeouts.values()) {
+            clearTimeout(timeout);
         }
-        this.pendingDecisionApprovals.clear();
+        this.pendingDecisionTimeouts.clear();
+        this.pendingDecisionResolvers.clear();
         await this.runtimeRepository.close();
         await this.eventBus.close();
     }
     async approveDecision(conversationId, decision) {
-        const pending = this.pendingDecisionApprovals.get(conversationId);
+        const pending = await this.runtimeRepository.getPendingApproval(conversationId);
         if (!pending) {
             return false;
         }
         const nextDecision = (decision ?? '').trim() || pending.decision;
-        pending.resolve(nextDecision);
+        const resolver = this.pendingDecisionResolvers.get(conversationId);
+        if (resolver) {
+            resolver(nextDecision);
+        }
         return true;
     }
     async runConversationStream(options) {
@@ -544,23 +554,29 @@ export class ConversationStore {
             updatedAt: new Date()
         };
         await this.runtimeRepository.updateConversation(conversationId, record);
+        const approvalData = {
+            conversationId,
+            decision,
+            createdAt: new Date().toISOString(),
+            timeoutMs: this.hitlApprovalTimeoutMs
+        };
+        await this.runtimeRepository.setPendingApproval(conversationId, approvalData);
         return await new Promise((resolve) => {
             const finalize = (nextDecision) => {
-                const existing = this.pendingDecisionApprovals.get(conversationId);
-                if (existing?.timeout) {
-                    clearTimeout(existing.timeout);
+                const existingTimeout = this.pendingDecisionTimeouts.get(conversationId);
+                if (existingTimeout) {
+                    clearTimeout(existingTimeout);
                 }
-                this.pendingDecisionApprovals.delete(conversationId);
+                this.pendingDecisionTimeouts.delete(conversationId);
+                this.pendingDecisionResolvers.delete(conversationId);
+                void this.runtimeRepository.deletePendingApproval(conversationId);
                 resolve(nextDecision);
             };
             const timeout = setTimeout(() => {
                 finalize(decision);
             }, this.hitlApprovalTimeoutMs);
-            this.pendingDecisionApprovals.set(conversationId, {
-                decision,
-                timeout,
-                resolve: finalize
-            });
+            this.pendingDecisionTimeouts.set(conversationId, timeout);
+            this.pendingDecisionResolvers.set(conversationId, finalize);
         });
     }
 }

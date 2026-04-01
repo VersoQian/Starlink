@@ -12,30 +12,14 @@ export function CCBMCDetailDrawer() {
   const { detailPanel, closeDetailPanel, getMacraNode } = useComfyStore()
   const [activeTab, setActiveTab] = useState<TabType>('overview')
 
-  console.log('[CCBMCDetailDrawer] State:', {
-    isOpen: detailPanel?.isOpen,
-    nodeId: detailPanel?.nodeId
-  })
-
   if (!detailPanel?.isOpen || !detailPanel?.nodeId) {
     return null
   }
 
   const nodeData = getMacraNode(detailPanel.nodeId)
   const nodeWithDetails = nodeData as (typeof nodeData & { summary?: string; fullContent?: string }) | null
-  console.log('[CCBMCDetailDrawer] Node data:', {
-    nodeId: detailPanel.nodeId,
-    nodeData: nodeData ? {
-      id: nodeData.id,
-      type: nodeData.type,
-      label: nodeData.label,
-      hasSummary: !!nodeWithDetails?.summary,
-      hasFullContent: !!nodeWithDetails?.fullContent
-    } : null
-  })
 
   if (!nodeData) {
-    console.error('[CCBMCDetailDrawer] Node not found in macraNodes Map:', detailPanel.nodeId)
     return null
   }
 
