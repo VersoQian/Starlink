@@ -12,6 +12,9 @@ import type {
 } from '@/types/macra'
 import type { CanvasNode, CanvasEdge, WorkspaceGraphResponse } from '@/types/graph'
 
+// Chat 消息类型
+type ChatMessage = { role: 'user' | 'assistant'; content: string; timestamp: string }
+
 // 节点数据类型（保留旧接口以兼容）
 export type NodeStatus = 'idle' | 'processing' | 'done' | 'error'
 
@@ -150,6 +153,10 @@ interface MacraState {
   knowledgeEvidence: KnowledgeEvidence[]
   setKnowledgeEvidence: (evidence: KnowledgeEvidence[]) => void
 
+  // Chat 状态（新增）
+  chatMessages: ChatMessage[]
+  setChatMessages: (messages: ChatMessage[] | ((msgs: ChatMessage[]) => ChatMessage[])) => void
+
   setWorkspaceId: (workspaceId: string) => void
 
   // 操作方法
@@ -203,6 +210,13 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   isCriticProcessing: false,
   lastCriticRun: null,
   knowledgeEvidence: [],
+  chatMessages: [
+    {
+      role: 'assistant',
+      content: '你好！我是你的 AI 商业顾问。描述你的想法，让我们一起将它可视化。',
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    }
+  ],
   detailPanel: {
     isOpen: false,
     nodeId: null
@@ -210,6 +224,12 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
   setKnowledgeEvidence: (evidence) => {
     set({ knowledgeEvidence: evidence })
+  },
+
+  setChatMessages: (messages) => {
+    set({
+      chatMessages: typeof messages === 'function' ? messages(get().chatMessages) : messages
+    })
   },
 
   setWorkspaceId: (workspaceId) => {
@@ -748,6 +768,13 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       isCriticProcessing: false,
       lastCriticRun: null,
       knowledgeEvidence: [],
+      chatMessages: [
+        {
+          role: 'assistant',
+          content: '你好！我是你的 AI 商业顾问。描述你的想法，让我们一起将它可视化。',
+          timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        }
+      ],
       detailPanel: {
         isOpen: false,
         nodeId: null
