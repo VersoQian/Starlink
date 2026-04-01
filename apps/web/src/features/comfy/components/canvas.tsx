@@ -23,6 +23,7 @@ import { CanvasImageNode } from './nodes/canvas-image-node'
 import { DataSourceNode } from './nodes/data-source-node'
 import { CanvasRegions } from './canvas-regions'
 import { CCBMCDetailDrawer } from './cc-bmc-detail-drawer'
+import { AgentRuntimePanel } from './agent-runtime-panel'
 import { Button } from '@/shared/components/ui/button'
 import { Sparkles, Loader2, AlertTriangle, Wand2, X, ChevronRight, Send, History, FileText, Lightbulb, Zap, TrendingUp } from 'lucide-react'
 
@@ -151,8 +152,8 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
       },
       data: { label: `${type} node` }
     }
-    setNodes([...nodes, newNode])
-  }, [nodes, setNodes])
+    setNodes(prev => [...prev, newNode])
+  }, [setNodes])
 
   const handleSeedGeneration = useCallback(async () => {
     if (!seedInput.trim() || isOrchestratorProcessing) return
@@ -226,90 +227,6 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
 
   return (
     <>
-      {/* Google Fonts Import */}
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-      <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-
-      <style jsx global>{`
-        :root {
-          --bg-deep: #0c1428;
-          --bg-canvas: #1e293b;
-          --accent-amber: #fbbf24;
-          --accent-emerald: #10b981;
-          --accent-coral: #f472b6;
-          --neutral-light: #e2e8f0;
-          --neutral-mid: #94a3b8;
-          --neutral-dark: #334155;
-          font-family: 'DM Sans', -apple-system, sans-serif;
-        }
-
-        .comfy-canvas-wrapper * {
-          font-family: 'DM Sans', -apple-system, sans-serif;
-        }
-
-        .title-font {
-          font-family: 'Outfit', sans-serif;
-        }
-
-        .mono-font {
-          font-family: 'JetBrains Mono', monospace;
-        }
-
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @keyframes pulse-glow {
-          0%, 100% {
-            box-shadow: 0 0 20px rgba(251, 191, 36, 0.3), 0 0 40px rgba(251, 191, 36, 0.1);
-          }
-          50% {
-            box-shadow: 0 0 30px rgba(251, 191, 36, 0.5), 0 0 60px rgba(251, 191, 36, 0.2);
-          }
-        }
-
-        @keyframes gradient-shift {
-          0%, 100% {
-            background-position: 0% 50%;
-          }
-          50% {
-            background-position: 100% 50%;
-          }
-        }
-
-        .animate-fade-in-up {
-          animation: fadeInUp 0.6s ease-out forwards;
-        }
-
-        .animate-pulse-glow {
-          animation: pulse-glow 2s ease-in-out infinite;
-        }
-
-        .animate-gradient {
-          background-size: 200% 200%;
-          animation: gradient-shift 3s ease infinite;
-        }
-
-        .glass-effect {
-          background: rgba(255, 255, 255, 0.05);
-          backdrop-filter: blur(12px);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .glow-border {
-          box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), inset 0 0 20px rgba(251, 191, 36, 0.05);
-        }
-      `}</style>
-
       <div className="h-screen w-screen flex flex-col overflow-hidden comfy-canvas-wrapper" style={{ background: 'linear-gradient(135deg, #0c1428 0%, #1e293b 50%, #0f172a 100%)' }}>
         {/* 顶部导航栏 - 毛玻璃效果 */}
         <header
@@ -463,6 +380,9 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
                 padding: 0.2,
                 includeHiddenNodes: false
               }}
+              minZoom={0.1}
+              maxZoom={2}
+              onlyRenderVisibleElements
             >
               {/* CC-BMC 区域划分层 */}
               <CanvasRegions />
@@ -507,6 +427,10 @@ export function ComfyCanvas({ workspaceId = 'comfy-default' }: ComfyCanvasProps)
                   <History className="w-4 h-4 text-slate-400" />
                 </button>
               </div>
+            </div>
+
+            <div className="px-5 pt-5">
+              <AgentRuntimePanel workspaceId={workspaceId} />
             </div>
 
             {/* 对话历史 */}

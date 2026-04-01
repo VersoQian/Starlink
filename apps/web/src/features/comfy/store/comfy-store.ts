@@ -264,14 +264,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
   // ============== MACRA 节点操作 ==============
   getMacraNode: (nodeId) => {
-    const result = get().macraNodes.get(nodeId)
-    console.log('[getMacraNode]', {
-      nodeId,
-      found: !!result,
-      totalNodes: get().macraNodes.size,
-      availableIds: Array.from(get().macraNodes.keys()).slice(0, 5)
-    })
-    return result
+    return get().macraNodes.get(nodeId)
   },
 
   updateMacraNode: (nodeId, data) => {
@@ -462,12 +455,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
           }
         })
 
-        console.log('[applyGraph] Updating store:', {
-          reactFlowNodesCount: reactFlowNodes.length,
-          macraNodesCount: macraNodesMap.size,
-          firstFewIds: Array.from(macraNodesMap.keys()).slice(0, 3)
-        })
-
         set({
           nodes: reactFlowNodes,
           edges: graph.edges.map(mapCanvasEdgeToReactFlow),
@@ -488,13 +475,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
             if (macraData) {
               newMacraNodes.set(node.id, macraData)
             }
-          })
-
-          console.log('[applyDelta] Updating store:', {
-            deltaNodesCount: delta.nodes?.length || 0,
-            macraNodesCountBefore: state.macraNodes.size,
-            macraNodesCountAfter: newMacraNodes.size,
-            addedIds: delta.nodes?.map(n => n.id).slice(0, 3)
           })
 
           return {
@@ -633,7 +613,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
   // ============== 详情面板操作 ==============
   openDetailPanel: (nodeId) => {
-    console.log('[openDetailPanel] Opening panel for node:', nodeId)
     set({
       detailPanel: {
         isOpen: true,

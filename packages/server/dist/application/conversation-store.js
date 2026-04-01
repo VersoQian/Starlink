@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@starlink/shared';
+import { canvasEdgeSchema, canvasNodeSchema, conversationEventSchema, conversationMetadataSchema } from '@starlink/shared';
 import { BusinessLangGraphService } from '../services/business-langgraph.js';
 import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js';
 import { getWorkspaceMetadata, listWorkspaceMetadata, listWorkspaceMetadataHistory, resolveViewerPermissions, updateWorkspaceMetadata } from './workspace-metadata-store.js';
@@ -54,7 +54,7 @@ export class ConversationStore {
                     conversationId: id,
                     payload: currentGraph
                 };
-                await this.publishEvent(baseEvent);
+                await this.publishEvent(workspaceId, baseEvent);
             }
         }
         catch (error) {
@@ -65,7 +65,7 @@ export class ConversationStore {
                 status: 'failed',
                 message
             };
-            await this.publishEvent(failedEvent);
+            await this.publishEvent(workspaceId, failedEvent);
             record.metadata = {
                 ...record.metadata,
                 status: 'failed',
@@ -94,6 +94,10 @@ export class ConversationStore {
             ...record,
             metadata
         };
+    }
+    async listConversationRuntimeEvents(workspaceId, conversationId) {
+        const events = await this.runtimeRepository.listConversationEvents(workspaceId, conversationId);
+        return events.map((event) => conversationEventSchema.parse(event));
     }
     async getGraph(workspaceId) {
         const manualGraph = await this.runtimeRepository.getWorkspaceGraph(workspaceId);
@@ -355,7 +359,7 @@ export class ConversationStore {
         let currentPhase = null;
         let latestDecision = '';
         const publishEvent = async (event) => {
-            await this.publishEvent(event);
+            await this.publishEvent(workspaceId, event);
         };
         const publishPhaseChanged = async (phase, reason) => {
             if (currentPhase === phase)
@@ -406,7 +410,7 @@ export class ConversationStore {
                             conversationId,
                             payload: currentGraph
                         };
-                        await this.publishEvent(appendedEvent);
+                        await this.publishEvent(workspaceId, appendedEvent);
                     }
                     continue;
                 }
@@ -516,12 +520,15 @@ export class ConversationStore {
             await this.runtimeRepository.updateConversation(conversationId, record);
         }
     }
-    async publishEvent(event) {
+    async publishEvent(workspaceId, event) {
+        if (shouldPersistRuntimeEvent(event)) {
+            await this.runtimeRepository.appendConversationEvent(workspaceId, event);
+        }
         await this.eventBus.publish(event);
     }
     async waitForDecisionApproval(options) {
         const { conversationId, workspaceId, decision, record } = options;
-        await this.publishEvent({
+        await this.publishEvent(workspaceId, {
             type: 'seminar.decision.requested',
             conversationId,
             payload: {
@@ -557,6 +564,13 @@ export class ConversationStore {
         });
     }
 }
+function shouldPersistRuntimeEvent(event) {
+    return event.type === 'status'
+        || event.type === 'phase.changed'
+        || event.type === 'seminar.turn.completed'
+        || event.type === 'seminar.decision.made'
+        || event.type === 'seminar.decision.requested';
+}
 const AGENT_NAME_MAP = {
     Market_Agent: 'Market Agent',
     Product_Agent: 'Product Agent',
@@ -572,7 +586,7 @@ function extractRuntimeInfo(node) {
         return null;
     const title = (typeof data.title === 'string' && data.title.trim()) || node.id;
     const summary = typeof data.content === 'string' ? data.content : '';
-    const stage = inferPhase(agentId, meta?.macraType, title, summary);
+    const stage = meta?.metadata?.stage ?? inferPhase(agentId, meta?.macraType, title, summary);
     return {
         stage,
         agentId,

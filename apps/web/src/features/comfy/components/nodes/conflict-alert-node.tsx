@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
@@ -38,7 +38,7 @@ const CONFLICT_TYPE_LABELS: Record<NonNullable<MacraNodeData['conflictType']>, s
   other: '其他冲突'
 }
 
-export function ConflictAlertNode({ id, data }: NodeProps) {
+export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: NodeProps) {
   const { getMacraNode } = useComfyStore()
   const nodeData = getMacraNode(id) || (data as MacraNodeData)
   const [isHovered, setIsHovered] = useState(false)
@@ -163,4 +163,4 @@ export function ConflictAlertNode({ id, data }: NodeProps) {
       />
     </>
   )
-}
+})

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { memo, useState, useEffect } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
 import { Badge } from '@/shared/components/ui/badge'
@@ -15,7 +15,7 @@ const AGENT_TYPES = [
   { value: 'code-reviewer', label: 'Code Reviewer', description: '代码审查员' }
 ]
 
-export function AgentNode({ id }: NodeProps) {
+export const AgentNode = memo(function AgentNode({ id }: NodeProps) {
   const { updateNodeData, getNodeData, executingNodeId } = useComfyStore()
   const nodeData = getNodeData(id)
   const [agentType, setAgentType] = useState(nodeData?.agentType || 'data-analyst')
@@ -106,4 +106,4 @@ export function AgentNode({ id }: NodeProps) {
       </Card>
     </>
   )
-}
+})

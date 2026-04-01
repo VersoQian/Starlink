@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
 import { useComfyStore } from '../../store'
 import { FileText } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
-export function ResultNode({ id }: NodeProps) {
+export const ResultNode = memo(function ResultNode({ id }: NodeProps) {
   const { edges, nodeDataMap } = useComfyStore()
   const [result, setResult] = useState<string>('')
 
@@ -91,4 +91,4 @@ export function ResultNode({ id }: NodeProps) {
       </Card>
     </>
   )
-}
+})

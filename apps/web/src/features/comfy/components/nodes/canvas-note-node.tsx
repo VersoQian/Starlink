@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import ReactMarkdown from 'react-markdown'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
@@ -78,7 +79,7 @@ const renderContent = (data: CanvasNodeData) => {
   }
 }
 
-export function CanvasNoteNode({ data }: NodeProps<CanvasNodeData>) {
+export const CanvasNoteNode = memo(function CanvasNoteNode({ data }: NodeProps<CanvasNodeData>) {
   const title = 'title' in data ? data.title : '画布节点'
 
   return (
@@ -93,4 +94,4 @@ export function CanvasNoteNode({ data }: NodeProps<CanvasNodeData>) {
       <Handle type="source" position={Position.Right} className="w-3 h-3 bg-blue-500 border-2 border-zinc-900" />
     </>
   )
-}
+})

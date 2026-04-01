@@ -14,6 +14,7 @@ export declare class ConversationStore {
     constructor({ eventBus, runtimeRepository }: ConversationStoreDeps);
     startConversation(workspaceId: string, userId: string, question: string): Promise<ConversationRecord>;
     getConversation(id: string): Promise<ConversationRecord | null>;
+    listConversationRuntimeEvents(workspaceId: string, conversationId?: string): Promise<ConversationEvent[]>;
     getGraph(workspaceId: string): Promise<CanvasGraph>;
     listWorkspaces(userId: string): Promise<WorkspaceDirectoryItem[]>;
     listWorkspaceHistory(workspaceId: string): Promise<WorkspaceMetadataHistoryEntry[]>;

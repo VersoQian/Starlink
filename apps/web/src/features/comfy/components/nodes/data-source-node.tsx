@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
@@ -13,7 +13,7 @@ const CONFIDENCE_STYLES = {
   low: { label: '低可靠', width: '33%' }
 }
 
-export function DataSourceNode({ id, data }: NodeProps) {
+export const DataSourceNode = memo(function DataSourceNode({ id, data }: NodeProps) {
   const { getMacraNode } = useComfyStore()
   const nodeData = getMacraNode(id) || (data as MacraNodeData)
   const [isHovered, setIsHovered] = useState(false)
@@ -169,4 +169,4 @@ export function DataSourceNode({ id, data }: NodeProps) {
       />
     </>
   )
-}
+})

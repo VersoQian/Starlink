@@ -1,14 +1,14 @@
 'use client'
 
 import Image from 'next/image'
-import { useCallback, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
 import { Badge } from '@/shared/components/ui/badge'
 import { useComfyStore } from '../../store'
 import { FileIcon, Upload } from 'lucide-react'
 
-export function ResourceNode({ id }: NodeProps) {
+export const ResourceNode = memo(function ResourceNode({ id }: NodeProps) {
   const { updateNodeData, getNodeData } = useComfyStore()
   const nodeData = getNodeData(id)
   const [isDragging, setIsDragging] = useState(false)
@@ -137,4 +137,4 @@ export function ResourceNode({ id }: NodeProps) {
       </Card>
     </>
   )
-}
+})

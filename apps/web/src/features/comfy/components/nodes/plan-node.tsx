@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import ReactMarkdown from 'react-markdown'
 import { useComfyStore } from '../../store'
@@ -22,7 +22,7 @@ const STATUS_STYLES = {
   }
 }
 
-export function PlanNode({ id, data }: NodeProps) {
+export const PlanNode = memo(function PlanNode({ id, data }: NodeProps) {
   const { getMacraNode, updateMacraNode } = useComfyStore()
   const nodeData = getMacraNode(id) || (data as MacraNodeData)
   const [isExpanded, setIsExpanded] = useState(false)
@@ -140,4 +140,4 @@ export function PlanNode({ id, data }: NodeProps) {
       />
     </>
   )
-}
+})

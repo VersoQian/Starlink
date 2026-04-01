@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -87,7 +89,80 @@
 }
 
 :root {
+  --bg-deep: #0c1428;
+  --bg-canvas: #1e293b;
+  --accent-amber: #fbbf24;
+  --accent-emerald: #10b981;
+  --accent-coral: #f472b6;
+  --neutral-light: #e2e8f0;
+  --neutral-mid: #94a3b8;
+  --neutral-dark: #334155;
+  font-family: 'DM Sans', -apple-system, sans-serif;
   color-scheme: light;
+}
+
+.comfy-canvas-wrapper * {
+  font-family: 'DM Sans', -apple-system, sans-serif;
+}
+
+.title-font {
+  font-family: 'Outfit', sans-serif;
+}
+
+.mono-font {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(251, 191, 36, 0.3), 0 0 40px rgba(251, 191, 36, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(251, 191, 36, 0.5), 0 0 60px rgba(251, 191, 36, 0.2);
+  }
+}
+
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 3s ease infinite;
+}
+
+.glass-effect {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glow-border {
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), inset 0 0 20px rgba(251, 191, 36, 0.05);
 }
 
 .dark {

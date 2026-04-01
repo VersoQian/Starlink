@@ -38,6 +38,16 @@ export const resolvers = {
         knowledgeEvidence: record.knowledgeEvidence ?? []
       }
     },
+    conversationRuntimeEvents: async (
+      _: unknown,
+      args: { workspaceId: string; conversationId?: string | null },
+      ctx: GraphQLContext
+    ) => {
+      return await ctx.conversationStore.listConversationRuntimeEvents(
+        args.workspaceId,
+        args.conversationId ?? undefined
+      )
+    },
     kbTaskStatus: async (_: unknown, args: { workspaceId: string; kbId: string }, ctx: GraphQLContext) => {
       const statuses = await ctx.taskEventStore.getTaskStatuses(args.kbId)
       return statuses.map((status) => ({

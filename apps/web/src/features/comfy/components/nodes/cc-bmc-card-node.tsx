@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { memo, useState, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { CC_BMC_DOMAINS, type CCBMCDomain, type MacraNodeData } from '@/types/macra'
@@ -47,7 +47,7 @@ const DOMAIN_COLORS: Record<CCBMCDomain, { main: string; light: string; accent: 
   }
 }
 
-export function CCBMCCardNode({ id, data }: NodeProps) {
+export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps) {
   const { getMacraNode, updateMacraNode, openDetailPanel } = useComfyStore()
   const nodeData = getMacraNode(id) || (data as MacraNodeData)
 
@@ -381,10 +381,7 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
 
           {/* 查看详情按钮 */}
           <button
-            onClick={() => {
-              console.log('[CCBMCCardNode] Opening detail panel for node:', id)
-              openDetailPanel(id)
-            }}
+            onClick={() => openDetailPanel(id)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105 backdrop-blur-sm border"
             style={{
               background: `linear-gradient(135deg, ${colors.main}15, ${colors.accent}10)`,
@@ -420,4 +417,4 @@ export function CCBMCCardNode({ id, data }: NodeProps) {
       />
     </>
   )
-}
+})

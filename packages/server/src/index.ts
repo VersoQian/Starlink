@@ -18,7 +18,8 @@ const PORT = Number(process.env.PORT ?? 4000)
 
 async function start() {
   const app = express()
-  app.use(cors({ origin: ['http://localhost:3000'], credentials: false }))
+  const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((o) => o.trim())
+  app.use(cors({ origin: corsOrigins, credentials: false }))
   app.use(helmet())
   app.use(express.json())
   app.use(morgan('dev'))

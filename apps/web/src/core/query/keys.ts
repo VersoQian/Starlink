@@ -3,6 +3,8 @@ export const workspaceKeys = {
   directory: (viewerId = 'anonymous') => ['workspace', 'directory', viewerId] as const,
   detail: (workspaceId: string) => ['workspace', workspaceId] as const,
   graph: (workspaceId: string) => ['workspace', workspaceId, 'graph'] as const,
+  runtime: (workspaceId: string, conversationId?: string | null) =>
+    ['workspace', workspaceId, 'runtime', conversationId ?? 'all'] as const,
   assets: (workspaceId: string) => ['workspace', workspaceId, 'assets'] as const,
   history: (workspaceId: string, viewerId = 'anonymous') => ['workspace', workspaceId, 'history', viewerId] as const
 }

@@ -1,6 +1,7 @@
 import { Redis } from 'ioredis'
 import type {
   CanvasGraph,
+  ConversationEvent,
   ConversationMetadata,
   KnowledgeEvidence,
   WorkspaceAsset
@@ -12,17 +13,29 @@ export type ConversationRecord = {
   knowledgeEvidence: KnowledgeEvidence[]
 }
 
+export type PendingApprovalData = {
+  conversationId: string
+  decision: string
+  createdAt: string
+  timeoutMs: number
+}
+
 export type ConversationRuntimeRepository = {
   createConversation: (id: string, record: ConversationRecord) => Promise<void>
   updateConversation: (id: string, record: ConversationRecord) => Promise<void>
   touchConversation: (id: string) => Promise<void>
   getConversation: (id: string) => Promise<ConversationRecord | null>
   getConversationsByWorkspace: (workspaceId: string) => Promise<Array<{ id: string; record: ConversationRecord }>>
+  appendConversationEvent: (workspaceId: string, event: ConversationEvent) => Promise<void>
+  listConversationEvents: (workspaceId: string, conversationId?: string) => Promise<ConversationEvent[]>
   listWorkspaces: () => Promise<Array<{ workspaceId: string; updatedAt: string; status: 'draft' | 'active' | 'error' }>>
   upsertWorkspaceAsset: (asset: WorkspaceAsset) => Promise<void>
   listWorkspaceAssets: (workspaceId: string) => Promise<WorkspaceAsset[]>
   setWorkspaceGraph: (workspaceId: string, graph: CanvasGraph) => Promise<void>
   getWorkspaceGraph: (workspaceId: string) => Promise<CanvasGraph | null>
+  setPendingApproval: (conversationId: string, data: PendingApprovalData) => Promise<void>
+  getPendingApproval: (conversationId: string) => Promise<PendingApprovalData | null>
+  deletePendingApproval: (conversationId: string) => Promise<void>
   close: () => Promise<void>
 }
 
@@ -38,6 +51,7 @@ type SerializableConversationRecord = {
 type RepositoryConfig = {
   maxConversations: number
   conversationTtlMs: number
+  maxRuntimeEventsPerWorkspace: number
 }
 
 type WorkspaceRuntimeStatus = 'draft' | 'active' | 'error'
@@ -47,12 +61,16 @@ class InMemoryConversationRuntimeRepository implements ConversationRuntimeReposi
   private readonly touchedAt = new Map<string, number>()
   private readonly workspaceGraphs = new Map<string, CanvasGraph>()
   private readonly workspaceAssets = new Map<string, Map<string, WorkspaceAsset>>()
+  private readonly workspaceEvents = new Map<string, ConversationEvent[]>()
+  private readonly pendingApprovals = new Map<string, PendingApprovalData>()
   private readonly maxConversations: number
   private readonly conversationTtlMs: number
+  private readonly maxRuntimeEventsPerWorkspace: number
 
   constructor(config: RepositoryConfig) {
     this.maxConversations = config.maxConversations
     this.conversationTtlMs = config.conversationTtlMs
+    this.maxRuntimeEventsPerWorkspace = config.maxRuntimeEventsPerWorkspace
   }
 
   async createConversation(id: string, record: ConversationRecord) {
@@ -88,12 +106,28 @@ class InMemoryConversationRuntimeRepository implements ConversationRuntimeReposi
     return results
   }
 
+  async appendConversationEvent(workspaceId: string, event: ConversationEvent) {
+    const next = (this.workspaceEvents.get(workspaceId) ?? []).concat(cloneConversationEvent(event))
+    const trimmed = next.slice(-this.maxRuntimeEventsPerWorkspace)
+    this.workspaceEvents.set(workspaceId, trimmed)
+  }
+
+  async listConversationEvents(workspaceId: string, conversationId?: string) {
+    const events = this.workspaceEvents.get(workspaceId) ?? []
+    return events
+      .filter((event) => !conversationId || event.conversationId === conversationId)
+      .map((event) => cloneConversationEvent(event))
+  }
+
   async listWorkspaces(): Promise<Array<{ workspaceId: string; updatedAt: string; status: WorkspaceRuntimeStatus }>> {
     const workspaceIds = new Set<string>(this.workspaceGraphs.keys())
     for (const record of this.conversations.values()) {
       workspaceIds.add(record.graph.workspaceId)
     }
     for (const workspaceId of this.workspaceAssets.keys()) {
+      workspaceIds.add(workspaceId)
+    }
+    for (const workspaceId of this.workspaceEvents.keys()) {
       workspaceIds.add(workspaceId)
     }
 
@@ -137,6 +171,19 @@ class InMemoryConversationRuntimeRepository implements ConversationRuntimeReposi
     const graph = this.workspaceGraphs.get(workspaceId)
     if (!graph) return null
     return cloneGraph(graph)
+  }
+
+  async setPendingApproval(conversationId: string, data: PendingApprovalData) {
+    this.pendingApprovals.set(conversationId, { ...data })
+  }
+
+  async getPendingApproval(conversationId: string) {
+    const data = this.pendingApprovals.get(conversationId)
+    return data ? { ...data } : null
+  }
+
+  async deletePendingApproval(conversationId: string) {
+    this.pendingApprovals.delete(conversationId)
   }
 
   async close() {}
@@ -187,6 +234,7 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
   private readonly redis: Redis
   private readonly keyPrefix: string
   private readonly ttlSeconds: number
+  private readonly maxRuntimeEventsPerWorkspace: number
   private available = true
 
   constructor(config: RepositoryConfig) {
@@ -202,6 +250,7 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
     })
     this.keyPrefix = process.env.CONVERSATION_RUNTIME_STORE_REDIS_PREFIX ?? 'conversation'
     this.ttlSeconds = Math.max(1, Math.floor(config.conversationTtlMs / 1000))
+    this.maxRuntimeEventsPerWorkspace = config.maxRuntimeEventsPerWorkspace
 
     this.redis.on('error', (error: unknown) => {
       this.available = false
@@ -301,6 +350,52 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
     })
 
     return records ?? this.fallback.getConversationsByWorkspace(workspaceId)
+  }
+
+  async appendConversationEvent(workspaceId: string, event: ConversationEvent) {
+    await this.fallback.appendConversationEvent(workspaceId, event)
+    await this.tryWrite(async () => {
+      const payload = JSON.stringify(cloneConversationEvent(event))
+      await this.redis
+        .multi()
+        .rpush(this.workspaceEventListKey(workspaceId), payload)
+        .ltrim(this.workspaceEventListKey(workspaceId), -this.maxRuntimeEventsPerWorkspace, -1)
+        .expire(this.workspaceEventListKey(workspaceId), this.ttlSeconds)
+        .sadd(this.workspaceIndexKey(), workspaceId)
+        .expire(this.workspaceIndexKey(), this.ttlSeconds)
+        .zadd(this.workspaceUpdatedSetKey(), Date.now(), workspaceId)
+        .exec()
+    })
+  }
+
+  async listConversationEvents(workspaceId: string, conversationId?: string) {
+    const events = await this.tryRead(async () => {
+      const payloads = await this.redis.lrange(this.workspaceEventListKey(workspaceId), 0, -1)
+      if (payloads.length === 0) return null
+
+      const result: ConversationEvent[] = []
+      for (const payload of payloads) {
+        try {
+          const event = JSON.parse(payload) as ConversationEvent
+          result.push(cloneConversationEvent(event))
+        } catch (error) {
+          console.error('[conversation-runtime-repository] invalid redis runtime event payload', {
+            workspaceId,
+            error: String(error)
+          })
+        }
+      }
+
+      for (const event of result) {
+        await this.fallback.appendConversationEvent(workspaceId, event)
+      }
+
+      return conversationId
+        ? result.filter((event) => event.conversationId === conversationId)
+        : result
+    })
+
+    return events ?? this.fallback.listConversationEvents(workspaceId, conversationId)
   }
 
   async listWorkspaces(): Promise<Array<{ workspaceId: string; updatedAt: string; status: WorkspaceRuntimeStatus }>> {
@@ -409,6 +504,37 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
     return graph ?? this.fallback.getWorkspaceGraph(workspaceId)
   }
 
+  async setPendingApproval(conversationId: string, data: PendingApprovalData) {
+    await this.fallback.setPendingApproval(conversationId, data)
+    await this.tryWrite(async () => {
+      const ttl = Math.max(1, Math.ceil(data.timeoutMs / 1000))
+      await this.redis.set(
+        this.pendingApprovalKey(conversationId),
+        JSON.stringify(data),
+        'EX',
+        ttl
+      )
+    })
+  }
+
+  async getPendingApproval(conversationId: string) {
+    const data = await this.tryRead(async () => {
+      const payload = await this.redis.get(this.pendingApprovalKey(conversationId))
+      if (!payload) return null
+      const parsed = JSON.parse(payload) as PendingApprovalData
+      await this.fallback.setPendingApproval(conversationId, parsed)
+      return parsed
+    })
+    return data ?? this.fallback.getPendingApproval(conversationId)
+  }
+
+  async deletePendingApproval(conversationId: string) {
+    await this.fallback.deletePendingApproval(conversationId)
+    await this.tryWrite(async () => {
+      await this.redis.del(this.pendingApprovalKey(conversationId))
+    })
+  }
+
   async close() {
     await this.fallback.close()
     await this.redis.quit().catch(() => {
@@ -470,12 +596,20 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
     return `${this.keyPrefix}:workspace:${workspaceId}:assets`
   }
 
+  private workspaceEventListKey(workspaceId: string) {
+    return `${this.keyPrefix}:workspace:${workspaceId}:events`
+  }
+
   private workspaceIndexKey() {
     return `${this.keyPrefix}:workspaces`
   }
 
   private workspaceUpdatedSetKey() {
     return `${this.keyPrefix}:workspace-updated`
+  }
+
+  private pendingApprovalKey(conversationId: string) {
+    return `${this.keyPrefix}:pending-approval:${conversationId}`
   }
 
   private touchedSetKey() {
@@ -486,7 +620,8 @@ class RedisConversationRuntimeRepository implements ConversationRuntimeRepositor
 export function createConversationRuntimeRepository(): ConversationRuntimeRepository {
   const config: RepositoryConfig = {
     maxConversations: Number(process.env.CONVERSATION_STORE_MAX_ITEMS ?? '200'),
-    conversationTtlMs: Number(process.env.CONVERSATION_STORE_TTL_MS ?? '1800000')
+    conversationTtlMs: Number(process.env.CONVERSATION_STORE_TTL_MS ?? '1800000'),
+    maxRuntimeEventsPerWorkspace: Number(process.env.CONVERSATION_RUNTIME_EVENT_LIMIT ?? '400')
   }
   const driver = process.env.CONVERSATION_RUNTIME_STORE_DRIVER ?? 'memory'
 
@@ -551,4 +686,8 @@ function cloneKnowledgeEvidence(knowledgeEvidence: KnowledgeEvidence[]) {
 
 function cloneAsset(asset: WorkspaceAsset): WorkspaceAsset {
   return JSON.parse(JSON.stringify(asset)) as WorkspaceAsset
+}
+
+function cloneConversationEvent(event: ConversationEvent): ConversationEvent {
+  return JSON.parse(JSON.stringify(event)) as ConversationEvent
 }

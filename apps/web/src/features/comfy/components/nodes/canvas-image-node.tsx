@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import Image from 'next/image'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
@@ -7,7 +8,7 @@ import type { CanvasNodeData } from '@/types/graph'
 
 type ImageNodeData = Extract<CanvasNodeData, { type: 'image' }>
 
-export function CanvasImageNode({ data }: NodeProps<ImageNodeData>) {
+export const CanvasImageNode = memo(function CanvasImageNode({ data }: NodeProps<ImageNodeData>) {
   if (data.type !== 'image') return null
 
   return (
@@ -41,4 +42,4 @@ export function CanvasImageNode({ data }: NodeProps<ImageNodeData>) {
       <Handle type="source" position={Position.Right} className="w-3 h-3 bg-purple-500 border-2 border-zinc-900" />
     </>
   )
-}
+})

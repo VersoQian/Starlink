@@ -134,6 +134,172 @@ export declare const resolvers: {
                 metadata?: Record<string, unknown> | undefined;
             }[];
         } | null>;
+        conversationRuntimeEvents: (_: unknown, args: {
+            workspaceId: string;
+            conversationId?: string | null;
+        }, ctx: GraphQLContext) => Promise<({
+            type: "graph/appended";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                nodes: {
+                    type: "note" | "document" | "task" | "reference" | "image" | "web";
+                    id: string;
+                    position: {
+                        x: number;
+                        y: number;
+                    };
+                    data: {
+                        type: "note";
+                        title: string;
+                        content: string;
+                        status?: string | undefined;
+                        subtitle?: string | undefined;
+                        bullets?: string[] | undefined;
+                        variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                        footerText?: string | undefined;
+                        category?: string | undefined;
+                        subCategory?: string | undefined;
+                        meta?: Record<string, unknown> | undefined;
+                    } | {
+                        type: "document";
+                        title: string;
+                        summary: string;
+                        references: number;
+                        points?: string[] | undefined;
+                    } | {
+                        type: "task";
+                        status: "todo" | "in-progress" | "done";
+                        title: string;
+                        assignee?: string | undefined;
+                        dueDate?: string | undefined;
+                    } | {
+                        type: "reference";
+                        title: string;
+                        source: string;
+                        location: string;
+                    } | {
+                        type: "image";
+                        title: string;
+                        url: string;
+                    } | {
+                        type: "web";
+                        title: string;
+                        url: string;
+                        description?: string | undefined;
+                    };
+                }[];
+                edges: {
+                    source: string;
+                    id: string;
+                    target: string;
+                    label?: string | null | undefined;
+                }[];
+            };
+        } | {
+            type: "graph/diff";
+            conversationId: string;
+            payload: {
+                nodes?: {
+                    type: "note" | "document" | "task" | "reference" | "image" | "web";
+                    id: string;
+                    position: {
+                        x: number;
+                        y: number;
+                    };
+                    data: {
+                        type: "note";
+                        title: string;
+                        content: string;
+                        status?: string | undefined;
+                        subtitle?: string | undefined;
+                        bullets?: string[] | undefined;
+                        variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                        footerText?: string | undefined;
+                        category?: string | undefined;
+                        subCategory?: string | undefined;
+                        meta?: Record<string, unknown> | undefined;
+                    } | {
+                        type: "document";
+                        title: string;
+                        summary: string;
+                        references: number;
+                        points?: string[] | undefined;
+                    } | {
+                        type: "task";
+                        status: "todo" | "in-progress" | "done";
+                        title: string;
+                        assignee?: string | undefined;
+                        dueDate?: string | undefined;
+                    } | {
+                        type: "reference";
+                        title: string;
+                        source: string;
+                        location: string;
+                    } | {
+                        type: "image";
+                        title: string;
+                        url: string;
+                    } | {
+                        type: "web";
+                        title: string;
+                        url: string;
+                        description?: string | undefined;
+                    };
+                }[] | undefined;
+                edges?: {
+                    source: string;
+                    id: string;
+                    target: string;
+                    label?: string | null | undefined;
+                }[] | undefined;
+            };
+        } | {
+            type: "status";
+            status: "idle" | "running" | "paused" | "failed" | "completed";
+            conversationId: string;
+            message?: string | undefined;
+        } | {
+            type: "phase.changed";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                phase: "planning" | "execution" | "review" | "decision";
+                occurredAt: string;
+                reason?: string | null | undefined;
+            };
+        } | {
+            type: "seminar.turn.completed";
+            conversationId: string;
+            payload: {
+                title: string;
+                summary: string;
+                workspaceId: string;
+                phase: "planning" | "execution" | "review" | "decision";
+                occurredAt: string;
+                agentId: string;
+                agentName: string;
+                nodeId: string;
+            };
+        } | {
+            type: "seminar.decision.made";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                decision: string;
+                phase: "decision";
+                occurredAt: string;
+            };
+        } | {
+            type: "seminar.decision.requested";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                decision: string;
+                phase: "decision";
+                occurredAt: string;
+            };
+        })[]>;
         kbTaskStatus: (_: unknown, args: {
             workspaceId: string;
             kbId: string;

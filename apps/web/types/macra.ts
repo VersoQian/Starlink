@@ -69,12 +69,14 @@ export type NodeType =
 
 // ============== 置信度级别 ==============
 export type ConfidenceLevel = 'high' | 'medium' | 'low'
+export type AgentStage = 'planning' | 'execution' | 'review' | 'decision'
 
 // ============== 节点元数据 ==============
 export interface NodeMetadata {
   source?: string                    // 数据来源（如"基于 NMPA 2024 新规"）
   confidence?: ConfidenceLevel       // 置信度
   agent_signature?: AgentType        // 创建此节点的 Agent
+  stage?: AgentStage                 // 节点所属阶段
   created_at?: string                // 创建时间
   updated_at?: string                // 更新时间
   tags?: string[]                    // 标签

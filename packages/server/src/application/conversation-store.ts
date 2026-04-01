@@ -14,21 +14,41 @@ import type {
   WorkspaceAsset,
   SeminarPhase
 } from '@starlink/shared'
-import { canvasEdgeSchema, canvasNodeSchema, conversationMetadataSchema } from '@starlink/shared'
+import {
+  canvasEdgeSchema,
+  canvasNodeSchema,
+  conversationEventSchema,
+  conversationMetadataSchema
+} from '@starlink/shared'
 import { BusinessLangGraphService, type BusinessStreamUpdate, type GraphDelta } from '../services/business-langgraph.js'
 import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js'
 import type { ConversationEventBus } from './conversation-event-bus.js'
 import type {
   ConversationRecord,
-  ConversationRuntimeRepository
+  ConversationRuntimeRepository,
+  PendingApprovalData
 } from './conversation-runtime-repository.js'
 import {
-  getWorkspaceMetadata,
-  listWorkspaceMetadata,
-  listWorkspaceMetadataHistory,
-  resolveViewerPermissions,
-  updateWorkspaceMetadata
+  getWorkspaceMetadata as getWorkspaceMetadataPg,
+  listWorkspaceMetadata as listWorkspaceMetadataPg,
+  listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryPg,
+  resolveViewerPermissions as resolveViewerPermissionsPg,
+  updateWorkspaceMetadata as updateWorkspaceMetadataPg
+} from './workspace-metadata-pg-store.js'
+import {
+  getWorkspaceMetadata as getWorkspaceMetadataFile,
+  listWorkspaceMetadata as listWorkspaceMetadataFile,
+  listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryFile,
+  resolveViewerPermissions as resolveViewerPermissionsFile,
+  updateWorkspaceMetadata as updateWorkspaceMetadataFile
 } from './workspace-metadata-store.js'
+
+const usePg = (process.env.WORKSPACE_METADATA_DRIVER ?? 'pg') === 'pg'
+const getWorkspaceMetadata = usePg ? getWorkspaceMetadataPg : getWorkspaceMetadataFile
+const listWorkspaceMetadata = usePg ? listWorkspaceMetadataPg : listWorkspaceMetadataFile
+const listWorkspaceMetadataHistory = usePg ? listWorkspaceMetadataHistoryPg : listWorkspaceMetadataHistoryFile
+const resolveViewerPermissions = usePg ? resolveViewerPermissionsPg : resolveViewerPermissionsFile
+const updateWorkspaceMetadata = usePg ? updateWorkspaceMetadataPg : updateWorkspaceMetadataFile
 export type ConversationStoreDeps = {
   eventBus: ConversationEventBus
   runtimeRepository: ConversationRuntimeRepository
@@ -39,7 +59,8 @@ const businessLangGraphService = new BusinessLangGraphService()
 export class ConversationStore {
   private readonly eventBus: ConversationEventBus
   private readonly runtimeRepository: ConversationRuntimeRepository
-  private readonly pendingDecisionApprovals = new Map<string, PendingDecisionApproval>()
+  private readonly pendingDecisionTimeouts = new Map<string, NodeJS.Timeout>()
+  private readonly pendingDecisionResolvers = new Map<string, (decision: string) => void>()
   private readonly hitlEnabled = process.env.HITL_ENABLED === 'true'
   private readonly hitlApprovalTimeoutMs = Number(process.env.HITL_APPROVAL_TIMEOUT_MS ?? '600000')
 
@@ -101,7 +122,7 @@ export class ConversationStore {
           conversationId: id,
           payload: currentGraph
         }
-        await this.publishEvent(baseEvent)
+        await this.publishEvent(workspaceId, baseEvent)
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -111,7 +132,7 @@ export class ConversationStore {
         status: 'failed',
         message
       }
-      await this.publishEvent(failedEvent)
+      await this.publishEvent(workspaceId, failedEvent)
       record.metadata = {
         ...record.metadata,
         status: 'failed',
@@ -142,6 +163,11 @@ export class ConversationStore {
       ...record,
       metadata
     }
+  }
+
+  async listConversationRuntimeEvents(workspaceId: string, conversationId?: string): Promise<ConversationEvent[]> {
+    const events = await this.runtimeRepository.listConversationEvents(workspaceId, conversationId)
+    return events.map((event) => conversationEventSchema.parse(event))
   }
 
   async getGraph(workspaceId: string): Promise<CanvasGraph> {
@@ -413,24 +439,26 @@ export class ConversationStore {
   }
 
   async close() {
-    for (const approval of this.pendingDecisionApprovals.values()) {
-      if (approval.timeout) {
-        clearTimeout(approval.timeout)
-      }
+    for (const timeout of this.pendingDecisionTimeouts.values()) {
+      clearTimeout(timeout)
     }
-    this.pendingDecisionApprovals.clear()
+    this.pendingDecisionTimeouts.clear()
+    this.pendingDecisionResolvers.clear()
     await this.runtimeRepository.close()
     await this.eventBus.close()
   }
 
   async approveDecision(conversationId: string, decision?: string): Promise<boolean> {
-    const pending = this.pendingDecisionApprovals.get(conversationId)
+    const pending = await this.runtimeRepository.getPendingApproval(conversationId)
     if (!pending) {
       return false
     }
 
     const nextDecision = (decision ?? '').trim() || pending.decision
-    pending.resolve(nextDecision)
+    const resolver = this.pendingDecisionResolvers.get(conversationId)
+    if (resolver) {
+      resolver(nextDecision)
+    }
     return true
   }
 
@@ -449,7 +477,7 @@ export class ConversationStore {
     let latestDecision = ''
 
     const publishEvent = async (event: ConversationEvent) => {
-      await this.publishEvent(event)
+      await this.publishEvent(workspaceId, event)
     }
 
     const publishPhaseChanged = async (phase: SeminarPhase, reason?: string | null) => {
@@ -503,7 +531,7 @@ export class ConversationStore {
               conversationId,
               payload: currentGraph
             }
-            await this.publishEvent(appendedEvent)
+            await this.publishEvent(workspaceId, appendedEvent)
           }
           continue
         }
@@ -626,7 +654,10 @@ export class ConversationStore {
     }
   }
 
-  private async publishEvent(event: ConversationEvent) {
+  private async publishEvent(workspaceId: string, event: ConversationEvent) {
+    if (shouldPersistRuntimeEvent(event)) {
+      await this.runtimeRepository.appendConversationEvent(workspaceId, event)
+    }
     await this.eventBus.publish(event)
   }
 
@@ -637,7 +668,7 @@ export class ConversationStore {
     record: ConversationRecord
   }) {
     const { conversationId, workspaceId, decision, record } = options
-    await this.publishEvent({
+    await this.publishEvent(workspaceId, {
       type: 'seminar.decision.requested',
       conversationId,
       payload: {
@@ -655,13 +686,23 @@ export class ConversationStore {
     }
     await this.runtimeRepository.updateConversation(conversationId, record)
 
+    const approvalData: PendingApprovalData = {
+      conversationId,
+      decision,
+      createdAt: new Date().toISOString(),
+      timeoutMs: this.hitlApprovalTimeoutMs
+    }
+    await this.runtimeRepository.setPendingApproval(conversationId, approvalData)
+
     return await new Promise<string>((resolve) => {
       const finalize = (nextDecision: string) => {
-        const existing = this.pendingDecisionApprovals.get(conversationId)
-        if (existing?.timeout) {
-          clearTimeout(existing.timeout)
+        const existingTimeout = this.pendingDecisionTimeouts.get(conversationId)
+        if (existingTimeout) {
+          clearTimeout(existingTimeout)
         }
-        this.pendingDecisionApprovals.delete(conversationId)
+        this.pendingDecisionTimeouts.delete(conversationId)
+        this.pendingDecisionResolvers.delete(conversationId)
+        void this.runtimeRepository.deletePendingApproval(conversationId)
         resolve(nextDecision)
       }
 
@@ -669,19 +710,18 @@ export class ConversationStore {
         finalize(decision)
       }, this.hitlApprovalTimeoutMs)
 
-      this.pendingDecisionApprovals.set(conversationId, {
-        decision,
-        timeout,
-        resolve: finalize
-      })
+      this.pendingDecisionTimeouts.set(conversationId, timeout)
+      this.pendingDecisionResolvers.set(conversationId, finalize)
     })
   }
 }
 
-type PendingDecisionApproval = {
-  decision: string
-  timeout: NodeJS.Timeout | null
-  resolve: (decision: string) => void
+function shouldPersistRuntimeEvent(event: ConversationEvent) {
+  return event.type === 'status'
+    || event.type === 'phase.changed'
+    || event.type === 'seminar.turn.completed'
+    || event.type === 'seminar.decision.made'
+    || event.type === 'seminar.decision.requested'
 }
 
 type ExtractRuntimeInfo = {
@@ -710,6 +750,7 @@ function extractRuntimeInfo(node: CanvasNode): ExtractRuntimeInfo | null {
       agentType?: string
       metadata?: {
         agent_signature?: string
+        stage?: SeminarPhase
       }
     }
   }
@@ -719,7 +760,7 @@ function extractRuntimeInfo(node: CanvasNode): ExtractRuntimeInfo | null {
 
   const title = (typeof data.title === 'string' && data.title.trim()) || node.id
   const summary = typeof data.content === 'string' ? data.content : ''
-  const stage = inferPhase(agentId, meta?.macraType, title, summary)
+  const stage = meta?.metadata?.stage ?? inferPhase(agentId, meta?.macraType, title, summary)
 
   return {
     stage,

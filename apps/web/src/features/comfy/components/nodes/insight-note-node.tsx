@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { memo, useState, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
 import { Lightbulb, Edit3, Check, X, Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
-export function InsightNoteNode({ id, data }: NodeProps) {
+export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeProps) {
   const { getMacraNode, updateMacraNode } = useComfyStore()
   const nodeData = getMacraNode(id) || (data as MacraNodeData)
 
@@ -246,4 +246,4 @@ export function InsightNoteNode({ id, data }: NodeProps) {
       />
     </>
   )
-}
+})

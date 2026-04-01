@@ -217,6 +217,7 @@ export const typeDefs = gql `
   type Query {
     workspaceGraph(workspaceId: ID!): CanvasGraph!
     conversation(id: ID!): StartConversationPayload
+    conversationRuntimeEvents(workspaceId: ID!, conversationId: ID): [ConversationEvent!]!
     kbTaskStatus(workspaceId: ID!, kbId: ID!): [KbTaskStatus!]!
     knowledgeBases(workspaceId: ID!): [KnowledgeBase!]!
     knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!

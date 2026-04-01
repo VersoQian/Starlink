@@ -8,7 +8,8 @@ import {
   type CanvasEdge,
   type CanvasGraph,
   type CanvasNode,
-  type KnowledgeEvidence
+  type KnowledgeEvidence,
+  type SeminarPhase
 } from '@starlink/shared'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
@@ -51,7 +52,8 @@ const MacraNodeDataSchema = z.object({
     agent_signature: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
     confidence: z.enum(['high', 'medium', 'low']).optional(),
     source: z.string().optional(),
-    tags: z.array(z.string()).optional()
+    tags: z.array(z.string()).optional(),
+    stage: z.enum(['planning', 'execution', 'review', 'decision']).optional()
   }),
   agentType: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
   isInteractive: z.boolean().optional(),
@@ -159,7 +161,7 @@ export class BusinessLangGraphService {
       })
       yield {
         type: 'delta',
-        delta: builder.addInsightNode('未配置 LLM', '请在 .env 文件中配置 LLM_API_KEY 环境变量')
+        delta: builder.addInsightNode('未配置 LLM', '请在 .env 文件中配置 LLM_API_KEY 环境变量', 'planning')
       }
       yield { type: 'status', status: 'completed' }
       return
@@ -222,7 +224,8 @@ export class BusinessLangGraphService {
               type: 'delta',
               delta: builder.addInsightNode(
                 '意图识别',
-                `**用户意图**: ${intent.intent}\n\n**分析**: ${intent.reasoning}`
+                `**用户意图**: ${intent.intent}\n\n**分析**: ${intent.reasoning}`,
+                'planning'
               )
             }
           }
@@ -305,7 +308,7 @@ export class BusinessLangGraphService {
       })
       yield {
         type: 'delta',
-        delta: builder.addInsightNode('执行失败', `错误信息：${message}`)
+        delta: builder.addInsightNode('执行失败', `错误信息：${message}`, 'review')
       }
       yield { type: 'status', status: 'failed', message }
     }
@@ -477,7 +480,8 @@ export class BusinessLangGraphService {
         type: 'cc-bmc-card' as const,
         metadata: {
           ...node.metadata,
-          agent_signature: AGENT_TYPES.MARKET
+          agent_signature: AGENT_TYPES.MARKET,
+          stage: 'execution' as const
         }
       }))
 
@@ -584,7 +588,8 @@ export class BusinessLangGraphService {
         type: 'cc-bmc-card' as const,
         metadata: {
           ...node.metadata,
-          agent_signature: AGENT_TYPES.PRODUCT
+          agent_signature: AGENT_TYPES.PRODUCT,
+          stage: 'execution' as const
         }
       }))
 
@@ -688,7 +693,8 @@ export class BusinessLangGraphService {
         type: 'cc-bmc-card' as const,
         metadata: {
           ...node.metadata,
-          agent_signature: AGENT_TYPES.FINANCE
+          agent_signature: AGENT_TYPES.FINANCE,
+          stage: 'execution' as const
         }
       }))
 
@@ -742,7 +748,8 @@ export class BusinessLangGraphService {
         isInteractive: true,
         metadata: {
           agent_signature: AGENT_TYPES.MARKET,
-          confidence: 'high'
+          confidence: 'high',
+          stage: 'execution'
         }
       })
     }
@@ -757,7 +764,8 @@ export class BusinessLangGraphService {
         isInteractive: true,
         metadata: {
           agent_signature: AGENT_TYPES.PRODUCT,
-          confidence: 'high'
+          confidence: 'high',
+          stage: 'execution'
         }
       })
     }
@@ -772,7 +780,8 @@ export class BusinessLangGraphService {
         isInteractive: true,
         metadata: {
           agent_signature: AGENT_TYPES.FINANCE,
-          confidence: 'high'
+          confidence: 'high',
+          stage: 'execution'
         }
       })
     }
@@ -930,7 +939,8 @@ export class BusinessLangGraphService {
         conflictType: 'channel-product',
         metadata: {
           agent_signature: AGENT_TYPES.CRITIC,
-          confidence: 'medium'
+          confidence: 'medium',
+          stage: 'review'
         }
       })
     }
@@ -1016,7 +1026,7 @@ class BusinessCanvasBuilder {
     return { nodes: [node] }
   }
 
-  addInsightNode(title: string, content: string): GraphDelta {
+  addInsightNode(title: string, content: string, stage: SeminarPhase = 'planning'): GraphDelta {
     const id = `insight-${nanoid(8)}`
     const node: CanvasNode = {
       id,
@@ -1031,7 +1041,8 @@ class BusinessCanvasBuilder {
           macraType: 'insight-note',
           metadata: {
             agent_signature: 'Orchestrator',
-            confidence: 'high'
+            confidence: 'high',
+            stage
           }
         }
       }

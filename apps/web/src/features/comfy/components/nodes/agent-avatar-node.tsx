@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { memo, useState, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { AGENT_TYPES, type AgentType, type MacraNodeData } from '@/types/macra'
@@ -148,7 +148,7 @@ interface ChatMessage {
   content: string
 }
 
-export function AgentAvatarNode({ id, data }: NodeProps) {
+export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeProps) {
   const { getMacraNode } = useComfyStore()
   const nodeData = getMacraNode(id) || (data as MacraNodeData)
 
@@ -379,4 +379,4 @@ export function AgentAvatarNode({ id, data }: NodeProps) {
       />
     </>
   )
-}
+})

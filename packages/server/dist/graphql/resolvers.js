@@ -22,6 +22,9 @@ export const resolvers = {
                 knowledgeEvidence: record.knowledgeEvidence ?? []
             };
         },
+        conversationRuntimeEvents: async (_, args, ctx) => {
+            return await ctx.conversationStore.listConversationRuntimeEvents(args.workspaceId, args.conversationId ?? undefined);
+        },
         kbTaskStatus: async (_, args, ctx) => {
             const statuses = await ctx.taskEventStore.getTaskStatuses(args.kbId);
             return statuses.map((status) => ({

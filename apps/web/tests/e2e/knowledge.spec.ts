@@ -185,7 +185,7 @@ test.describe('Knowledge workspace', () => {
       })
     })
 
-    await page.route('http://localhost:4000/kb/**/import/file', async (route) => {
+    await page.route(/http:\/\/localhost:4000\/kb\/.+\/import\/file(?:\?.*)?$/, async (route) => {
       const url = new URL(route.request().url())
       const segments = url.pathname.split('/').filter(Boolean)
       const kbId = segments[1] ?? 'kb-initial'
