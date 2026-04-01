@@ -109,9 +109,6 @@ class PgNotifyConversationEventBus extends InMemoryConversationEventBus {
 
       await this.listenClient.query(`LISTEN "${this.channel}"`)
       this.available = true
-      console.log('[conversation-event-bus] using pg_notify driver', {
-        channel: this.channel
-      })
     } catch (error) {
       console.error('[conversation-event-bus] failed to initialize pg_notify driver, fallback to local only', {
         error: String(error)

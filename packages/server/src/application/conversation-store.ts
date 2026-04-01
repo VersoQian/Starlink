@@ -469,7 +469,6 @@ export class ConversationStore {
     conversationId: string
     initialized: boolean
   }) {
-    console.log('🎬 [runConversationStream] Starting background stream processing...')
     let { stream, record, workspaceId, conversationId, initialized } = options
     let currentGraph = record.graph
     const emittedTurnNodeIds = new Set<string>()
@@ -515,7 +514,6 @@ export class ConversationStore {
     await publishPhaseChanged('planning', 'conversation.started')
 
     try {
-      console.log('🔄 [runConversationStream] Iterating stream updates...')
       for await (const update of stream) {
         if (update.type === 'init') {
           currentGraph = update.graph
@@ -629,7 +627,6 @@ export class ConversationStore {
         updatedAt: new Date()
       }
       await this.runtimeRepository.updateConversation(conversationId, record)
-      console.log('✅ [runConversationStream] Stream completed successfully')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const stack = error instanceof Error ? error.stack : undefined

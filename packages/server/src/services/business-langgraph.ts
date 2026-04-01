@@ -214,8 +214,6 @@ export class BusinessLangGraphService {
                       : 0
             }
           })
-          // Debug log (commented out for production)
-          // console.log('business-langgraph.nodeUpdate', { nodeName, payload })
 
           // Router Agent
           if (nodeName === 'routerAgent' && payload.intent) {
