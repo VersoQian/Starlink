@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -115,12 +115,26 @@
   --transition-fast: 200ms;
   --transition-normal: 300ms;
   --transition-slow: 500ms;
+  --font-editorial: 'Manrope', sans-serif;
+  --font-interface: 'Inter', sans-serif;
+  --stratum-surface: #f7f9fb;
+  --stratum-surface-low: #f2f4f6;
+  --stratum-surface-raised: #ffffff;
+  --stratum-panel: #eef2f6;
+  --stratum-ink: #191c1e;
+  --stratum-muted: #6b7280;
+  --stratum-line: rgba(19, 27, 46, 0.08);
+  --stratum-navy: #131b2e;
+  --stratum-blue: #008cc7;
+  --stratum-sky: #89ceff;
+  --stratum-shadow: 0 24px 48px rgba(19, 27, 46, 0.08);
+  --stratum-glow: linear-gradient(135deg, #008cc7 0%, #131b2e 100%);
 
   font-family: 'DM Sans', -apple-system, sans-serif;
   color-scheme: light;
 }
 
-.comfy-canvas-wrapper * {
+.canvas-page-shell * {
   font-family: 'DM Sans', -apple-system, sans-serif;
 }
 
@@ -188,6 +202,28 @@
   color-scheme: dark;
 }
 
+.stratum-shell {
+  font-family: var(--font-interface);
+}
+
+.stratum-shell h1,
+.stratum-shell h2,
+.stratum-shell h3,
+.stratum-display {
+  font-family: var(--font-editorial);
+  letter-spacing: -0.02em;
+}
+
+.stratum-card {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--stratum-shadow);
+}
+
+.stratum-glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px);
+}
+
 body {
   background-color: hsl(var(--canvas-bg));
   color: hsl(var(--canvas-text));
@@ -202,8 +238,8 @@ body {
   background-size: 40px 40px;
 }
 
-/* ComfyUI风格深色网格 */
-.comfy-canvas {
+/* Business canvas dark grid */
+.canvas-flow-surface {
   background-color: #1a1a1a;
   background-image:
     linear-gradient(#2a2a2a 1px, transparent 1px),
@@ -220,19 +256,19 @@ body {
   box-shadow: 0 22px 45px -36px rgba(64, 84, 172, 0.55);
 }
 
-/* ComfyUI节点样式 */
-.react-flow__node.comfy-node {
+/* Canvas node chrome */
+.react-flow__node.canvas-panel-node {
   transition: all 0.2s ease;
   border-radius: 0.5rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.react-flow__node.comfy-node:hover {
+.react-flow__node.canvas-panel-node:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   transform: translateY(-1px);
 }
 
-.react-flow__node.comfy-node.executing {
+.react-flow__node.canvas-panel-node.executing {
   box-shadow: 0 0 0 2px #4ade80, 0 8px 24px rgba(74, 222, 128, 0.3);
 }
 

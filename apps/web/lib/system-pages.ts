@@ -127,6 +127,8 @@ function getWorkflowInputs(key: WorkspaceFlowKey) {
       return ['研究问题', '知识背景']
     case 'insights':
       return ['表格数据', '图表需求']
+    case 'experts':
+      return ['Agent 观点', 'Seminar 轨迹', '画布上下文']
     case 'canvas':
       return ['研究结论', '节点引用', '问题拆解']
     case 'comfy':
@@ -150,8 +152,10 @@ function getWorkflowNextIds(key: WorkspaceFlowKey): MonitoredPageId[] {
       return ['canvas']
     case 'insights':
       return ['canvas']
+    case 'experts':
+      return ['canvas', 'agents', 'seminar']
     case 'canvas':
-      return ['comfy', 'agents', 'seminar']
+      return ['experts', 'comfy', 'agents', 'seminar']
     case 'comfy':
       return ['agents', 'seminar']
     case 'agents':

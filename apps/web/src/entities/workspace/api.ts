@@ -14,9 +14,9 @@ import type { WorkspaceEntitySnapshot, WorkspaceMember, WorkspaceModuleId, Works
 
 const STAGE_DEFAULT_FLOW: Record<string, WorkspaceFlowKey> = {
   intake: 'knowledge',
-  analysis: 'deep-research',
+  analysis: 'canvas',
   modeling: 'canvas',
-  delivery: 'seminar'
+  delivery: 'cultural-tools'
 }
 
 function unique<T>(items: T[]) {

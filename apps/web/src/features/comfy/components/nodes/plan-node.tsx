@@ -23,8 +23,9 @@ const STATUS_STYLES = {
 }
 
 export const PlanNode = memo(function PlanNode({ id, data }: NodeProps) {
-  const { getMacraNode, updateMacraNode } = useComfyStore()
-  const nodeData = getMacraNode(id) || (data as MacraNodeData)
+  const macraNode = useComfyStore((state) => state.macraNodes.get(id))
+  const updateMacraNode = useComfyStore((state) => state.updateMacraNode)
+  const nodeData = macraNode || (data as MacraNodeData)
   const [isExpanded, setIsExpanded] = useState(false)
 
   const metadata = nodeData?.metadata || {}

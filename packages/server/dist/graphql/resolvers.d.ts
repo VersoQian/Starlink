@@ -253,6 +253,8 @@ export declare const resolvers: {
                     target: string;
                     label?: string | null | undefined;
                 }[] | undefined;
+                removedNodeIds?: string[] | undefined;
+                removedEdgeIds?: string[] | undefined;
             };
         } | {
             type: "status";
@@ -315,11 +317,11 @@ export declare const resolvers: {
         }[]>;
         knowledgeBases: (_: unknown, args: {
             workspaceId: string;
-        }) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase[]>;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase[]>;
         knowledgeBaseStatus: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
-        }) => Promise<{
+        }, ctx: GraphQLContext) => Promise<{
             knowledgeBase: import("../services/kb-task-service.js").GatewayKnowledgeBase;
             tasks: import("../services/kb-task-service.js").GatewayKbTask[];
         }>;
@@ -522,21 +524,21 @@ export declare const resolvers: {
         }>;
         createKnowledgeBase: (_: unknown, args: {
             workspaceId: string;
-        }) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
         publishKnowledgeBase: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
-        }) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
         addKnowledgeSeed: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
             text: string;
-        }) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
         importKnowledgeUrl: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
             url: string;
-        }) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
         saveCommunityPost: (_: unknown, args: {
             input: {
                 workspaceId: string;
@@ -635,9 +637,12 @@ export declare const resolvers: {
     };
     Subscription: {
         conversationProgress: {
-            subscribe: (_: unknown, __: unknown, ctx: GraphQLContext) => AsyncIterable<{
+            subscribe: (_: unknown, args: {
+                workspaceId: string;
+                conversationId?: string | null;
+            }, ctx: GraphQLContext) => Promise<AsyncIterable<{
                 conversationProgress: import("@starlink/shared").ConversationEvent;
-            }>;
+            }>>;
             resolve: (payload: {
                 conversationProgress: unknown;
             }) => unknown;

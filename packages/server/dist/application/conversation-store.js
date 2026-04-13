@@ -1,26 +1,36 @@
 import { nanoid } from 'nanoid';
 import { canvasEdgeSchema, canvasNodeSchema, conversationEventSchema, conversationMetadataSchema } from '@starlink/shared';
 import { BusinessLangGraphService } from '../services/business-langgraph.js';
-import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js';
-import { getWorkspaceMetadata as getWorkspaceMetadataPg, listWorkspaceMetadata as listWorkspaceMetadataPg, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryPg, resolveViewerPermissions as resolveViewerPermissionsPg, updateWorkspaceMetadata as updateWorkspaceMetadataPg } from './workspace-metadata-pg-store.js';
-import { getWorkspaceMetadata as getWorkspaceMetadataFile, listWorkspaceMetadata as listWorkspaceMetadataFile, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryFile, resolveViewerPermissions as resolveViewerPermissionsFile, updateWorkspaceMetadata as updateWorkspaceMetadataFile } from './workspace-metadata-store.js';
+import { ConversationSessionStore } from './conversation-session-store.js';
+import { WorkspaceGraphStore } from './workspace-graph-store.js';
+import { WorkspaceAssetStore } from './workspace-asset-store.js';
+import { RuntimeEventStore } from './runtime-event-store.js';
+import { applyGraphDelta } from './graph-delta.js';
+import { getWorkspaceMetadata as getWorkspaceMetadataPg, listWorkspaceMetadata as listWorkspaceMetadataPg, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryPg, updateWorkspaceMetadata as updateWorkspaceMetadataPg } from './workspace-metadata-pg-store.js';
+import { getWorkspaceMetadata as getWorkspaceMetadataFile, listWorkspaceMetadata as listWorkspaceMetadataFile, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryFile, updateWorkspaceMetadata as updateWorkspaceMetadataFile } from './workspace-metadata-store.js';
+import { getViewerPermissions, requireWorkspacePermission } from './workspace-access.js';
 const usePg = (process.env.WORKSPACE_METADATA_DRIVER ?? 'pg') === 'pg';
 const getWorkspaceMetadata = usePg ? getWorkspaceMetadataPg : getWorkspaceMetadataFile;
 const listWorkspaceMetadata = usePg ? listWorkspaceMetadataPg : listWorkspaceMetadataFile;
 const listWorkspaceMetadataHistory = usePg ? listWorkspaceMetadataHistoryPg : listWorkspaceMetadataHistoryFile;
-const resolveViewerPermissions = usePg ? resolveViewerPermissionsPg : resolveViewerPermissionsFile;
 const updateWorkspaceMetadata = usePg ? updateWorkspaceMetadataPg : updateWorkspaceMetadataFile;
-const businessLangGraphService = new BusinessLangGraphService();
 export class ConversationStore {
-    constructor({ eventBus, runtimeRepository }) {
+    constructor({ eventBus, runtimeRepository, businessLangGraphService = new BusinessLangGraphService() }) {
         this.pendingDecisionTimeouts = new Map();
         this.pendingDecisionResolvers = new Map();
         this.hitlEnabled = process.env.HITL_ENABLED === 'true';
         this.hitlApprovalTimeoutMs = Number(process.env.HITL_APPROVAL_TIMEOUT_MS ?? '600000');
         this.eventBus = eventBus;
         this.runtimeRepository = runtimeRepository;
+        this.businessLangGraphService = businessLangGraphService;
+        this.sessionStore = new ConversationSessionStore(runtimeRepository);
+        this.graphStore = new WorkspaceGraphStore(runtimeRepository);
+        this.assetStore = new WorkspaceAssetStore(runtimeRepository);
+        this.eventStore = new RuntimeEventStore(runtimeRepository, eventBus);
     }
     async startConversation(workspaceId, userId, question) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
+        const existingGraph = await this.getGraph(workspaceId);
         const id = nanoid();
         const startedAt = new Date();
         const metadata = {
@@ -32,20 +42,17 @@ export class ConversationStore {
         };
         const record = {
             metadata,
-            graph: {
-                workspaceId,
-                nodes: [],
-                edges: []
-            },
+            graph: existingGraph,
             knowledgeEvidence: []
         };
-        await this.runtimeRepository.createConversation(id, record);
-        await this.runtimeRepository.setWorkspaceGraph(workspaceId, record.graph);
-        const stream = businessLangGraphService.streamConversation({
+        await this.sessionStore.createConversation(id, record);
+        await this.graphStore.setWorkspaceGraph(workspaceId, record.graph);
+        const stream = this.businessLangGraphService.streamConversation({
             workspaceId,
             userId,
             question,
-            traceId: id
+            traceId: id,
+            baseGraph: existingGraph
         });
         let initialized = false;
         try {
@@ -54,9 +61,9 @@ export class ConversationStore {
                 initialized = true;
                 const currentGraph = initResult.value.graph;
                 record.graph = currentGraph;
-                await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph);
-                await this.runtimeRepository.updateConversation(id, record);
-                await this.persistGraphState(currentGraph);
+                await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph);
+                await this.sessionStore.updateConversation(id, record);
+                await this.graphStore.persistGraph(currentGraph);
                 const baseEvent = {
                     type: 'graph/appended',
                     conversationId: id,
@@ -79,7 +86,7 @@ export class ConversationStore {
                 status: 'failed',
                 updatedAt: new Date()
             };
-            await this.runtimeRepository.updateConversation(id, record);
+            await this.sessionStore.updateConversation(id, record);
             return record;
         }
         setTimeout(() => {
@@ -93,22 +100,41 @@ export class ConversationStore {
         }, 0);
         return record;
     }
-    async getConversation(id) {
-        const record = await this.runtimeRepository.getConversation(id);
+    async getConversation(id, userId) {
+        const record = await this.sessionStore.getConversation(id);
         if (!record)
             return null;
+        if (userId) {
+            await this.assertWorkspacePermission(record.graph.workspaceId, userId, 'workspace.read');
+        }
         const metadata = conversationMetadataSchema.parse(record.metadata);
         return {
             ...record,
             metadata
         };
     }
-    async listConversationRuntimeEvents(workspaceId, conversationId) {
-        const events = await this.runtimeRepository.listConversationEvents(workspaceId, conversationId);
+    async listConversationRuntimeEvents(workspaceId, userId, conversationId) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        if (conversationId) {
+            await this.assertConversationBelongsToWorkspace(workspaceId, conversationId);
+        }
+        const events = await this.eventStore.listConversationEvents(workspaceId, conversationId);
         return events.map((event) => conversationEventSchema.parse(event));
     }
-    async getGraph(workspaceId) {
-        const manualGraph = await this.runtimeRepository.getWorkspaceGraph(workspaceId);
+    async assertWorkspaceAccess(workspaceId, userId, requiredPermission) {
+        await this.assertWorkspacePermission(workspaceId, userId, requiredPermission);
+    }
+    async assertConversationScope(workspaceId, userId, conversationId) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        if (!conversationId)
+            return;
+        await this.assertConversationBelongsToWorkspace(workspaceId, conversationId);
+    }
+    async getGraph(workspaceId, userId) {
+        if (userId) {
+            await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        }
+        const manualGraph = await this.graphStore.getWorkspaceGraph(workspaceId);
         if (manualGraph) {
             return {
                 workspaceId: manualGraph.workspaceId,
@@ -116,19 +142,19 @@ export class ConversationStore {
                 edges: [...manualGraph.edges]
             };
         }
-        const workspaceConversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId);
+        const workspaceConversations = await this.sessionStore.getConversationsByWorkspace(workspaceId);
         const existing = workspaceConversations[0]?.record;
         if (existing) {
-            await this.runtimeRepository.setWorkspaceGraph(workspaceId, existing.graph);
+            await this.graphStore.setWorkspaceGraph(workspaceId, existing.graph);
             return {
                 workspaceId,
                 nodes: [...existing.graph.nodes],
                 edges: [...existing.graph.edges]
             };
         }
-        const persistedGraph = await loadPersistedGraph(workspaceId);
+        const persistedGraph = await this.graphStore.loadPersistedGraph(workspaceId);
         if (persistedGraph) {
-            await this.runtimeRepository.setWorkspaceGraph(workspaceId, persistedGraph);
+            await this.graphStore.setWorkspaceGraph(workspaceId, persistedGraph);
             return {
                 workspaceId,
                 nodes: [...persistedGraph.nodes],
@@ -140,7 +166,7 @@ export class ConversationStore {
             nodes: [],
             edges: []
         };
-        await this.runtimeRepository.setWorkspaceGraph(workspaceId, emptyGraph);
+        await this.graphStore.setWorkspaceGraph(workspaceId, emptyGraph);
         return emptyGraph;
     }
     async listWorkspaces(userId) {
@@ -154,7 +180,7 @@ export class ConversationStore {
         return await Promise.all([...knownIds].map(async (workspaceId) => {
             const metadata = await getWorkspaceMetadata(workspaceId);
             const runtime = runtimeById.get(workspaceId);
-            const viewerPermissions = resolveViewerPermissions(userId, metadata.members);
+            const viewerPermissions = getViewerPermissions(userId, metadata.members);
             return {
                 workspaceId,
                 name: metadata.name,
@@ -168,20 +194,27 @@ export class ConversationStore {
                 status: runtime?.status ?? 'draft',
                 updatedAt: runtime?.updatedAt ?? new Date().toISOString()
             };
-        }));
+        })).then((items) => items.filter((workspace) => workspace.viewerPermissions.length > 0));
     }
-    async listWorkspaceHistory(workspaceId) {
+    async listWorkspaceHistory(workspaceId, userId) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
         return await listWorkspaceMetadataHistory(workspaceId);
     }
     async updateWorkspace(input, userId) {
         const currentMetadata = await getWorkspaceMetadata(input.workspaceId);
-        const viewerPermissions = resolveViewerPermissions(userId, currentMetadata.members);
-        if (!viewerPermissions.includes('workspace.manage')) {
-            throw new Error('FORBIDDEN_WORKSPACE_METADATA');
+        let viewerPermissions;
+        try {
+            viewerPermissions = this.assertPermissionFromMetadata(currentMetadata, userId, 'workspace.manage');
+        }
+        catch (error) {
+            if (error instanceof Error && error.message === 'FORBIDDEN_WORKSPACE') {
+                throw new Error('FORBIDDEN_WORKSPACE_METADATA');
+            }
+            throw error;
         }
         const { workspace: metadata } = await updateWorkspaceMetadata(input, userId);
         const runtime = (await this.runtimeRepository.listWorkspaces()).find((workspace) => workspace.workspaceId === input.workspaceId);
-        const nextViewerPermissions = resolveViewerPermissions(userId, metadata.members);
+        const nextViewerPermissions = getViewerPermissions(userId, metadata.members);
         return {
             workspaceId: metadata.workspaceId,
             name: metadata.name,
@@ -196,10 +229,12 @@ export class ConversationStore {
             updatedAt: runtime?.updatedAt ?? new Date().toISOString()
         };
     }
-    async listWorkspaceAssets(workspaceId) {
-        return await this.runtimeRepository.listWorkspaceAssets(workspaceId);
+    async listWorkspaceAssets(workspaceId, userId) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        return await this.assetStore.listWorkspaceAssets(workspaceId);
     }
     async saveCommunityPost(input, userId) {
+        await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write');
         const createdAt = new Date().toISOString();
         const postId = nanoid();
         const asset = {
@@ -230,13 +265,14 @@ export class ConversationStore {
             createdAt,
             updatedAt: createdAt
         };
-        await this.runtimeRepository.upsertWorkspaceAsset(asset);
+        await this.assetStore.upsertWorkspaceAsset(asset);
         return asset;
     }
     async savePracticeSession(input, userId) {
+        await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write');
         const updatedAt = input.lastUpdated ?? new Date().toISOString();
         const assetId = `practice:${input.workspaceId}:${input.scenarioId}`;
-        const current = (await this.runtimeRepository.listWorkspaceAssets(input.workspaceId))
+        const current = (await this.assetStore.listWorkspaceAssets(input.workspaceId))
             .find((asset) => asset.assetId === assetId);
         const asset = {
             assetId,
@@ -266,10 +302,11 @@ export class ConversationStore {
             createdAt: current?.createdAt ?? updatedAt,
             updatedAt
         };
-        await this.runtimeRepository.upsertWorkspaceAsset(asset);
+        await this.assetStore.upsertWorkspaceAsset(asset);
         return asset;
     }
-    async addNode(workspaceId, input) {
+    async addNode(workspaceId, userId, input) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
         const id = input.id ?? nanoid();
         const parsed = canvasNodeSchema.parse({
             id,
@@ -284,9 +321,9 @@ export class ConversationStore {
             nodes: updatedNodes,
             edges: baseGraph.edges
         };
-        await this.runtimeRepository.setWorkspaceGraph(workspaceId, updatedGraph);
-        await this.persistGraphState(updatedGraph);
-        const conversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId);
+        await this.graphStore.setWorkspaceGraph(workspaceId, updatedGraph);
+        await this.graphStore.persistGraph(updatedGraph);
+        const conversations = await this.sessionStore.getConversationsByWorkspace(workspaceId);
         for (const item of conversations) {
             const nextRecord = {
                 ...item.record,
@@ -295,11 +332,12 @@ export class ConversationStore {
                     nodes: updatedNodes
                 }
             };
-            await this.runtimeRepository.updateConversation(item.id, nextRecord);
+            await this.sessionStore.updateConversation(item.id, nextRecord);
         }
         return parsed;
     }
-    async connectNodes(workspaceId, input) {
+    async connectNodes(workspaceId, userId, input) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
         const id = input.id ?? nanoid();
         const parsed = canvasEdgeSchema.parse({
             id,
@@ -314,9 +352,9 @@ export class ConversationStore {
             nodes: baseGraph.nodes,
             edges: updatedEdges
         };
-        await this.runtimeRepository.setWorkspaceGraph(workspaceId, updatedGraph);
-        await this.persistGraphState(updatedGraph);
-        const conversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId);
+        await this.graphStore.setWorkspaceGraph(workspaceId, updatedGraph);
+        await this.graphStore.persistGraph(updatedGraph);
+        const conversations = await this.sessionStore.getConversationsByWorkspace(workspaceId);
         for (const item of conversations) {
             const nextRecord = {
                 ...item.record,
@@ -325,20 +363,12 @@ export class ConversationStore {
                     edges: updatedEdges
                 }
             };
-            await this.runtimeRepository.updateConversation(item.id, nextRecord);
+            await this.sessionStore.updateConversation(item.id, nextRecord);
         }
         return parsed;
     }
-    async persistGraphState(graph) {
-        try {
-            await persistCanvasGraph(graph);
-        }
-        catch (error) {
-            console.error('Failed to persist canvas graph', error);
-        }
-    }
-    getEventIterator() {
-        return this.eventBus.getEventIterator();
+    getEventIterator(filter) {
+        return this.eventStore.getEventIterator(filter);
     }
     async close() {
         for (const timeout of this.pendingDecisionTimeouts.values()) {
@@ -349,11 +379,12 @@ export class ConversationStore {
         await this.runtimeRepository.close();
         await this.eventBus.close();
     }
-    async approveDecision(conversationId, decision) {
-        const pending = await this.runtimeRepository.getPendingApproval(conversationId);
+    async approveDecision(conversationId, userId, decision) {
+        const pending = await this.sessionStore.getPendingApproval(conversationId);
         if (!pending) {
             return false;
         }
+        await this.assertWorkspacePermission(pending.workspaceId, userId, 'workspace.write');
         const nextDecision = (decision ?? '').trim() || pending.decision;
         const resolver = this.pendingDecisionResolvers.get(conversationId);
         if (resolver) {
@@ -407,10 +438,10 @@ export class ConversationStore {
                 if (update.type === 'init') {
                     currentGraph = update.graph;
                     record.graph = currentGraph;
-                    await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph);
-                    await this.persistGraphState(currentGraph);
+                    await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph);
+                    await this.graphStore.persistGraph(currentGraph);
                     record.knowledgeEvidence = update.knowledgeEvidence ?? [];
-                    await this.runtimeRepository.updateConversation(conversationId, record);
+                    await this.sessionStore.updateConversation(conversationId, record);
                     if (!initialized) {
                         initialized = true;
                         const appendedEvent = {
@@ -425,14 +456,19 @@ export class ConversationStore {
                 if (update.type === 'delta') {
                     currentGraph = applyGraphDelta(currentGraph, update.delta);
                     record.graph = currentGraph;
-                    await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph);
-                    await this.runtimeRepository.updateConversation(conversationId, record);
-                    await this.persistGraphState(currentGraph);
+                    await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph);
+                    await this.sessionStore.updateConversation(conversationId, record);
+                    await this.graphStore.persistGraph(currentGraph);
                     const event = initialized
                         ? {
                             type: 'graph/diff',
                             conversationId,
-                            payload: { nodes: update.delta.nodes, edges: update.delta.edges }
+                            payload: {
+                                nodes: update.delta.nodes,
+                                edges: update.delta.edges,
+                                removedNodeIds: update.delta.removedNodeIds,
+                                removedEdgeIds: update.delta.removedEdgeIds
+                            }
                         }
                         : {
                             type: 'graph/appended',
@@ -465,6 +501,33 @@ export class ConversationStore {
                     continue;
                 }
                 if (update.type === 'status') {
+                    continue;
+                }
+                if (update.type === 'interrupt') {
+                    if (this.hitlEnabled) {
+                        const userDecision = await this.waitForDecisionApproval({
+                            conversationId,
+                            workspaceId,
+                            decision: update.decision,
+                            record
+                        });
+                        record.metadata = {
+                            ...record.metadata,
+                            status: 'running',
+                            updatedAt: new Date()
+                        };
+                        await this.sessionStore.updateConversation(conversationId, record);
+                        await publishEvent({
+                            type: 'seminar.decision.made',
+                            conversationId,
+                            payload: {
+                                workspaceId,
+                                phase: 'decision',
+                                decision: userDecision,
+                                occurredAt: new Date().toISOString()
+                            }
+                        });
+                    }
                     continue;
                 }
             }
@@ -503,7 +566,7 @@ export class ConversationStore {
                 status: 'completed',
                 updatedAt: new Date()
             };
-            await this.runtimeRepository.updateConversation(conversationId, record);
+            await this.sessionStore.updateConversation(conversationId, record);
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -524,14 +587,14 @@ export class ConversationStore {
                 status: 'failed',
                 updatedAt: new Date()
             };
-            await this.runtimeRepository.updateConversation(conversationId, record);
+            await this.sessionStore.updateConversation(conversationId, record);
         }
     }
     async publishEvent(workspaceId, event) {
         if (shouldPersistRuntimeEvent(event)) {
-            await this.runtimeRepository.appendConversationEvent(workspaceId, event);
+            await this.eventStore.appendConversationEvent(workspaceId, event);
         }
-        await this.eventBus.publish(event);
+        await this.eventStore.publish(workspaceId, event);
     }
     async waitForDecisionApproval(options) {
         const { conversationId, workspaceId, decision, record } = options;
@@ -550,14 +613,15 @@ export class ConversationStore {
             status: 'paused',
             updatedAt: new Date()
         };
-        await this.runtimeRepository.updateConversation(conversationId, record);
+        await this.sessionStore.updateConversation(conversationId, record);
         const approvalData = {
             conversationId,
+            workspaceId,
             decision,
             createdAt: new Date().toISOString(),
             timeoutMs: this.hitlApprovalTimeoutMs
         };
-        await this.runtimeRepository.setPendingApproval(conversationId, approvalData);
+        await this.sessionStore.setPendingApproval(conversationId, approvalData);
         return await new Promise((resolve) => {
             const finalize = (nextDecision) => {
                 const existingTimeout = this.pendingDecisionTimeouts.get(conversationId);
@@ -566,7 +630,7 @@ export class ConversationStore {
                 }
                 this.pendingDecisionTimeouts.delete(conversationId);
                 this.pendingDecisionResolvers.delete(conversationId);
-                void this.runtimeRepository.deletePendingApproval(conversationId);
+                void this.sessionStore.deletePendingApproval(conversationId);
                 resolve(nextDecision);
             };
             const timeout = setTimeout(() => {
@@ -575,6 +639,21 @@ export class ConversationStore {
             this.pendingDecisionTimeouts.set(conversationId, timeout);
             this.pendingDecisionResolvers.set(conversationId, finalize);
         });
+    }
+    assertPermissionFromMetadata(metadata, userId, requiredPermission) {
+        return requireWorkspacePermission(userId, metadata, requiredPermission);
+    }
+    async assertWorkspacePermission(workspaceId, userId, requiredPermission) {
+        const metadata = await getWorkspaceMetadata(workspaceId);
+        return this.assertPermissionFromMetadata(metadata, userId, requiredPermission);
+    }
+    async assertConversationBelongsToWorkspace(workspaceId, conversationId) {
+        const record = await this.sessionStore.getConversation(conversationId);
+        if (!record)
+            return;
+        if (record.graph.workspaceId !== workspaceId) {
+            throw new Error('INVALID_CONVERSATION_SCOPE');
+        }
     }
 }
 function shouldPersistRuntimeEvent(event) {
@@ -628,20 +707,4 @@ function findLatestDecision(graph) {
         .filter((item) => item !== null)
         .filter((item) => item.stage === 'decision');
     return decisionNodes[decisionNodes.length - 1]?.summary ?? '';
-}
-function applyGraphDelta(graph, delta) {
-    return {
-        workspaceId: graph.workspaceId,
-        nodes: mergeById(graph.nodes, delta.nodes),
-        edges: mergeById(graph.edges, delta.edges)
-    };
-}
-function mergeById(current, updates) {
-    if (!updates || updates.length === 0)
-        return current;
-    const merged = new Map(current.map((item) => [item.id, item]));
-    for (const item of updates) {
-        merged.set(item.id, item);
-    }
-    return [...merged.values()];
 }

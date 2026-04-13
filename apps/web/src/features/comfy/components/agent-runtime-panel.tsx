@@ -21,6 +21,8 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
   const nodes = useComfyStore((state) => state.nodes)
   const edges = useComfyStore((state) => state.edges)
   const openDetailPanel = useComfyStore((state) => state.openDetailPanel)
+  const roundNumber = useComfyStore((state) => state.roundNumber)
+  const maxRounds = useComfyStore((state) => state.maxRounds)
   const runtime = useConversationRuntime(workspaceId)
 
   const graph = useMemo<WorkspaceGraphResponse>(() => ({
@@ -228,7 +230,7 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
 
       {!collapsed && (
         <>
-          <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+          <div className="mt-4 grid grid-cols-4 gap-2 text-xs">
             <div className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2">
               <p className="text-[10px] uppercase tracking-widest text-slate-500">Agents</p>
               <p className="mt-1 font-semibold text-white">{snapshot.agents.length}</p>
@@ -240,6 +242,10 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
             <div className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2">
               <p className="text-[10px] uppercase tracking-widest text-slate-500">Turns</p>
               <p className="mt-1 font-semibold text-white">{filteredTurns.length}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-widest text-slate-500">Round</p>
+              <p className="mt-1 font-semibold text-white">{roundNumber}/{maxRounds}</p>
             </div>
           </div>
 

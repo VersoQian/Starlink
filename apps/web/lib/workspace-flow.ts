@@ -5,11 +5,14 @@ export type WorkspaceFlowKey =
   | 'translate'
   | 'deep-research'
   | 'insights'
+  | 'experts'
   | 'canvas'
   | 'comfy'
   | 'agents'
   | 'seminar'
   | 'cultural-tools'
+
+export type WorkspaceFlowNavGroup = 'primary' | 'tools' | 'collaboration' | 'delivery'
 
 type WorkspaceFlowDefinition = {
   key: WorkspaceFlowKey
@@ -19,6 +22,7 @@ type WorkspaceFlowDefinition = {
   deliverable: string
   stageId: WorkspaceStageId
   segment: string
+  navGroup: WorkspaceFlowNavGroup
 }
 
 type WorkspaceStageDefinition = {
@@ -33,6 +37,12 @@ export type WorkspaceFlowItem = WorkspaceFlowDefinition & {
 }
 
 export type WorkspaceFlowStage = WorkspaceStageDefinition & {
+  items: WorkspaceFlowItem[]
+}
+
+export type WorkspaceFlowNavigationSection = {
+  id: WorkspaceFlowNavGroup
+  label: string
   items: WorkspaceFlowItem[]
 }
 
@@ -71,7 +81,8 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '导入文件、网页和文本种子，建立项目知识底座。',
     deliverable: '沉淀可检索、可发布的资料库',
     stageId: 'intake',
-    segment: 'knowledge'
+    segment: 'knowledge',
+    navGroup: 'tools'
   },
   {
     key: 'translate',
@@ -80,7 +91,8 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '处理跨语种内容，为研究和汇报统一语言上下文。',
     deliverable: '得到可直接分析的统一语言版本',
     stageId: 'intake',
-    segment: 'translate'
+    segment: 'translate',
+    navGroup: 'tools'
   },
   {
     key: 'deep-research',
@@ -89,7 +101,8 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '围绕问题发起多源研究，获得概览、关键发现和建议。',
     deliverable: '生成主题研究报告与参考来源',
     stageId: 'analysis',
-    segment: 'deep-research'
+    segment: 'deep-research',
+    navGroup: 'tools'
   },
   {
     key: 'insights',
@@ -98,16 +111,28 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '上传结构化数据并生成图表、摘要和异常信号。',
     deliverable: '形成数据图表与结论摘要',
     stageId: 'analysis',
-    segment: 'insights'
+    segment: 'insights',
+    navGroup: 'tools'
+  },
+  {
+    key: 'experts',
+    label: '专家协作',
+    shortLabel: '专家',
+    description: '以统一专家面板查看多角色观点、分歧、阶段推进与收敛建议。',
+    deliverable: '得到专家协作摘要、冲突点与行动建议',
+    stageId: 'modeling',
+    segment: 'experts',
+    navGroup: 'tools'
   },
   {
     key: 'canvas',
-    label: '多维画布',
+    label: '智慧画布',
     shortLabel: '画布',
-    description: '将问题拆解、节点关系和文档引用聚合为工作区主战场。',
+    description: '将问题拆解、证据引用、策略推演与行动路径统一到工作区主战场。',
     deliverable: '形成主问题树、节点结构和行动脉络',
     stageId: 'modeling',
-    segment: 'canvas'
+    segment: 'canvas',
+    navGroup: 'primary'
   },
   {
     key: 'comfy',
@@ -116,7 +141,8 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '以商业模型视角重构方案，沉淀价值主张与关键资源。',
     deliverable: '输出商业模型与策略路径',
     stageId: 'modeling',
-    segment: 'comfy'
+    segment: 'comfy',
+    navGroup: 'collaboration'
   },
   {
     key: 'agents',
@@ -125,7 +151,8 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '查看各个 Agent 的规划、执行、质询和决策产出。',
     deliverable: '明确每个 Agent 的贡献与分歧点',
     stageId: 'modeling',
-    segment: 'agents'
+    segment: 'agents',
+    navGroup: 'collaboration'
   },
   {
     key: 'seminar',
@@ -134,7 +161,8 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '把 Agent 观点拉到统一议程，完成模拟讨论与决策收敛。',
     deliverable: '形成共识、冲突记录和行动建议',
     stageId: 'delivery',
-    segment: 'seminar'
+    segment: 'seminar',
+    navGroup: 'collaboration'
   },
   {
     key: 'cultural-tools',
@@ -143,7 +171,8 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     description: '进行话术润色、场景模拟与策略报告封装，支撑对外表达。',
     deliverable: '完成跨文化沟通、表达与报告交付',
     stageId: 'delivery',
-    segment: 'cultural-tools'
+    segment: 'cultural-tools',
+    navGroup: 'delivery'
   }
 ]
 
@@ -160,6 +189,21 @@ export function getWorkspaceFlow(workspaceId: string): WorkspaceFlowItem[] {
 
 export function getWorkspaceFlowByKey(workspaceId: string, key: WorkspaceFlowKey) {
   return getWorkspaceFlow(workspaceId).find((item) => item.key === key) ?? null
+}
+
+export function getWorkspaceNavigationSections(workspaceId: string): WorkspaceFlowNavigationSection[] {
+  const items = getWorkspaceFlow(workspaceId)
+  const definitions: Array<{ id: WorkspaceFlowNavGroup; label: string }> = [
+    { id: 'primary', label: '主战场' },
+    { id: 'tools', label: '工具页' },
+    { id: 'collaboration', label: '协作层' },
+    { id: 'delivery', label: '输出层' }
+  ]
+
+  return definitions.map((definition) => ({
+    ...definition,
+    items: items.filter((item) => item.navGroup === definition.id)
+  }))
 }
 
 export function getWorkspaceFlowContext(workspaceId: string, pathname: string) {

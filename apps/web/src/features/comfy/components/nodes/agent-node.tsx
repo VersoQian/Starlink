@@ -16,19 +16,18 @@ const AGENT_TYPES = [
 ]
 
 export const AgentNode = memo(function AgentNode({ id }: NodeProps) {
-  const { updateNodeData, getNodeData, executingNodeId } = useComfyStore()
-  const nodeData = getNodeData(id)
+  const updateNodeData = useComfyStore((state) => state.updateNodeData)
+  const nodeData = useComfyStore((state) => state.nodeDataMap.get(id))
+  const isExecuting = useComfyStore((state) => state.executingNodeId === id)
   const [agentType, setAgentType] = useState(nodeData?.agentType || 'data-analyst')
   const [instruction, setInstruction] = useState(nodeData?.systemInstruction || '')
-
-  const isExecuting = executingNodeId === id
 
   useEffect(() => {
     updateNodeData(id, {
       agentType,
       systemInstruction: instruction
     })
-  }, [agentType, instruction, id, updateNodeData])
+  }, [agentType, id, instruction, updateNodeData])
 
   const getStatusBadge = () => {
     if (isExecuting) {
@@ -50,7 +49,7 @@ export const AgentNode = memo(function AgentNode({ id }: NodeProps) {
         position={Position.Left}
         className="w-3 h-3 bg-blue-500 border-2 border-zinc-900"
       />
-      <Card className={`w-80 bg-comfy-node border-comfy-nodeBorder shadow-lg comfy-node ${isExecuting ? 'executing' : ''}`}>
+      <Card className={`w-80 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node ${isExecuting ? 'executing' : ''}`}>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm flex items-center gap-2 text-zinc-100">
             <Bot className="w-4 h-4 text-purple-400" />

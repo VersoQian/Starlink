@@ -86,7 +86,7 @@ export default function SeminarPage({ params }: SeminarPageProps) {
       <header className={cn('rounded-2xl border p-6', theme.colors.border.default, theme.colors.background.card)}>
         <h2 className="text-xl font-semibold">多智能体研讨会</h2>
         <p className={cn('mt-2 text-sm', theme.colors.text.muted)}>
-          基于当前商业画布自动聚合，按“规划-执行-质询-决策”四阶段模拟公司经营研讨。
+          这是 @experts 的详情页之一，用来回看“规划-执行-质询-决策”四阶段的完整协作轨迹。
         </p>
         <p className={cn('mt-2 text-xs', theme.colors.text.muted)}>
           {runtimePhaseText}
@@ -94,16 +94,22 @@ export default function SeminarPage({ params }: SeminarPageProps) {
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link
+            href={`/workspace/${params.workspaceId}/experts`}
+            className={cn('rounded-lg border px-3 py-1.5 text-xs', theme.colors.border.default, theme.colors.interactive.hover)}
+          >
+            返回 Experts Hub
+          </Link>
+          <Link
             href={`/workspace/${params.workspaceId}/agents`}
             className={cn('rounded-lg border px-3 py-1.5 text-xs', theme.colors.border.default, theme.colors.interactive.hover)}
           >
             查看 Agent 页面
           </Link>
           <Link
-            href={`/workspace/${params.workspaceId}/comfy`}
+            href={`/workspace/${params.workspaceId}/canvas`}
             className={cn('rounded-lg border px-3 py-1.5 text-xs', theme.colors.border.default, theme.colors.interactive.hover)}
           >
-            回到商业画布
+            回到智慧画布
           </Link>
         </div>
       </header>

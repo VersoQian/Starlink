@@ -48,8 +48,10 @@ const DOMAIN_COLORS: Record<CCBMCDomain, { main: string; light: string; accent: 
 }
 
 export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps) {
-  const { getMacraNode, updateMacraNode, openDetailPanel } = useComfyStore()
-  const nodeData = getMacraNode(id) || (data as MacraNodeData)
+  const macraNode = useComfyStore((state) => state.macraNodes.get(id))
+  const updateMacraNode = useComfyStore((state) => state.updateMacraNode)
+  const openDetailPanel = useComfyStore((state) => state.openDetailPanel)
+  const nodeData = macraNode || (data as MacraNodeData)
 
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(nodeData?.content || '')

@@ -9,8 +9,8 @@ import { useComfyStore } from '../../store'
 import { FileIcon, Upload } from 'lucide-react'
 
 export const ResourceNode = memo(function ResourceNode({ id }: NodeProps) {
-  const { updateNodeData, getNodeData } = useComfyStore()
-  const nodeData = getNodeData(id)
+  const updateNodeData = useComfyStore((state) => state.updateNodeData)
+  const nodeData = useComfyStore((state) => state.nodeDataMap.get(id))
   const [isDragging, setIsDragging] = useState(false)
 
   const handleDrop = useCallback((e: React.DragEvent) => {

@@ -14,8 +14,8 @@ const CONFIDENCE_STYLES = {
 }
 
 export const DataSourceNode = memo(function DataSourceNode({ id, data }: NodeProps) {
-  const { getMacraNode } = useComfyStore()
-  const nodeData = getMacraNode(id) || (data as MacraNodeData)
+  const macraNode = useComfyStore((state) => state.macraNodes.get(id))
+  const nodeData = macraNode || (data as MacraNodeData)
   const [isHovered, setIsHovered] = useState(false)
 
   const confidence = nodeData?.metadata?.confidence

@@ -1,29 +1,38 @@
 import type { CanvasEdge, CanvasGraph, WorkspaceMetadataUpdateInput, CanvasNode, CommunityPostInput, ConversationEvent, PracticeSessionInput, WorkspaceDirectoryItem, WorkspaceMetadataHistoryEntry, WorkspaceAsset } from '@starlink/shared';
-import type { ConversationEventBus } from './conversation-event-bus.js';
+import { BusinessLangGraphService } from '../services/business-langgraph.js';
+import type { ConversationEventBus, ConversationEventFilter } from './conversation-event-bus.js';
 import type { ConversationRecord, ConversationRuntimeRepository } from './conversation-runtime-repository.js';
 export type ConversationStoreDeps = {
     eventBus: ConversationEventBus;
     runtimeRepository: ConversationRuntimeRepository;
+    businessLangGraphService?: BusinessLangGraphService;
 };
 export declare class ConversationStore {
     private readonly eventBus;
     private readonly runtimeRepository;
+    private readonly sessionStore;
+    private readonly graphStore;
+    private readonly assetStore;
+    private readonly eventStore;
+    private readonly businessLangGraphService;
     private readonly pendingDecisionTimeouts;
     private readonly pendingDecisionResolvers;
     private readonly hitlEnabled;
     private readonly hitlApprovalTimeoutMs;
-    constructor({ eventBus, runtimeRepository }: ConversationStoreDeps);
+    constructor({ eventBus, runtimeRepository, businessLangGraphService }: ConversationStoreDeps);
     startConversation(workspaceId: string, userId: string, question: string): Promise<ConversationRecord>;
-    getConversation(id: string): Promise<ConversationRecord | null>;
-    listConversationRuntimeEvents(workspaceId: string, conversationId?: string): Promise<ConversationEvent[]>;
-    getGraph(workspaceId: string): Promise<CanvasGraph>;
+    getConversation(id: string, userId?: string): Promise<ConversationRecord | null>;
+    listConversationRuntimeEvents(workspaceId: string, userId: string, conversationId?: string): Promise<ConversationEvent[]>;
+    assertWorkspaceAccess(workspaceId: string, userId: string, requiredPermission: 'workspace.read' | 'workspace.write' | 'workspace.publish' | 'workspace.manage'): Promise<void>;
+    assertConversationScope(workspaceId: string, userId: string, conversationId?: string): Promise<void>;
+    getGraph(workspaceId: string, userId?: string): Promise<CanvasGraph>;
     listWorkspaces(userId: string): Promise<WorkspaceDirectoryItem[]>;
-    listWorkspaceHistory(workspaceId: string): Promise<WorkspaceMetadataHistoryEntry[]>;
+    listWorkspaceHistory(workspaceId: string, userId: string): Promise<WorkspaceMetadataHistoryEntry[]>;
     updateWorkspace(input: WorkspaceMetadataUpdateInput, userId: string): Promise<WorkspaceDirectoryItem>;
-    listWorkspaceAssets(workspaceId: string): Promise<WorkspaceAsset[]>;
+    listWorkspaceAssets(workspaceId: string, userId: string): Promise<WorkspaceAsset[]>;
     saveCommunityPost(input: CommunityPostInput, userId: string): Promise<WorkspaceAsset>;
     savePracticeSession(input: PracticeSessionInput, userId: string): Promise<WorkspaceAsset>;
-    addNode(workspaceId: string, input: {
+    addNode(workspaceId: string, userId: string, input: {
         id?: string;
         type: string;
         position: {
@@ -32,19 +41,21 @@ export declare class ConversationStore {
         };
         data: unknown;
     }): Promise<CanvasNode>;
-    connectNodes(workspaceId: string, input: {
+    connectNodes(workspaceId: string, userId: string, input: {
         id?: string;
         source: string;
         target: string;
         label?: string | null;
     }): Promise<CanvasEdge>;
-    private persistGraphState;
-    getEventIterator(): AsyncIterable<{
+    getEventIterator(filter: ConversationEventFilter): AsyncIterable<{
         conversationProgress: ConversationEvent;
     }>;
     close(): Promise<void>;
-    approveDecision(conversationId: string, decision?: string): Promise<boolean>;
+    approveDecision(conversationId: string, userId: string, decision?: string): Promise<boolean>;
     private runConversationStream;
     private publishEvent;
     private waitForDecisionApproval;
+    private assertPermissionFromMetadata;
+    private assertWorkspacePermission;
+    private assertConversationBelongsToWorkspace;
 }

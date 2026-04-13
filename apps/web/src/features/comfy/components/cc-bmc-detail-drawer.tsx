@@ -1,22 +1,26 @@
 'use client'
 
+import { useState } from 'react'
 import { useComfyStore } from '../store'
 import { X, FileText, MessageSquare, Edit3, Link2, Sparkles } from 'lucide-react'
-import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { QuizPanel, type QuizQuestion } from './quiz-panel'
 
 type TabType = 'overview' | 'quiz' | 'edit' | 'resources'
 
 export function CCBMCDetailDrawer() {
-  const { detailPanel, closeDetailPanel, getMacraNode } = useComfyStore()
+  const detailPanel = useComfyStore((state) => state.detailPanel)
+  const closeDetailPanel = useComfyStore((state) => state.closeDetailPanel)
+  const nodeData = useComfyStore((state) => {
+    if (!state.detailPanel?.nodeId) return null
+    return state.macraNodes.get(state.detailPanel.nodeId) ?? null
+  })
   const [activeTab, setActiveTab] = useState<TabType>('overview')
 
   if (!detailPanel?.isOpen || !detailPanel?.nodeId) {
     return null
   }
 
-  const nodeData = getMacraNode(detailPanel.nodeId)
   const nodeWithDetails = nodeData as (typeof nodeData & { summary?: string; fullContent?: string }) | null
 
   if (!nodeData) {

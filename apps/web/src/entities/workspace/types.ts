@@ -5,6 +5,7 @@ export type WorkspaceModuleId =
   | 'translate'
   | 'deep-research'
   | 'insights'
+  | 'experts'
   | 'canvas'
   | 'comfy'
   | 'agents'

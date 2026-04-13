@@ -149,8 +149,8 @@ interface ChatMessage {
 }
 
 export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeProps) {
-  const { getMacraNode } = useComfyStore()
-  const nodeData = getMacraNode(id) || (data as MacraNodeData)
+  const macraNode = useComfyStore((state) => state.macraNodes.get(id))
+  const nodeData = macraNode || (data as MacraNodeData)
 
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])

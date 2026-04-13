@@ -85,7 +85,7 @@ export const CanvasNoteNode = memo(function CanvasNoteNode({ data }: NodeProps<C
   return (
     <>
       <Handle type="target" position={Position.Left} className="w-3 h-3 bg-blue-500 border-2 border-zinc-900" />
-      <Card className="w-96 bg-comfy-node border-comfy-nodeBorder shadow-lg comfy-node">
+      <Card className="w-96 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm text-zinc-100">{title}</CardTitle>
         </CardHeader>

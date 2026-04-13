@@ -11,9 +11,11 @@
     "start": "node dist/index.js",
     "clean": "rimraf dist",
     "lint": "tsc --noEmit",
+    "test": "pnpm --filter @starlink/shared build && pnpm run build && node --test dist/**/*.test.js",
+    "smoke:access-subscriptions": "pnpm run build && node dist/scripts/smoke-access-subscriptions.js",
     "smoke:task-events": "pnpm run build && node dist/scripts/smoke-task-event-store.js",
     "smoke:conversation-runtime": "pnpm run build && node dist/scripts/smoke-conversation-runtime-store.js",
-    "smoke:all": "pnpm run build && node dist/scripts/smoke-task-event-store.js && node dist/scripts/smoke-conversation-runtime-store.js"
+    "smoke:all": "pnpm run build && node dist/scripts/smoke-task-event-store.js && node dist/scripts/smoke-conversation-runtime-store.js && node dist/scripts/smoke-access-subscriptions.js"
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",

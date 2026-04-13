@@ -15,6 +15,7 @@ export type ConversationRecord = {
 
 export type PendingApprovalData = {
   conversationId: string
+  workspaceId: string
   decision: string
   createdAt: string
   timeoutMs: number

@@ -65,8 +65,8 @@ const config: Config = {
         slate: {
           950: '#020617'
         },
-        // ComfyUI深色调色板
-        comfy: {
+        // Business canvas dark palette
+        graph: {
           canvas: '#1a1a1a',
           grid: '#2a2a2a',
           node: '#2d2d2d',

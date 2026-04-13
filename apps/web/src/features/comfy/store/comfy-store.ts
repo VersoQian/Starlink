@@ -3,6 +3,7 @@ import { addEdge, applyEdgeChanges, applyNodeChanges } from 'reactflow'
 import type { Node, Edge, Connection, NodeChange, EdgeChange } from 'reactflow'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import { watchConversation } from '@/shared/lib/conversation-sync-engine'
+import { fetchWorkspaceGraphSnapshot } from '@/features/workspace/hooks/use-workspace-graph'
 import type {
   MacraNodeData,
   MacraEdgeData,
@@ -43,6 +44,14 @@ type KnowledgeEvidence = {
   score?: number
 }
 
+const createInitialChatMessages = (): ChatMessage[] => [
+  {
+    role: 'assistant',
+    content: '你好！我是你的 AI 商业顾问。描述你的想法，让我们一起将它可视化。',
+    timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+]
+
 const START_CONVERSATION_MUTATION = /* GraphQL */ `
   mutation StartConversation($workspaceId: ID!, $question: String!) {
     startConversation(workspaceId: $workspaceId, question: $question) {
@@ -72,6 +81,13 @@ const START_CONVERSATION_MUTATION = /* GraphQL */ `
 `
 
 let activeSubscription: (() => void) | null = null
+let activeConversationId: string | null = null
+
+const APPROVE_DECISION_MUTATION = /* GraphQL */ `
+  mutation ApproveDecision($conversationId: ID!, $decision: String) {
+    approveDecision(conversationId: $conversationId, decision: $decision)
+  }
+`
 
 const MACRA_NODE_TYPES = new Set([
   'agent-avatar',
@@ -143,6 +159,11 @@ interface MacraState {
   isCriticProcessing: boolean
   lastCriticRun: number | null
 
+  // 研讨会轮次状态
+  roundNumber: number
+  maxRounds: number
+  pendingInterrupt: { decision: string; conflicts: unknown[] } | null
+
   // 详情面板状态
   detailPanel: {
     isOpen: boolean
@@ -154,8 +175,11 @@ interface MacraState {
   setKnowledgeEvidence: (evidence: KnowledgeEvidence[]) => void
 
   // Chat 状态（新增）
+  chatInput: string
   chatMessages: ChatMessage[]
+  setChatInput: (input: string) => void
   setChatMessages: (messages: ChatMessage[] | ((msgs: ChatMessage[]) => ChatMessage[])) => void
+  appendChatMessage: (message: Omit<ChatMessage, 'timestamp'>) => void
 
   setWorkspaceId: (workspaceId: string) => void
 
@@ -186,6 +210,10 @@ interface MacraState {
   // AI Critic 调用（通过 GraphQL 后端自动触发，前端保留手动触发接口）
   callCritic: () => Promise<void>
 
+  // HITL 决策
+  approveDecision: (conversationId: string, decision?: string) => Promise<void>
+  dismissInterrupt: () => void
+
   // 详情面板操作
   openDetailPanel: (nodeId: string) => void
   closeDetailPanel: () => void
@@ -199,7 +227,7 @@ interface MacraState {
 }
 
 export const useComfyStore = create<MacraState>((set, get) => ({
-  workspaceId: 'comfy-default',
+  workspaceId: 'canvas-default',
   nodes: [],
   edges: [],
   nodeDataMap: new Map(),
@@ -209,51 +237,68 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   isOrchestratorProcessing: false,
   isCriticProcessing: false,
   lastCriticRun: null,
+  roundNumber: 0,
+  maxRounds: 3,
+  pendingInterrupt: null,
   knowledgeEvidence: [],
-  chatMessages: [
-    {
-      role: 'assistant',
-      content: '你好！我是你的 AI 商业顾问。描述你的想法，让我们一起将它可视化。',
-      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-    }
-  ],
+  chatInput: '',
+  chatMessages: createInitialChatMessages(),
   detailPanel: {
     isOpen: false,
     nodeId: null
   },
 
   setKnowledgeEvidence: (evidence) => {
+    if (get().knowledgeEvidence === evidence) return
     set({ knowledgeEvidence: evidence })
   },
 
+  setChatInput: (chatInput) => {
+    if (get().chatInput === chatInput) return
+    set({ chatInput })
+  },
+
   setChatMessages: (messages) => {
-    set({
-      chatMessages: typeof messages === 'function' ? messages(get().chatMessages) : messages
-    })
+    const nextMessages = typeof messages === 'function' ? messages(get().chatMessages) : messages
+    if (nextMessages === get().chatMessages) return
+    set({ chatMessages: nextMessages })
+  },
+
+  appendChatMessage: (message) => {
+    get().setChatMessages((currentMessages) => [
+      ...currentMessages,
+      {
+        ...message,
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+    ])
   },
 
   setWorkspaceId: (workspaceId) => {
+    if (get().workspaceId === workspaceId) return
     set({ workspaceId })
   },
 
   setNodes: (nodes) => {
-    set({
-      nodes: typeof nodes === 'function' ? nodes(get().nodes) : nodes
-    })
+    const nextNodes = typeof nodes === 'function' ? nodes(get().nodes) : nodes
+    if (nextNodes === get().nodes) return
+    set({ nodes: nextNodes })
   },
 
   setEdges: (edges) => {
-    set({
-      edges: typeof edges === 'function' ? edges(get().edges) : edges
-    })
+    const nextEdges = typeof edges === 'function' ? edges(get().edges) : edges
+    if (nextEdges === get().edges) return
+    set({ edges: nextEdges })
   },
 
   onNodesChange: (changes) => {
+    if (changes.length === 0) return
     const { nodes } = get()
     set({ nodes: applyNodeChanges(changes, nodes) })
   },
 
   onEdgesChange: (changes) => {
+    if (changes.length === 0) return
     const { edges } = get()
     set({ edges: applyEdgeChanges(changes, edges) })
   },
@@ -270,6 +315,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   updateNodeData: (nodeId, data) => {
     const { nodeDataMap } = get()
     const existingData = nodeDataMap.get(nodeId) || { id: nodeId, status: 'idle' as NodeStatus }
+    const hasChanges = Object.entries(data).some(([key, value]) => existingData[key as keyof NodeData] !== value)
+    if (!hasChanges) return
     const newData = { ...existingData, ...data }
 
     const newMap = new Map(nodeDataMap)
@@ -291,6 +338,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     const { macraNodes } = get()
     const existingNode = macraNodes.get(nodeId)
     if (!existingNode) return
+    const hasChanges = Object.entries(data).some(([key, value]) => existingNode[key as keyof MacraNodeData] !== value)
+    if (!hasChanges) return
 
     const updatedNode = { ...existingNode, ...data }
     const newMap = new Map(macraNodes)
@@ -385,7 +434,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
           break
         }
         default:
-          console.warn('Unknown canvas action:', action.action)
+          break
       }
     }
   },
@@ -404,7 +453,9 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       nodes: [],
       edges: [],
       nodeDataMap: new Map(),
-      macraNodes: new Map()
+      macraNodes: new Map(),
+      roundNumber: 0,
+      pendingInterrupt: null
     })
 
     const workspaceId = get().workspaceId
@@ -423,12 +474,12 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       })
 
       const conversationId = response.startConversation.metadata.id
+      activeConversationId = conversationId
 
       const extractMacraNodeData = (canvasNode: CanvasNode): MacraNodeData | null => {
         const data = (canvasNode.data ?? {}) as Record<string, unknown>
         const meta = data.meta as Record<string, unknown> | undefined
         if (!meta) {
-          console.warn('[extractMacraNodeData] No meta found for node:', canvasNode.id)
           return null
         }
 
@@ -474,25 +525,53 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         })
       }
 
-      const applyDelta = (delta: { nodes?: CanvasNode[]; edges?: CanvasEdge[] }) => {
+      const applyDelta = (delta: {
+        nodes?: CanvasNode[]
+        edges?: CanvasEdge[]
+        removedNodeIds?: string[]
+        removedEdgeIds?: string[]
+      }) => {
         const nodeUpdates = delta.nodes?.map(mapCanvasNodeToReactFlow)
         const edgeUpdates = delta.edges?.map(mapCanvasEdgeToReactFlow)
 
         set((state) => {
           const newMacraNodes = new Map(state.macraNodes)
+          let detectedRound = state.roundNumber
 
-          // 同时更新 macraNodes Map
+          delta.removedNodeIds?.forEach((nodeId) => {
+            newMacraNodes.delete(nodeId)
+          })
+
+          // 同时更新 macraNodes Map 并检测轮次
           delta.nodes?.forEach(node => {
             const macraData = extractMacraNodeData(node)
             if (macraData) {
               newMacraNodes.set(node.id, macraData)
+              // 从 metadata.tags 中检测轮次 (round-N)
+              const tags = macraData.metadata?.tags as string[] | undefined
+              if (tags) {
+                for (const tag of tags) {
+                  const match = tag.match(/^round-(\d+)$/)
+                  if (match) {
+                    const round = Number(match[1])
+                    if (round > detectedRound) detectedRound = round
+                  }
+                }
+              }
             }
           })
 
           return {
-            nodes: nodeUpdates ? mergeById(state.nodes, nodeUpdates) : state.nodes,
-            edges: edgeUpdates ? mergeById(state.edges, edgeUpdates) : state.edges,
-            macraNodes: newMacraNodes
+            nodes: mergeById(
+              delta.removedNodeIds ? state.nodes.filter((node) => !delta.removedNodeIds?.includes(node.id)) : state.nodes,
+              nodeUpdates
+            ),
+            edges: mergeById(
+              delta.removedEdgeIds ? state.edges.filter((edge) => !delta.removedEdgeIds?.includes(edge.id)) : state.edges,
+              edgeUpdates
+            ),
+            macraNodes: newMacraNodes,
+            roundNumber: detectedRound
           }
         })
       }
@@ -502,13 +581,20 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       }
 
       const watcher = watchConversation({
+        workspaceId,
         conversationId,
         onGraphAppended: (payload) => {
           applyGraph(payload as WorkspaceGraphResponse)
         },
         onGraphDiff: (payload) => {
-          applyDelta(payload as { nodes?: CanvasNode[]; edges?: CanvasEdge[] })
-        }
+          applyDelta(payload as {
+            nodes?: CanvasNode[]
+            edges?: CanvasEdge[]
+            removedNodeIds?: string[]
+            removedEdgeIds?: string[]
+          })
+        },
+        loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId)
       })
       activeSubscription = watcher.cancel
       await watcher.done.finally(() => {
@@ -616,6 +702,25 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       set({ isCriticProcessing: false })
       throw error
     }
+  },
+
+  // ============== HITL 决策 ==============
+  approveDecision: async (conversationId, decision) => {
+    try {
+      const client = getGraphQLClient()
+      await client.request(APPROVE_DECISION_MUTATION, {
+        conversationId,
+        decision: decision ?? null
+      })
+      set({ pendingInterrupt: null })
+    } catch (error) {
+      console.error('❌ 决策审批失败:', error)
+      throw error
+    }
+  },
+
+  dismissInterrupt: () => {
+    set({ pendingInterrupt: null })
   },
 
   // ============== 详情面板操作 ==============
@@ -754,14 +859,11 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       isOrchestratorProcessing: false,
       isCriticProcessing: false,
       lastCriticRun: null,
+      roundNumber: 0,
+      pendingInterrupt: null,
       knowledgeEvidence: [],
-      chatMessages: [
-        {
-          role: 'assistant',
-          content: '你好！我是你的 AI 商业顾问。描述你的想法，让我们一起将它可视化。',
-          timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-        }
-      ],
+      chatInput: '',
+      chatMessages: createInitialChatMessages(),
       detailPanel: {
         isOpen: false,
         nodeId: null

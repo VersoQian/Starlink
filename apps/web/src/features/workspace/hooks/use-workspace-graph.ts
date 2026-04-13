@@ -5,7 +5,7 @@ import { workspaceKeys } from '@/core/query/keys'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import { type WorkspaceGraphResponse } from '@/types/graph'
 
-const WORKSPACE_GRAPH_QUERY = /* GraphQL */ `
+export const WORKSPACE_GRAPH_QUERY = /* GraphQL */ `
   query WorkspaceGraph($workspaceId: ID!) {
     workspaceGraph(workspaceId: $workspaceId) {
       workspaceId
@@ -28,15 +28,17 @@ const WORKSPACE_GRAPH_QUERY = /* GraphQL */ `
   }
 `
 
+export async function fetchWorkspaceGraphSnapshot(workspaceId: string): Promise<WorkspaceGraphResponse> {
+  const client = getGraphQLClient()
+  const data = await client.request<{ workspaceGraph: WorkspaceGraphResponse }>(WORKSPACE_GRAPH_QUERY, {
+    workspaceId
+  })
+  return data.workspaceGraph
+}
+
 export function useWorkspaceGraph(workspaceId: string): UseQueryResult<WorkspaceGraphResponse> {
   return useQuery({
     queryKey: workspaceKeys.graph(workspaceId),
-    queryFn: async () => {
-      const client = getGraphQLClient()
-      const data = await client.request<{ workspaceGraph: WorkspaceGraphResponse }>(WORKSPACE_GRAPH_QUERY, {
-        workspaceId
-      })
-      return data.workspaceGraph
-    }
+    queryFn: async () => fetchWorkspaceGraphSnapshot(workspaceId)
   })
 }

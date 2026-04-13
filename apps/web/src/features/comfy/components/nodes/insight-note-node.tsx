@@ -8,8 +8,9 @@ import { Lightbulb, Edit3, Check, X, Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
 export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeProps) {
-  const { getMacraNode, updateMacraNode } = useComfyStore()
-  const nodeData = getMacraNode(id) || (data as MacraNodeData)
+  const macraNode = useComfyStore((state) => state.macraNodes.get(id))
+  const updateMacraNode = useComfyStore((state) => state.updateMacraNode)
+  const nodeData = macraNode || (data as MacraNodeData)
 
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(nodeData?.content || '')
@@ -22,7 +23,7 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
       label: editedLabel
     })
     setIsEditing(false)
-  }, [id, editedContent, editedLabel, updateMacraNode])
+  }, [editedContent, editedLabel, id, updateMacraNode])
 
   const handleCancel = useCallback(() => {
     setEditedContent(nodeData?.content || '')

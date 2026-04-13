@@ -21,44 +21,54 @@ import {
   conversationMetadataSchema
 } from '@starlink/shared'
 import { BusinessLangGraphService, type BusinessStreamUpdate, type GraphDelta } from '../services/business-langgraph.js'
-import { loadPersistedGraph, persistCanvasGraph } from './canvas-persistence.js'
-import type { ConversationEventBus } from './conversation-event-bus.js'
+import type { ConversationEventBus, ConversationEventFilter } from './conversation-event-bus.js'
 import type {
   ConversationRecord,
   ConversationRuntimeRepository,
   PendingApprovalData
 } from './conversation-runtime-repository.js'
+import { ConversationSessionStore } from './conversation-session-store.js'
+import { WorkspaceGraphStore } from './workspace-graph-store.js'
+import { WorkspaceAssetStore } from './workspace-asset-store.js'
+import { RuntimeEventStore } from './runtime-event-store.js'
+import { applyGraphDelta } from './graph-delta.js'
 import {
   getWorkspaceMetadata as getWorkspaceMetadataPg,
   listWorkspaceMetadata as listWorkspaceMetadataPg,
   listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryPg,
-  resolveViewerPermissions as resolveViewerPermissionsPg,
   updateWorkspaceMetadata as updateWorkspaceMetadataPg
 } from './workspace-metadata-pg-store.js'
 import {
   getWorkspaceMetadata as getWorkspaceMetadataFile,
   listWorkspaceMetadata as listWorkspaceMetadataFile,
   listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryFile,
-  resolveViewerPermissions as resolveViewerPermissionsFile,
   updateWorkspaceMetadata as updateWorkspaceMetadataFile
 } from './workspace-metadata-store.js'
+import {
+  getViewerPermissions,
+  requireWorkspacePermission,
+  type WorkspaceMetadataRecord
+} from './workspace-access.js'
 
 const usePg = (process.env.WORKSPACE_METADATA_DRIVER ?? 'pg') === 'pg'
 const getWorkspaceMetadata = usePg ? getWorkspaceMetadataPg : getWorkspaceMetadataFile
 const listWorkspaceMetadata = usePg ? listWorkspaceMetadataPg : listWorkspaceMetadataFile
 const listWorkspaceMetadataHistory = usePg ? listWorkspaceMetadataHistoryPg : listWorkspaceMetadataHistoryFile
-const resolveViewerPermissions = usePg ? resolveViewerPermissionsPg : resolveViewerPermissionsFile
 const updateWorkspaceMetadata = usePg ? updateWorkspaceMetadataPg : updateWorkspaceMetadataFile
 export type ConversationStoreDeps = {
   eventBus: ConversationEventBus
   runtimeRepository: ConversationRuntimeRepository
+  businessLangGraphService?: BusinessLangGraphService
 }
-
-const businessLangGraphService = new BusinessLangGraphService()
 
 export class ConversationStore {
   private readonly eventBus: ConversationEventBus
   private readonly runtimeRepository: ConversationRuntimeRepository
+  private readonly sessionStore: ConversationSessionStore
+  private readonly graphStore: WorkspaceGraphStore
+  private readonly assetStore: WorkspaceAssetStore
+  private readonly eventStore: RuntimeEventStore
+  private readonly businessLangGraphService: BusinessLangGraphService
   private readonly pendingDecisionTimeouts = new Map<string, NodeJS.Timeout>()
   private readonly pendingDecisionResolvers = new Map<string, (decision: string) => void>()
   private readonly hitlEnabled = process.env.HITL_ENABLED === 'true'
@@ -66,10 +76,16 @@ export class ConversationStore {
 
   constructor({
     eventBus,
-    runtimeRepository
+    runtimeRepository,
+    businessLangGraphService = new BusinessLangGraphService()
   }: ConversationStoreDeps) {
     this.eventBus = eventBus
     this.runtimeRepository = runtimeRepository
+    this.businessLangGraphService = businessLangGraphService
+    this.sessionStore = new ConversationSessionStore(runtimeRepository)
+    this.graphStore = new WorkspaceGraphStore(runtimeRepository)
+    this.assetStore = new WorkspaceAssetStore(runtimeRepository)
+    this.eventStore = new RuntimeEventStore(runtimeRepository, eventBus)
   }
 
   async startConversation(
@@ -77,6 +93,9 @@ export class ConversationStore {
     userId: string,
     question: string
   ): Promise<ConversationRecord> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
+    const existingGraph = await this.getGraph(workspaceId)
+
     const id = nanoid()
     const startedAt = new Date()
     const metadata: ConversationMetadata = {
@@ -89,22 +108,19 @@ export class ConversationStore {
 
     const record: ConversationRecord = {
       metadata,
-      graph: {
-        workspaceId,
-        nodes: [],
-        edges: []
-      },
+      graph: existingGraph,
       knowledgeEvidence: []
     }
 
-    await this.runtimeRepository.createConversation(id, record)
-    await this.runtimeRepository.setWorkspaceGraph(workspaceId, record.graph)
+    await this.sessionStore.createConversation(id, record)
+    await this.graphStore.setWorkspaceGraph(workspaceId, record.graph)
 
-    const stream = businessLangGraphService.streamConversation({
+    const stream = this.businessLangGraphService.streamConversation({
       workspaceId,
       userId,
       question,
-      traceId: id
+      traceId: id,
+      baseGraph: existingGraph
     })
     let initialized = false
 
@@ -114,9 +130,9 @@ export class ConversationStore {
         initialized = true
         const currentGraph = initResult.value.graph
         record.graph = currentGraph
-        await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph)
-        await this.runtimeRepository.updateConversation(id, record)
-        await this.persistGraphState(currentGraph)
+        await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph)
+        await this.sessionStore.updateConversation(id, record)
+        await this.graphStore.persistGraph(currentGraph)
         const baseEvent: ConversationEvent = {
           type: 'graph/appended',
           conversationId: id,
@@ -138,7 +154,7 @@ export class ConversationStore {
         status: 'failed',
         updatedAt: new Date()
       }
-      await this.runtimeRepository.updateConversation(id, record)
+      await this.sessionStore.updateConversation(id, record)
       return record
     }
 
@@ -155,9 +171,12 @@ export class ConversationStore {
     return record
   }
 
-  async getConversation(id: string): Promise<ConversationRecord | null> {
-    const record = await this.runtimeRepository.getConversation(id)
+  async getConversation(id: string, userId?: string): Promise<ConversationRecord | null> {
+    const record = await this.sessionStore.getConversation(id)
     if (!record) return null
+    if (userId) {
+      await this.assertWorkspacePermission(record.graph.workspaceId, userId, 'workspace.read')
+    }
     const metadata = conversationMetadataSchema.parse(record.metadata)
     return {
       ...record,
@@ -165,13 +184,39 @@ export class ConversationStore {
     }
   }
 
-  async listConversationRuntimeEvents(workspaceId: string, conversationId?: string): Promise<ConversationEvent[]> {
-    const events = await this.runtimeRepository.listConversationEvents(workspaceId, conversationId)
+  async listConversationRuntimeEvents(
+    workspaceId: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<ConversationEvent[]> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    if (conversationId) {
+      await this.assertConversationBelongsToWorkspace(workspaceId, conversationId)
+    }
+    const events = await this.eventStore.listConversationEvents(workspaceId, conversationId)
     return events.map((event) => conversationEventSchema.parse(event))
   }
 
-  async getGraph(workspaceId: string): Promise<CanvasGraph> {
-    const manualGraph = await this.runtimeRepository.getWorkspaceGraph(workspaceId)
+  async assertWorkspaceAccess(
+    workspaceId: string,
+    userId: string,
+    requiredPermission: 'workspace.read' | 'workspace.write' | 'workspace.publish' | 'workspace.manage'
+  ) {
+    await this.assertWorkspacePermission(workspaceId, userId, requiredPermission)
+  }
+
+  async assertConversationScope(workspaceId: string, userId: string, conversationId?: string) {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    if (!conversationId) return
+    await this.assertConversationBelongsToWorkspace(workspaceId, conversationId)
+  }
+
+  async getGraph(workspaceId: string, userId?: string): Promise<CanvasGraph> {
+    if (userId) {
+      await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    }
+
+    const manualGraph = await this.graphStore.getWorkspaceGraph(workspaceId)
     if (manualGraph) {
       return {
         workspaceId: manualGraph.workspaceId,
@@ -180,10 +225,10 @@ export class ConversationStore {
       }
     }
 
-    const workspaceConversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId)
+    const workspaceConversations = await this.sessionStore.getConversationsByWorkspace(workspaceId)
     const existing = workspaceConversations[0]?.record
     if (existing) {
-      await this.runtimeRepository.setWorkspaceGraph(workspaceId, existing.graph)
+      await this.graphStore.setWorkspaceGraph(workspaceId, existing.graph)
       return {
         workspaceId,
         nodes: [...existing.graph.nodes],
@@ -191,9 +236,9 @@ export class ConversationStore {
       }
     }
 
-    const persistedGraph = await loadPersistedGraph(workspaceId)
+    const persistedGraph = await this.graphStore.loadPersistedGraph(workspaceId)
     if (persistedGraph) {
-      await this.runtimeRepository.setWorkspaceGraph(workspaceId, persistedGraph)
+      await this.graphStore.setWorkspaceGraph(workspaceId, persistedGraph)
       return {
         workspaceId,
         nodes: [...persistedGraph.nodes],
@@ -206,7 +251,7 @@ export class ConversationStore {
       nodes: [],
       edges: []
     }
-    await this.runtimeRepository.setWorkspaceGraph(workspaceId, emptyGraph)
+    await this.graphStore.setWorkspaceGraph(workspaceId, emptyGraph)
     return emptyGraph
   }
 
@@ -222,7 +267,7 @@ export class ConversationStore {
     return await Promise.all([...knownIds].map(async (workspaceId) => {
       const metadata = await getWorkspaceMetadata(workspaceId)
       const runtime = runtimeById.get(workspaceId)
-      const viewerPermissions = resolveViewerPermissions(userId, metadata.members)
+      const viewerPermissions = getViewerPermissions(userId, metadata.members)
       return {
         workspaceId,
         name: metadata.name,
@@ -236,25 +281,31 @@ export class ConversationStore {
         status: runtime?.status ?? 'draft',
         updatedAt: runtime?.updatedAt ?? new Date().toISOString()
       }
-    }))
+    })).then((items) => items.filter((workspace) => workspace.viewerPermissions.length > 0))
   }
 
-  async listWorkspaceHistory(workspaceId: string): Promise<WorkspaceMetadataHistoryEntry[]> {
+  async listWorkspaceHistory(workspaceId: string, userId: string): Promise<WorkspaceMetadataHistoryEntry[]> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
     return await listWorkspaceMetadataHistory(workspaceId)
   }
 
   async updateWorkspace(input: WorkspaceMetadataUpdateInput, userId: string): Promise<WorkspaceDirectoryItem> {
     const currentMetadata = await getWorkspaceMetadata(input.workspaceId)
-    const viewerPermissions = resolveViewerPermissions(userId, currentMetadata.members)
-    if (!viewerPermissions.includes('workspace.manage')) {
-      throw new Error('FORBIDDEN_WORKSPACE_METADATA')
+    let viewerPermissions: string[]
+    try {
+      viewerPermissions = this.assertPermissionFromMetadata(currentMetadata, userId, 'workspace.manage')
+    } catch (error) {
+      if (error instanceof Error && error.message === 'FORBIDDEN_WORKSPACE') {
+        throw new Error('FORBIDDEN_WORKSPACE_METADATA')
+      }
+      throw error
     }
 
     const { workspace: metadata } = await updateWorkspaceMetadata(input, userId)
     const runtime = (await this.runtimeRepository.listWorkspaces()).find(
       (workspace) => workspace.workspaceId === input.workspaceId
     )
-    const nextViewerPermissions = resolveViewerPermissions(userId, metadata.members)
+    const nextViewerPermissions = getViewerPermissions(userId, metadata.members)
 
     return {
       workspaceId: metadata.workspaceId,
@@ -271,11 +322,14 @@ export class ConversationStore {
     }
   }
 
-  async listWorkspaceAssets(workspaceId: string): Promise<WorkspaceAsset[]> {
-    return await this.runtimeRepository.listWorkspaceAssets(workspaceId)
+  async listWorkspaceAssets(workspaceId: string, userId: string): Promise<WorkspaceAsset[]> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    return await this.assetStore.listWorkspaceAssets(workspaceId)
   }
 
   async saveCommunityPost(input: CommunityPostInput, userId: string): Promise<WorkspaceAsset> {
+    await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write')
+
     const createdAt = new Date().toISOString()
     const postId = nanoid()
     const asset: WorkspaceAsset = {
@@ -307,14 +361,16 @@ export class ConversationStore {
       updatedAt: createdAt
     }
 
-    await this.runtimeRepository.upsertWorkspaceAsset(asset)
+    await this.assetStore.upsertWorkspaceAsset(asset)
     return asset
   }
 
   async savePracticeSession(input: PracticeSessionInput, userId: string): Promise<WorkspaceAsset> {
+    await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write')
+
     const updatedAt = input.lastUpdated ?? new Date().toISOString()
     const assetId = `practice:${input.workspaceId}:${input.scenarioId}`
-    const current = (await this.runtimeRepository.listWorkspaceAssets(input.workspaceId))
+    const current = (await this.assetStore.listWorkspaceAssets(input.workspaceId))
       .find((asset) => asset.assetId === assetId)
     const asset: WorkspaceAsset = {
       assetId,
@@ -345,14 +401,17 @@ export class ConversationStore {
       updatedAt
     }
 
-    await this.runtimeRepository.upsertWorkspaceAsset(asset)
+    await this.assetStore.upsertWorkspaceAsset(asset)
     return asset
   }
 
   async addNode(
     workspaceId: string,
+    userId: string,
     input: { id?: string; type: string; position: { x: number; y: number }; data: unknown }
   ): Promise<CanvasNode> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
+
     const id = input.id ?? nanoid()
     const parsed = canvasNodeSchema.parse({
       id,
@@ -370,10 +429,10 @@ export class ConversationStore {
       edges: baseGraph.edges
     }
 
-    await this.runtimeRepository.setWorkspaceGraph(workspaceId, updatedGraph)
-    await this.persistGraphState(updatedGraph)
+    await this.graphStore.setWorkspaceGraph(workspaceId, updatedGraph)
+    await this.graphStore.persistGraph(updatedGraph)
 
-    const conversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId)
+    const conversations = await this.sessionStore.getConversationsByWorkspace(workspaceId)
     for (const item of conversations) {
       const nextRecord: ConversationRecord = {
         ...item.record,
@@ -382,7 +441,7 @@ export class ConversationStore {
           nodes: updatedNodes
         }
       }
-      await this.runtimeRepository.updateConversation(item.id, nextRecord)
+      await this.sessionStore.updateConversation(item.id, nextRecord)
     }
 
     return parsed
@@ -390,8 +449,11 @@ export class ConversationStore {
 
   async connectNodes(
     workspaceId: string,
+    userId: string,
     input: { id?: string; source: string; target: string; label?: string | null }
   ): Promise<CanvasEdge> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
+
     const id = input.id ?? nanoid()
     const parsed = canvasEdgeSchema.parse({
       id,
@@ -408,10 +470,10 @@ export class ConversationStore {
       edges: updatedEdges
     }
 
-    await this.runtimeRepository.setWorkspaceGraph(workspaceId, updatedGraph)
-    await this.persistGraphState(updatedGraph)
+    await this.graphStore.setWorkspaceGraph(workspaceId, updatedGraph)
+    await this.graphStore.persistGraph(updatedGraph)
 
-    const conversations = await this.runtimeRepository.getConversationsByWorkspace(workspaceId)
+    const conversations = await this.sessionStore.getConversationsByWorkspace(workspaceId)
     for (const item of conversations) {
       const nextRecord: ConversationRecord = {
         ...item.record,
@@ -420,22 +482,14 @@ export class ConversationStore {
           edges: updatedEdges
         }
       }
-      await this.runtimeRepository.updateConversation(item.id, nextRecord)
+      await this.sessionStore.updateConversation(item.id, nextRecord)
     }
 
     return parsed
   }
 
-  private async persistGraphState(graph: CanvasGraph) {
-    try {
-      await persistCanvasGraph(graph)
-    } catch (error) {
-      console.error('Failed to persist canvas graph', error)
-    }
-  }
-
-  getEventIterator() {
-    return this.eventBus.getEventIterator()
+  getEventIterator(filter: ConversationEventFilter) {
+    return this.eventStore.getEventIterator(filter)
   }
 
   async close() {
@@ -448,11 +502,13 @@ export class ConversationStore {
     await this.eventBus.close()
   }
 
-  async approveDecision(conversationId: string, decision?: string): Promise<boolean> {
-    const pending = await this.runtimeRepository.getPendingApproval(conversationId)
+  async approveDecision(conversationId: string, userId: string, decision?: string): Promise<boolean> {
+    const pending = await this.sessionStore.getPendingApproval(conversationId)
     if (!pending) {
       return false
     }
+
+    await this.assertWorkspacePermission(pending.workspaceId, userId, 'workspace.write')
 
     const nextDecision = (decision ?? '').trim() || pending.decision
     const resolver = this.pendingDecisionResolvers.get(conversationId)
@@ -518,10 +574,10 @@ export class ConversationStore {
         if (update.type === 'init') {
           currentGraph = update.graph
           record.graph = currentGraph
-          await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph)
-          await this.persistGraphState(currentGraph)
+          await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph)
+          await this.graphStore.persistGraph(currentGraph)
           record.knowledgeEvidence = update.knowledgeEvidence ?? []
-          await this.runtimeRepository.updateConversation(conversationId, record)
+          await this.sessionStore.updateConversation(conversationId, record)
           if (!initialized) {
             initialized = true
             const appendedEvent: ConversationEvent = {
@@ -537,15 +593,20 @@ export class ConversationStore {
         if (update.type === 'delta') {
           currentGraph = applyGraphDelta(currentGraph, update.delta)
           record.graph = currentGraph
-          await this.runtimeRepository.setWorkspaceGraph(workspaceId, currentGraph)
-          await this.runtimeRepository.updateConversation(conversationId, record)
-          await this.persistGraphState(currentGraph)
+          await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph)
+          await this.sessionStore.updateConversation(conversationId, record)
+          await this.graphStore.persistGraph(currentGraph)
 
           const event: ConversationEvent = initialized
             ? {
                 type: 'graph/diff',
-                conversationId,
-                payload: { nodes: update.delta.nodes, edges: update.delta.edges }
+              conversationId,
+              payload: {
+                nodes: update.delta.nodes,
+                edges: update.delta.edges,
+                removedNodeIds: update.delta.removedNodeIds,
+                removedEdgeIds: update.delta.removedEdgeIds
+              }
               }
             : {
                 type: 'graph/appended',
@@ -583,6 +644,36 @@ export class ConversationStore {
         }
 
         if (update.type === 'status') {
+          continue
+        }
+
+        if (update.type === 'interrupt') {
+          if (this.hitlEnabled) {
+            const userDecision = await this.waitForDecisionApproval({
+              conversationId,
+              workspaceId,
+              decision: update.decision,
+              record
+            })
+
+            record.metadata = {
+              ...record.metadata,
+              status: 'running',
+              updatedAt: new Date()
+            }
+            await this.sessionStore.updateConversation(conversationId, record)
+
+            await publishEvent({
+              type: 'seminar.decision.made',
+              conversationId,
+              payload: {
+                workspaceId,
+                phase: 'decision' as const,
+                decision: userDecision,
+                occurredAt: new Date().toISOString()
+              }
+            })
+          }
           continue
         }
       }
@@ -626,7 +717,7 @@ export class ConversationStore {
         status: 'completed',
         updatedAt: new Date()
       }
-      await this.runtimeRepository.updateConversation(conversationId, record)
+      await this.sessionStore.updateConversation(conversationId, record)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const stack = error instanceof Error ? error.stack : undefined
@@ -647,15 +738,15 @@ export class ConversationStore {
         status: 'failed',
         updatedAt: new Date()
       }
-      await this.runtimeRepository.updateConversation(conversationId, record)
+      await this.sessionStore.updateConversation(conversationId, record)
     }
   }
 
   private async publishEvent(workspaceId: string, event: ConversationEvent) {
     if (shouldPersistRuntimeEvent(event)) {
-      await this.runtimeRepository.appendConversationEvent(workspaceId, event)
+      await this.eventStore.appendConversationEvent(workspaceId, event)
     }
-    await this.eventBus.publish(event)
+    await this.eventStore.publish(workspaceId, event)
   }
 
   private async waitForDecisionApproval(options: {
@@ -681,15 +772,16 @@ export class ConversationStore {
       status: 'paused',
       updatedAt: new Date()
     }
-    await this.runtimeRepository.updateConversation(conversationId, record)
+    await this.sessionStore.updateConversation(conversationId, record)
 
     const approvalData: PendingApprovalData = {
       conversationId,
+      workspaceId,
       decision,
       createdAt: new Date().toISOString(),
       timeoutMs: this.hitlApprovalTimeoutMs
     }
-    await this.runtimeRepository.setPendingApproval(conversationId, approvalData)
+    await this.sessionStore.setPendingApproval(conversationId, approvalData)
 
     return await new Promise<string>((resolve) => {
       const finalize = (nextDecision: string) => {
@@ -699,7 +791,7 @@ export class ConversationStore {
         }
         this.pendingDecisionTimeouts.delete(conversationId)
         this.pendingDecisionResolvers.delete(conversationId)
-        void this.runtimeRepository.deletePendingApproval(conversationId)
+        void this.sessionStore.deletePendingApproval(conversationId)
         resolve(nextDecision)
       }
 
@@ -710,6 +802,31 @@ export class ConversationStore {
       this.pendingDecisionTimeouts.set(conversationId, timeout)
       this.pendingDecisionResolvers.set(conversationId, finalize)
     })
+  }
+
+  private assertPermissionFromMetadata(
+    metadata: WorkspaceMetadataRecord,
+    userId: string,
+    requiredPermission: 'workspace.read' | 'workspace.write' | 'workspace.publish' | 'workspace.manage'
+  ) {
+    return requireWorkspacePermission(userId, metadata, requiredPermission)
+  }
+
+  private async assertWorkspacePermission(
+    workspaceId: string,
+    userId: string,
+    requiredPermission: 'workspace.read' | 'workspace.write' | 'workspace.publish' | 'workspace.manage'
+  ) {
+    const metadata = await getWorkspaceMetadata(workspaceId)
+    return this.assertPermissionFromMetadata(metadata, userId, requiredPermission)
+  }
+
+  private async assertConversationBelongsToWorkspace(workspaceId: string, conversationId: string) {
+    const record = await this.sessionStore.getConversation(conversationId)
+    if (!record) return
+    if (record.graph.workspaceId !== workspaceId) {
+      throw new Error('INVALID_CONVERSATION_SCOPE')
+    }
   }
 }
 
@@ -789,21 +906,4 @@ function findLatestDecision(graph: CanvasGraph): string {
     .filter((item): item is ExtractRuntimeInfo => item !== null)
     .filter((item) => item.stage === 'decision')
   return decisionNodes[decisionNodes.length - 1]?.summary ?? ''
-}
-
-function applyGraphDelta(graph: CanvasGraph, delta: GraphDelta): CanvasGraph {
-  return {
-    workspaceId: graph.workspaceId,
-    nodes: mergeById(graph.nodes, delta.nodes),
-    edges: mergeById(graph.edges, delta.edges)
-  }
-}
-
-function mergeById<T extends { id: string }>(current: T[], updates?: T[]): T[] {
-  if (!updates || updates.length === 0) return current
-  const merged = new Map(current.map((item) => [item.id, item]))
-  for (const item of updates) {
-    merged.set(item.id, item)
-  }
-  return [...merged.values()]
 }

@@ -14,7 +14,7 @@ export const CanvasImageNode = memo(function CanvasImageNode({ data }: NodeProps
   return (
     <>
       <Handle type="target" position={Position.Left} className="w-3 h-3 bg-purple-500 border-2 border-zinc-900" />
-      <Card className="w-80 bg-comfy-node border-comfy-nodeBorder shadow-lg comfy-node">
+      <Card className="w-80 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm text-zinc-100">{data.title}</CardTitle>
         </CardHeader>

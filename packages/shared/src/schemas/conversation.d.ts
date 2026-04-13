@@ -712,6 +712,8 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             target: string;
             label?: string | null | undefined;
         }>, "many">>;
+        removedNodeIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        removedEdgeIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     }, "strip", z.ZodTypeAny, {
         nodes?: {
             type: "note" | "document" | "task" | "reference" | "image" | "web";
@@ -766,6 +768,8 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             target: string;
             label?: string | null | undefined;
         }[] | undefined;
+        removedNodeIds?: string[] | undefined;
+        removedEdgeIds?: string[] | undefined;
     }, {
         nodes?: {
             type: "note" | "document" | "task" | "reference" | "image" | "web";
@@ -820,6 +824,8 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             target: string;
             label?: string | null | undefined;
         }[] | undefined;
+        removedNodeIds?: string[] | undefined;
+        removedEdgeIds?: string[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     type: "graph/diff";
@@ -878,6 +884,8 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             target: string;
             label?: string | null | undefined;
         }[] | undefined;
+        removedNodeIds?: string[] | undefined;
+        removedEdgeIds?: string[] | undefined;
     };
 }, {
     type: "graph/diff";
@@ -936,6 +944,8 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             target: string;
             label?: string | null | undefined;
         }[] | undefined;
+        removedNodeIds?: string[] | undefined;
+        removedEdgeIds?: string[] | undefined;
     };
 }>, z.ZodObject<{
     type: z.ZodLiteral<"status">;

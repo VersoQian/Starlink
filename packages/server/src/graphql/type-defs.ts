@@ -242,6 +242,6 @@ export const typeDefs = gql`
   }
 
   type Subscription {
-    conversationProgress: ConversationEvent!
+    conversationProgress(workspaceId: ID!, conversationId: ID): ConversationEvent!
   }
 `

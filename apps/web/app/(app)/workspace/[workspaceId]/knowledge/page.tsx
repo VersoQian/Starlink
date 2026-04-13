@@ -1,7 +1,9 @@
 'use client'
 
+import Link from 'next/link'
+import type { Route } from 'next'
 import { useEffect, useMemo, useState } from 'react'
-import { useTheme, cn } from '@/lib/theme'
+import { ArrowRightIcon } from '@radix-ui/react-icons'
 import {
   useAddKnowledgeSeed,
   useCreateKnowledgeBase,
@@ -12,20 +14,22 @@ import {
   useKnowledgeBases,
   usePublishKnowledgeBase
 } from '@/features/knowledge/hooks'
+import { ToolHeroCard } from '@/shared/components/tool-page-shell'
 import type { KnowledgeTask } from '@/types/knowledge'
+import { cn } from '@/shared/lib/utils'
 
 const importOptions = [
   {
     id: 'file',
-    title: '从文件导入',
-    description: '上传文档内容，支持 image / pdf / txt / ms-office / audio / video',
-    actionLabel: '选择文件'
+    title: 'Document ingestion',
+    description: 'Upload pdf, office, audio, video or mixed files for OCR and semantic mapping.',
+    actionLabel: 'Select files'
   },
   {
     id: 'link',
-    title: '从网页链接导入',
-    description: '粘贴网页链接即可抓取内容，并提炼核心片段',
-    actionLabel: '输入网址'
+    title: 'Web extraction',
+    description: 'Capture a remote page and turn it into reusable strategic fragments.',
+    actionLabel: 'Add URL'
   }
 ]
 
@@ -97,6 +101,27 @@ function getTaskCardSummary(task: KnowledgeTask): string {
   return '文本种子已提交，等待切片与索引。'
 }
 
+function formatDate(value?: string | null) {
+  if (!value) return 'Just now'
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
+function getTaskProgress(task: KnowledgeTask) {
+  if (task.status === 'succeeded') return 100
+  if (task.status === 'failed') return 100
+  if (task.status === 'processing') return 68
+  return 22
+}
+
 type OperationNotice = {
   type: 'success' | 'error'
   message: string
@@ -108,7 +133,6 @@ type MergedTask = KnowledgeTask & {
 }
 
 export default function KnowledgePage({ params }: { params: { workspaceId: string } }) {
-  const { theme } = useTheme()
   const [activeBaseId, setActiveBaseId] = useState('')
   const [inputText, setInputText] = useState('')
   const [activeImport, setActiveImport] = useState<'file' | 'link'>('file')
@@ -119,6 +143,7 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [aiMode, setAiMode] = useState<'ai' | 'manual'>('ai')
   const [operationNotice, setOperationNotice] = useState<OperationNotice>(null)
+
   const {
     data: knowledgeBases = [],
     isLoading: isKnowledgeBasesLoading,
@@ -147,7 +172,12 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
     isLoading: isKnowledgeBaseStatusLoading,
     isError: isKnowledgeBaseStatusError
   } = useKnowledgeBaseStatus(params.workspaceId, activeBaseId)
-  const { data: taskStatuses = [], isLoading: isTaskLoading, isError: isTaskError } = useKbTaskStatus(params.workspaceId, activeBaseId)
+  const {
+    data: taskStatuses = [],
+    isLoading: isTaskLoading,
+    isError: isTaskError
+  } = useKbTaskStatus(params.workspaceId, activeBaseId)
+
   const mergedTasks = useMemo<MergedTask[]>(() => {
     const byId = new Map<string, MergedTask>()
 
@@ -196,6 +226,7 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
 
     return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }, [knowledgeBaseStatus?.tasks, taskStatuses])
+
   const taskStats = useMemo(() => {
     return {
       total: mergedTasks.length,
@@ -205,12 +236,14 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
       failed: mergedTasks.filter((task) => task.status === 'failed').length
     }
   }, [mergedTasks])
+
   const activeBaseDescription = useMemo(() => {
     if (!activeBase) return '欢迎来到您的知识花园'
     if (activeBase.status === 'ready') return '可发布，适合生成洞察并同步画布'
     if (activeBase.status === 'processing') return '任务处理中，等待索引完成'
     return '草稿状态，可继续导入与整理'
   }, [activeBase])
+
   const importedTasks = useMemo(() => {
     const filter = fileFilter.trim().toLowerCase()
 
@@ -230,6 +263,29 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
 
     return latestOnly ? matched.slice(0, 6) : matched
   }, [fileFilter, latestOnly, mergedTasks])
+
+  const extractedThemes = useMemo(() => {
+    const tokens = new Set<string>()
+    if (activeBase?.status) {
+      tokens.add(activeBase.status === 'ready' ? 'Research Ready' : `Status ${activeBase.status}`)
+    }
+    importedTasks.forEach((task) => {
+      if (task.type === 'file') tokens.add('File OCR')
+      if (task.type === 'url') tokens.add('Web Extraction')
+      if (task.type === 'seed') tokens.add('Text Seeds')
+      if (task.status === 'processing') tokens.add('Live Indexing')
+      if (task.status === 'succeeded') tokens.add('Structured Fragments')
+    })
+    return [...tokens].slice(0, 6)
+  }, [activeBase?.status, importedTasks])
+
+  const integrityScore = useMemo(() => {
+    if (taskStats.total === 0) return 100
+    const score = Math.round(((taskStats.succeeded + taskStats.processing * 0.7 + taskStats.pending * 0.4) / taskStats.total) * 100)
+    return Math.min(100, Math.max(62, score))
+  }, [taskStats])
+
+  const queueTasks = importedTasks.slice(0, 3)
   const isTaskCenterLoading = isKnowledgeBaseStatusLoading || isTaskLoading
   const isTaskCenterError = isKnowledgeBaseStatusError && isTaskError
   const isTaskCenterPartialError = (isKnowledgeBaseStatusError || isTaskError) && !isTaskCenterError
@@ -331,164 +387,275 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
   }
 
   return (
-    <div className={cn('flex flex-1 flex-col gap-8 px-8 py-6', theme.colors.background.primary, theme.colors.text.primary)}>
-      <section className={cn('rounded-3xl border px-8 py-6 shadow-sm', theme.colors.border.default, theme.colors.background.card)}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className={cn('text-xs uppercase tracking-widest', theme.colors.brand.solid.replace('bg-', 'text-'))}>Workspace {params.workspaceId}</p>
-            <h1 className={cn('mt-2 text-2xl font-semibold', theme.colors.text.primary)}>
-              {activeBase?.name ?? (isKnowledgeBasesLoading ? '加载中...' : 'Knowledge Base')}
-            </h1>
-            <p className={cn('mt-1 text-sm', theme.colors.text.muted)}>{activeBaseDescription}</p>
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            <button className={cn('rounded-lg border px-4 py-2 transition', theme.colors.border.default, theme.colors.text.secondary, theme.colors.interactive.hover)}>
-              分享
-            </button>
-            <button
-              onClick={handlePublishKnowledgeBase}
-              disabled={!activeBaseId || publishKnowledgeBaseMutation.isPending}
-              className={cn(
-                'rounded-lg px-5 py-2 font-semibold text-white shadow bg-gradient-to-r',
-                theme.colors.brand.from,
-                theme.colors.brand.to,
-                !activeBaseId || publishKnowledgeBaseMutation.isPending ? 'cursor-not-allowed opacity-60' : ''
-              )}
+    <div className="space-y-8 text-[var(--stratum-ink)]">
+      <ToolHeroCard
+        theme="ocean"
+        eyebrow="@knowledge"
+        title="Knowledge Input Console"
+        description="这里只负责导入、整理和供给证据，不再承担工作区主战场职责。完成资料处理后，建议回到智慧画布继续建模，或交给 @research 做进一步提炼。"
+        actions={
+          <>
+            <Link
+              href={`/workspace/${params.workspaceId}/canvas` as Route}
+              className="rounded-full bg-[var(--stratum-navy)] px-4 py-2.5 text-sm font-semibold text-white"
             >
-              {publishKnowledgeBaseMutation.isPending ? '发布中...' : '发布'}
-            </button>
-          </div>
-        </div>
+              返回智慧画布
+            </Link>
+            <Link
+              href={`/workspace/${params.workspaceId}/deep-research` as Route}
+              className="rounded-full bg-white/80 px-4 py-2.5 text-sm font-semibold text-slate-700"
+            >
+              打开研究工具
+            </Link>
+          </>
+        }
+        stats={[
+          {
+            label: 'Sources',
+            value: `${taskStats.total}`,
+            detail: '当前工作区已接入的知识来源'
+          },
+          {
+            label: 'Indexed',
+            value: `${taskStats.succeeded + taskStats.processing}`,
+            detail: '已经索引或正在处理中的条目'
+          },
+          {
+            label: 'Integrity',
+            value: `${integrityScore}%`,
+            detail: activeBaseDescription
+          },
+          {
+            label: 'Themes',
+            value: `${extractedThemes.length || 2}`,
+            detail: '自动聚合出的资料主题簇'
+          }
+        ]}
+      />
 
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          {isKnowledgeBasesError && (
-            <p className="w-full text-xs text-rose-500">知识库列表加载失败，请检查 Gateway 与 Task Service。</p>
-          )}
-          {knowledgeBases.map((kb) => (
-            <button
-              key={kb.id}
-              onClick={() => setActiveBaseId(kb.id)}
-              className={cn(
-                'rounded-2xl border px-4 py-3 text-left text-sm transition shadow-sm',
-                activeBaseId === kb.id
-                  ? cn('text-cyan-500', theme.colors.brand.light, theme.colors.border.hover)
-                  : cn(theme.colors.text.secondary, theme.colors.background.card, theme.colors.interactive.hover, 'border-transparent')
-              )}
-            >
-              <p className="font-semibold">{kb.name}</p>
-              <p className={cn('mt-1 text-xs', theme.colors.text.muted)}>
-                状态：{kb.status} · 更新于 {new Date(kb.updatedAt).toLocaleDateString()}
-              </p>
-            </button>
-          ))}
-          {!isKnowledgeBasesLoading && knowledgeBases.length === 0 && (
-            <p className={cn('text-xs', theme.colors.text.muted)}>暂无 Knowledge Base，请先创建一个。</p>
-          )}
+      <section className="flex flex-wrap items-start justify-between gap-6">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-slate-400">Tool Status</p>
+          <h2 className="stratum-display mt-3 text-4xl font-semibold leading-none">Knowledge Base</h2>
+          <p className="mt-3 max-w-3xl text-base leading-7 text-slate-500">
+            Assemble and synthesize multi-source intelligence for AI-driven strategy.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={handleCreateKnowledgeBase}
             disabled={createKnowledgeBaseMutation.isPending}
             data-testid="kb-create-button"
-            className={cn(
-              'rounded-2xl border border-dashed px-4 py-3 text-sm transition',
-              theme.colors.border.default,
-              theme.colors.brand.solid.replace('bg-', 'text-'),
-              theme.colors.interactive.hover,
-              createKnowledgeBaseMutation.isPending ? 'opacity-60 cursor-not-allowed' : ''
-            )}
+            className="rounded-2xl bg-[var(--stratum-navy)] px-6 py-4 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(19,27,46,0.18)] transition hover:translate-y-[-1px] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {createKnowledgeBaseMutation.isPending ? '创建中...' : '+ 新建 Knowledge Base'}
+            {createKnowledgeBaseMutation.isPending ? 'Creating...' : '+ New Data Source'}
+          </button>
+          <button
+            onClick={handlePublishKnowledgeBase}
+            disabled={!activeBaseId || publishKnowledgeBaseMutation.isPending}
+            className="rounded-2xl bg-[var(--stratum-surface-low)] px-5 py-4 text-sm font-medium text-[var(--stratum-navy)] transition hover:bg-[#e9edf2] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {publishKnowledgeBaseMutation.isPending ? 'Publishing...' : 'Publish KB'}
           </button>
         </div>
-        {operationNotice && (
-          <p
-            className={cn(
-              'mt-4 rounded-xl border px-3 py-2 text-xs',
-              operationNotice.type === 'success'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
-                : 'border-rose-200 bg-rose-50 text-rose-600'
-            )}
-          >
-            {operationNotice.message}
-          </p>
-        )}
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className={cn('rounded-3xl border p-6 shadow-sm', theme.colors.border.default, theme.colors.background.card)}>
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="grid gap-4 md:grid-cols-3">
+          <article className="stratum-card rounded-[28px] p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Total Sources</p>
+            <p className="mt-4 text-5xl font-semibold text-[var(--stratum-ink)]">{taskStats.total}</p>
+            <p className="mt-2 text-sm text-slate-500">Current ingestion payload across files, links and text seeds.</p>
+          </article>
+          <article className="stratum-card rounded-[28px] p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Index Volume</p>
+            <p className="mt-4 text-5xl font-semibold text-[var(--stratum-ink)]">{taskStats.succeeded + taskStats.processing}</p>
+            <p className="mt-2 text-sm text-slate-500">Documents already indexed or currently moving through the queue.</p>
+          </article>
+          <article className="stratum-card rounded-[28px] border border-[rgba(137,206,255,0.4)] p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Integrity Score</p>
+            <p className="mt-4 text-5xl font-semibold text-[var(--stratum-blue)]">{integrityScore}%</p>
+            <p className="mt-2 text-sm text-slate-500">{activeBaseDescription}</p>
+          </article>
+        </div>
+
+        <aside className="stratum-card rounded-[28px] p-6">
+          <h2 className="stratum-display text-3xl font-semibold">Extracted Themes</h2>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {(extractedThemes.length > 0 ? extractedThemes : ['Ingestion Ready', 'Workspace Sync']).map((theme) => (
+              <span
+                key={theme}
+                className="rounded-full bg-[var(--stratum-surface-low)] px-3 py-2 text-sm text-slate-500"
+              >
+                {theme}
+              </span>
+            ))}
+          </div>
+        </aside>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_300px]">
+        <div>
+          <h2 className="stratum-display text-3xl font-semibold">Active Processing Queue</h2>
+          <div className="mt-5 space-y-4">
+            {(queueTasks.length > 0
+              ? queueTasks
+              : [
+                  {
+                    id: 'empty',
+                    type: 'seed',
+                    status: 'pending',
+                    payload: {},
+                    workspaceId: params.workspaceId,
+                    kbId: activeBaseId || 'default',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    source: 'history'
+                  } as MergedTask
+                ]
+            ).map((task) => (
+              <article key={task.id} className="stratum-card rounded-[28px] p-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--stratum-surface-low)] text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    {task.type === 'file' ? 'DOC' : task.type === 'url' ? 'URL' : 'TXT'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-semibold text-[var(--stratum-ink)]">{task.id === 'empty' ? 'Waiting for first source' : getTaskCardTitle(task)}</h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {task.id === 'empty' ? 'Create a knowledge base or add a source to activate the queue.' : getTaskCardSummary(task)}
+                        </p>
+                      </div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--stratum-blue)]">
+                        {task.id === 'empty' ? 'idle' : statusBadgeMap[task.status]}
+                      </p>
+                    </div>
+                    <div className="mt-4 h-1.5 rounded-full bg-black/[0.08]">
+                      <div
+                        className={cn(
+                          'h-1.5 rounded-full',
+                          task.status === 'failed' ? 'bg-rose-400' : 'bg-[var(--stratum-blue)]'
+                        )}
+                        style={{ width: `${getTaskProgress(task)}%` }}
+                      />
+                    </div>
+                    {task.status === 'succeeded' && task.id !== 'empty' && (
+                      <div className="mt-4 rounded-2xl bg-[var(--stratum-surface-low)] px-4 py-3 text-sm italic leading-6 text-slate-500">
+                        “{getTaskCardSummary(task)}”
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <aside className="space-y-6">
+          <article className="stratum-card rounded-[28px] p-7">
+            <h2 className="stratum-display text-4xl font-semibold leading-none">Ready for Synthesized Analysis?</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-500">
+              Knowledge Base 已经沉淀到可供研究模块复用的状态。可以直接进入 Deep Research 生成执行摘要与策略建议。
+            </p>
+            <Link
+              href={`/workspace/${params.workspaceId}/deep-research` as Route}
+              className="mt-8 inline-flex items-center gap-3 rounded-2xl bg-[var(--stratum-glow)] px-5 py-4 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(19,27,46,0.18)]"
+            >
+              Start Deep Research
+              <ArrowRightIcon />
+            </Link>
+          </article>
+
+          <article className="rounded-[24px] bg-[var(--stratum-navy)] px-5 py-4 text-white shadow-[0_22px_44px_rgba(19,27,46,0.18)]">
+            <p className="text-[11px] uppercase tracking-[0.3em] text-white/45">Infrastructure Status</p>
+            <p className="mt-3 text-sm text-white/72">
+              Contextual Engine: {taskStats.processing > 0 ? 'Syncing workspace nodes...' : 'Idle and ready.'}
+            </p>
+          </article>
+        </aside>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_380px]">
+        <article className="stratum-card rounded-[32px] p-7">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Source Studio</p>
+              <h2 className="stratum-display mt-2 text-3xl font-semibold">Manual Seeds</h2>
+            </div>
+            <button
+              onClick={() => setAiMode(aiMode === 'ai' ? 'manual' : 'ai')}
+              className={cn(
+                'rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em]',
+                aiMode === 'ai' ? 'bg-[#eaf4ff] text-[var(--stratum-blue)]' : 'bg-[var(--stratum-surface-low)] text-slate-500'
+              )}
+            >
+              {aiMode === 'ai' ? 'AI mode' : 'Manual mode'}
+            </button>
+          </div>
           <textarea
             value={inputText}
             onChange={(event) => setInputText(event.target.value)}
             data-testid="kb-seed-textarea"
-            placeholder="在此输入或粘贴文本，或上传 Seeds 到 Knowledge Base..."
-            className={cn('h-48 w-full rounded-2xl border px-4 py-3 text-sm placeholder:text-slate-400 focus:outline-none', theme.colors.border.default, theme.colors.background.secondary, theme.colors.text.primary, `focus:${theme.colors.border.hover}`)}
+            placeholder="在此输入或粘贴文本，构建新的知识种子..."
+            className="mt-5 h-56 w-full rounded-[28px] bg-[var(--stratum-surface-low)] px-5 py-4 text-sm leading-7 text-[var(--stratum-ink)] outline-none placeholder:text-slate-400"
           />
-          <div className={cn('mt-4 flex flex-wrap items-center gap-3 text-xs', theme.colors.text.muted)}>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-500">支持粘贴摘要、访谈原文、竞品记录与长文本资料。</p>
             <button
               onClick={handleAddSeed}
               disabled={!activeBaseId || addKnowledgeSeedMutation.isPending}
               data-testid="kb-add-seed-button"
-              className={cn(
-                'rounded-lg border px-3 py-2 transition',
-                theme.colors.border.default,
-                theme.colors.text.secondary,
-                theme.colors.interactive.hover,
-                !activeBaseId || addKnowledgeSeedMutation.isPending ? 'cursor-not-allowed opacity-60' : ''
-              )}
+              className="rounded-2xl bg-[var(--stratum-navy)] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {addKnowledgeSeedMutation.isPending ? '提交中...' : '添加'}
+              {addKnowledgeSeedMutation.isPending ? 'Submitting...' : 'Add seed'}
             </button>
-            <span>支持粘贴、上传多种格式，AI 会自动分类与提炼。</span>
           </div>
-        </div>
+        </article>
 
-        <div className="grid gap-4">
+        <div className="space-y-4">
           {importOptions.map((option) => (
-            <div
+            <article
               key={option.id}
               className={cn(
-                'rounded-3xl border p-5 shadow-sm transition',
-                theme.colors.border.default,
-                theme.colors.background.card,
-                activeImport === option.id ? 'ring-2 ring-cyan-500' : 'hover:border-cyan-400/50'
+                'stratum-card rounded-[28px] p-5 transition',
+                activeImport === option.id ? 'ring-1 ring-[rgba(0,140,199,0.35)]' : ''
               )}
             >
-              <div className={cn('flex items-center justify-between text-sm font-semibold', theme.colors.text.primary)}>
-                <span>{option.title}</span>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-semibold text-[var(--stratum-ink)]">{option.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">{option.description}</p>
+                </div>
                 <button
                   onClick={() => setActiveImport(option.id as 'file' | 'link')}
-                  className={cn('rounded-full border px-3 py-1 text-xs transition', theme.colors.border.default, theme.colors.brand.solid.replace('bg-', 'text-'), theme.colors.interactive.hover)}
+                  className="rounded-full bg-[var(--stratum-surface-low)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
                 >
                   {option.actionLabel}
                 </button>
               </div>
-              <p className={cn('mt-2 text-xs', theme.colors.text.muted)}>{option.description}</p>
+
               {option.id === 'link' ? (
-                <>
+                <div className="mt-4 space-y-3">
                   <input
                     value={linkValue}
                     onChange={(event) => setLinkValue(event.target.value)}
                     data-testid="kb-url-input"
-                    placeholder="输入网址"
-                    className={cn('mt-3 w-full rounded-xl border px-3 py-2 text-xs placeholder:text-slate-400 focus:outline-none', theme.colors.border.default, theme.colors.background.secondary, theme.colors.text.secondary, `focus:${theme.colors.border.hover}`)}
+                    placeholder="https://..."
+                    className="w-full rounded-2xl bg-[var(--stratum-surface-low)] px-4 py-3 text-sm outline-none placeholder:text-slate-400"
                   />
                   <button
                     onClick={handleImportUrl}
                     disabled={!activeBaseId || importKnowledgeUrlMutation.isPending}
                     data-testid="kb-import-url-button"
-                    className={cn(
-                      'mt-3 w-full rounded-xl border px-3 py-2 text-xs transition',
-                      theme.colors.border.default,
-                      theme.colors.text.secondary,
-                      theme.colors.interactive.hover,
-                      !activeBaseId || importKnowledgeUrlMutation.isPending ? 'cursor-not-allowed opacity-60' : ''
-                    )}
+                    className="w-full rounded-2xl bg-[var(--stratum-navy)] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {importKnowledgeUrlMutation.isPending ? '导入中...' : '导入 URL'}
+                    {importKnowledgeUrlMutation.isPending ? 'Importing...' : 'Import URL'}
                   </button>
-                </>
+                </div>
               ) : (
-                <>
-                  <div className={cn('mt-3 rounded-xl border border-dashed px-3 py-3 text-xs', theme.colors.border.default, theme.colors.text.muted)}>
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-2xl border border-dashed border-[rgba(19,27,46,0.12)] bg-[var(--stratum-surface-low)] px-4 py-4">
                     <input
                       type="file"
                       multiple
@@ -498,100 +665,119 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
                         setSelectedFiles(files)
                         setUploadProgress(null)
                       }}
-                      className="w-full text-xs"
+                      className="w-full text-sm text-slate-500"
                     />
                   </div>
                   {selectedFiles.length > 0 && (
-                    <p className={cn('mt-2 text-[11px]', theme.colors.text.muted)}>
+                    <p className="text-xs leading-5 text-slate-500">
                       已选择 {selectedFiles.length} 个文件：{selectedFiles.slice(0, 2).map((file) => file.name).join('，')}
                       {selectedFiles.length > 2 ? ' ...' : ''}
                     </p>
                   )}
                   {uploadProgress !== null && (
-                    <p className={cn('mt-1 text-[11px]', theme.colors.text.muted)}>上传进度：{uploadProgress}%</p>
+                    <p className="text-xs leading-5 text-slate-500">上传进度：{uploadProgress}%</p>
                   )}
                   <button
                     onClick={handleImportFiles}
                     disabled={!activeBaseId || importKnowledgeFilesMutation.isPending}
                     data-testid="kb-import-file-button"
-                    className={cn(
-                      'mt-3 w-full rounded-xl border px-3 py-2 text-xs transition',
-                      theme.colors.border.default,
-                      theme.colors.text.secondary,
-                      theme.colors.interactive.hover,
-                      !activeBaseId || importKnowledgeFilesMutation.isPending ? 'cursor-not-allowed opacity-60' : ''
-                    )}
+                    className="w-full rounded-2xl bg-[var(--stratum-navy)] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {importKnowledgeFilesMutation.isPending ? '上传中...' : '上传并导入文件'}
+                    {importKnowledgeFilesMutation.isPending ? 'Uploading...' : 'Upload and ingest'}
                   </button>
-                </>
+                </div>
               )}
-            </div>
+            </article>
           ))}
         </div>
       </section>
 
-      <section className={cn('rounded-3xl border px-6 py-4 shadow-sm', theme.colors.border.default, theme.colors.background.card)}>
-        <div className={cn('flex flex-wrap items-center justify-between gap-3 text-xs', theme.colors.text.muted)}>
-          <div className="flex items-center gap-3">
-            <span>当前模式：</span>
-            <button
-              onClick={() => setAiMode(aiMode === 'ai' ? 'manual' : 'ai')}
+      <section className="stratum-card rounded-[32px] p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Knowledge Bases</p>
+            <h2 className="stratum-display mt-2 text-3xl font-semibold">Current Collections</h2>
+          </div>
+          {operationNotice && (
+            <p
               className={cn(
-                'rounded-full border px-3 py-1 text-[11px] transition',
-                aiMode === 'ai'
-                  ? cn('text-cyan-500', theme.colors.brand.light, theme.colors.border.hover)
-                  : cn(theme.colors.border.default, theme.colors.background.card, theme.colors.text.secondary, theme.colors.interactive.hover)
+                'rounded-2xl px-4 py-3 text-sm',
+                operationNotice.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'bg-rose-50 text-rose-700'
               )}
             >
-              {aiMode === 'ai' ? 'AI 智能拆分' : '手动模式'}
+              {operationNotice.message}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          {isKnowledgeBasesError && (
+            <p className="w-full text-sm text-rose-600">知识库列表加载失败，请检查 Gateway 与 Task Service。</p>
+          )}
+          {knowledgeBases.map((kb) => (
+            <button
+              key={kb.id}
+              onClick={() => setActiveBaseId(kb.id)}
+              className={cn(
+                'rounded-[24px] px-4 py-4 text-left transition',
+                activeBaseId === kb.id
+                  ? 'bg-[#eaf4ff] text-[var(--stratum-blue)] shadow-[0_12px_28px_rgba(0,140,199,0.08)]'
+                  : 'bg-[var(--stratum-surface-low)] text-slate-500'
+              )}
+            >
+              <p className="font-semibold">{kb.name}</p>
+              <p className="mt-1 text-xs">状态 {kb.status} · 更新于 {formatDate(kb.updatedAt)}</p>
             </button>
-          </div>
-          <p>AI 将分析内容并优化逻辑，关闭后改为手动上传与整理。</p>
+          ))}
+          {!isKnowledgeBasesLoading && knowledgeBases.length === 0 && (
+            <p className="text-sm text-slate-500">暂无 Knowledge Base，请先创建一个。</p>
+          )}
         </div>
       </section>
 
-      <section data-testid="knowledge-task-center" className="rounded-3xl bg-gradient-to-br from-[#0F1729] via-[#10172B] to-[#111C30] p-8 text-white shadow-lg">
-        <header className="flex flex-wrap items-center justify-between gap-4">
+      <section data-testid="knowledge-task-center" className="rounded-[32px] bg-[var(--stratum-navy)] p-8 text-white shadow-[0_30px_60px_rgba(19,27,46,0.18)]">
+        <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold">任务中心（实时 + 历史）</h2>
-            <p className="mt-1 text-sm text-white/60">
-              当前 KB：{activeBaseId || '-'}。任务来源于 `kbTaskStatus` 实时事件与 `knowledgeBaseStatus` 历史聚合，按 Task ID 合并去重。
+            <h2 className="stratum-display text-3xl font-semibold">Task Center</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-white/65">
+              当前 KB：{activeBaseId || '-'}。任务来源于实时事件与历史聚合，按 Task ID 合并去重。
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-white/70">
-            <span className="rounded-full border border-white/20 px-3 py-1">总计 {taskStats.total}</span>
-            <span className="rounded-full border border-slate-300/40 px-3 py-1 text-slate-200">待处理 {taskStats.pending}</span>
-            <span className="rounded-full border border-amber-300/40 px-3 py-1 text-amber-200">处理中 {taskStats.processing}</span>
-            <span className="rounded-full border border-emerald-300/40 px-3 py-1 text-emerald-200">完成 {taskStats.succeeded}</span>
-            <span className="rounded-full border border-rose-300/40 px-3 py-1 text-rose-200">失败 {taskStats.failed}</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-white/72">
+            <span className="rounded-full border border-white/15 px-3 py-1">总计 {taskStats.total}</span>
+            <span className="rounded-full border border-white/15 px-3 py-1">待处理 {taskStats.pending}</span>
+            <span className="rounded-full border border-white/15 px-3 py-1">处理中 {taskStats.processing}</span>
+            <span className="rounded-full border border-white/15 px-3 py-1">完成 {taskStats.succeeded}</span>
+            <span className="rounded-full border border-white/15 px-3 py-1">失败 {taskStats.failed}</span>
           </div>
         </header>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3 text-xs text-white/60">
-            <label className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 backdrop-blur">
-              <span>筛选：</span>
-              <input
-                value={fileFilter}
-                onChange={(event) => setFileFilter(event.target.value)}
-                data-testid="kb-task-filter-input"
-                placeholder="任务名 / 类型 / 状态 / ID"
-                className="w-44 bg-transparent text-white placeholder:text-white/40 focus:outline-none"
-              />
-            </label>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/72">
+            <span>筛选</span>
+            <input
+              value={fileFilter}
+              onChange={(event) => setFileFilter(event.target.value)}
+              data-testid="kb-task-filter-input"
+              placeholder="任务名 / 类型 / 状态 / ID"
+              className="w-52 bg-transparent text-white placeholder:text-white/35 outline-none"
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setLatestOnly((current) => !current)}
               className={cn(
                 'rounded-full border px-4 py-2 text-xs transition',
-                latestOnly ? 'border-cyan-300 bg-cyan-400/10 text-cyan-100' : 'border-white/20 text-white hover:bg-white/10'
+                latestOnly ? 'border-cyan-300 bg-cyan-400/10 text-cyan-100' : 'border-white/20 text-white/75 hover:bg-white/10'
               )}
             >
               {latestOnly ? '仅最新 6 条' : '显示全部'}
             </button>
             <button
               onClick={() => setFileFilter('')}
-              className="rounded-full border border-white/20 px-4 py-2 text-xs text-white transition hover:bg-white/10"
+              className="rounded-full border border-white/20 px-4 py-2 text-xs text-white/75 transition hover:bg-white/10"
             >
               清空筛选
             </button>
@@ -599,7 +785,7 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
         </div>
 
         {isTaskCenterLoading && (
-          <p className="mt-6 text-sm text-white/60">正在同步任务中心数据...</p>
+          <p className="mt-6 text-sm text-white/65">正在同步任务中心数据...</p>
         )}
         {isTaskCenterError && (
           <p className="mt-6 text-sm text-rose-200">任务中心加载失败，请检查 Gateway 与 Task Service 链路。</p>
@@ -608,7 +794,7 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
           <p className="mt-6 text-sm text-amber-100">部分任务源加载失败，当前展示的是可用数据。</p>
         )}
         {!isTaskCenterLoading && !isTaskCenterError && importedTasks.length === 0 && (
-          <p className="mt-6 text-sm text-white/60">暂无导入任务。可先上传文件、粘贴文本或导入 URL。</p>
+          <p className="mt-6 text-sm text-white/65">暂无导入任务。可先上传文件、粘贴文本或导入 URL。</p>
         )}
 
         {!isTaskCenterLoading && !isTaskCenterError && importedTasks.length > 0 && (
@@ -617,9 +803,9 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
               <article
                 key={task.id}
                 data-testid="kb-task-card"
-                className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.05] p-5 transition hover:border-white/25 hover:bg-white/[0.08]"
+                className="rounded-[28px] border border-white/10 bg-white/[0.05] p-5 transition hover:bg-white/[0.08]"
               >
-                <div className="flex items-center justify-between text-xs uppercase tracking-widest text-white/60">
+                <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-white/55">
                   <span className="inline-flex items-center gap-2">
                     <span
                       className="inline-flex h-2.5 w-2.5 rounded-full"
@@ -627,15 +813,15 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
                     />
                     {taskTypeMap[task.type]}
                   </span>
-                  <span>{new Date(task.updatedAt).toLocaleString()}</span>
+                  <span>{formatDate(task.updatedAt)}</span>
                 </div>
-                <h3 className="mt-4 line-clamp-2 text-base font-semibold text-white">{getTaskCardTitle(task)}</h3>
-                <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-white/70">{getTaskCardSummary(task)}</p>
+                <h3 className="mt-4 line-clamp-2 text-lg font-semibold text-white">{getTaskCardTitle(task)}</h3>
+                <p className="mt-2 line-clamp-3 text-sm leading-7 text-white/68">{getTaskCardSummary(task)}</p>
 
-                <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-white/50">
-                  <span className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1">#{task.type}</span>
-                  <span className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1">#{task.status}</span>
-                  <span className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1">
+                <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-white/55">
+                  <span className="rounded-full border border-white/15 px-3 py-1">#{task.type}</span>
+                  <span className="rounded-full border border-white/15 px-3 py-1">#{task.status}</span>
+                  <span className="rounded-full border border-white/15 px-3 py-1">
                     {task.source === 'realtime' ? '#实时' : '#历史'}
                   </span>
                   {task.error && (
@@ -645,15 +831,20 @@ export default function KnowledgePage({ params }: { params: { workspaceId: strin
                   )}
                 </div>
 
-                <div className="mt-5 flex items-center justify-between text-xs text-white/50">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="inline-flex h-1.5 w-1.5 rounded-full bg-white/40" />
-                    {statusBadgeMap[task.status]}
-                  </span>
-                  <span className="rounded-full border border-white/20 px-3 py-1 font-mono">ID {task.id.slice(-8)}</span>
+                <div className="mt-5 h-1.5 rounded-full bg-white/10">
+                  <div
+                    className={cn(
+                      'h-1.5 rounded-full',
+                      task.status === 'failed' ? 'bg-rose-400' : 'bg-[var(--stratum-sky)]'
+                    )}
+                    style={{ width: `${getTaskProgress(task)}%` }}
+                  />
                 </div>
 
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/20 to-transparent opacity-0 transition group-hover:opacity-100" />
+                <div className="mt-4 flex items-center justify-between text-xs text-white/55">
+                  <span>{statusBadgeMap[task.status]}</span>
+                  <span className="rounded-full border border-white/15 px-3 py-1 font-mono">ID {task.id.slice(-8)}</span>
+                </div>
               </article>
             ))}
           </div>

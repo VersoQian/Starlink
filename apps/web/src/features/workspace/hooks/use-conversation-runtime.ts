@@ -104,48 +104,68 @@ export function useConversationRuntime(workspaceId: string) {
         .filter((event): event is ConversationRuntimeEvent => event !== null)
     }
   })
+  const refetchPersistedEvents = persistedEventsQuery.refetch
 
   useEffect(() => {
     setLiveEvents([])
 
-    const dispose = subscribeConversationProgress((event: ConversationProgressEvent) => {
-      if (event.type === 'phase.changed') {
-        const payload = event.payload as PhaseChangedPayload | undefined
-        if (!payload || payload.workspaceId !== workspaceId) return
-        setLiveEvents((current) => current.concat({
-          type: 'phase.changed',
-          conversationId: event.conversationId,
-          payload
-        }))
-        return
-      }
+    const dispose = subscribeConversationProgress(
+      { workspaceId },
+      (event: ConversationProgressEvent) => {
+        if (event.type === 'phase.changed') {
+          const payload = event.payload as PhaseChangedPayload | undefined
+          if (!payload || payload.workspaceId !== workspaceId) return
+          setLiveEvents((current) => current.concat({
+            type: 'phase.changed',
+            conversationId: event.conversationId,
+            payload
+          }))
+          return
+        }
 
-      if (event.type === 'seminar.turn.completed') {
-        const payload = event.payload as SeminarTurnPayload | undefined
-        if (!payload || payload.workspaceId !== workspaceId) return
-        setLiveEvents((current) => current.concat({
-          type: 'seminar.turn.completed',
-          conversationId: event.conversationId,
-          payload
-        }))
-        return
-      }
+        if (event.type === 'seminar.turn.completed') {
+          const payload = event.payload as SeminarTurnPayload | undefined
+          if (!payload || payload.workspaceId !== workspaceId) return
+          setLiveEvents((current) => current.concat({
+            type: 'seminar.turn.completed',
+            conversationId: event.conversationId,
+            payload
+          }))
+          return
+        }
 
-      if (event.type === 'seminar.decision.made') {
-        const payload = event.payload as SeminarDecisionPayload | undefined
-        if (!payload || payload.workspaceId !== workspaceId) return
-        setLiveEvents((current) => current.concat({
-          type: 'seminar.decision.made',
-          conversationId: event.conversationId,
-          payload
-        }))
+        if (event.type === 'seminar.decision.made') {
+          const payload = event.payload as SeminarDecisionPayload | undefined
+          if (!payload || payload.workspaceId !== workspaceId) return
+          setLiveEvents((current) => current.concat({
+            type: 'seminar.decision.made',
+            conversationId: event.conversationId,
+            payload
+          }))
+          return
+        }
+
+        if (event.type === 'seminar.decision.requested') {
+          const payload = event.payload as SeminarDecisionRequestedPayload | undefined
+          if (!payload || payload.workspaceId !== workspaceId) return
+          setLiveEvents((current) => current.concat({
+            type: 'seminar.decision.requested',
+            conversationId: event.conversationId,
+            payload
+          }))
+        }
+      },
+      {
+        onReconnect: async () => {
+          await refetchPersistedEvents()
+        }
       }
-    })
+    )
 
     return () => {
       dispose()
     }
-  }, [workspaceId])
+  }, [refetchPersistedEvents, workspaceId])
 
   const events = useMemo(
     () => dedupeRuntimeEvents([

@@ -29,6 +29,7 @@ import type { UseMutationResult } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 
 import { useWorkspaceGraph } from '../hooks'
+import { fetchWorkspaceGraphSnapshot } from '../hooks/use-workspace-graph'
 import { useCanvasStore } from '../store'
 import { NoteNode } from './nodes/note-node'
 import { DocumentNode } from './nodes/document-node'
@@ -62,6 +63,13 @@ type StartConversationResult = {
     }
     graph: WorkspaceGraphResponse
   }
+}
+
+type GraphDeltaPayload = {
+  nodes?: CanvasNode[]
+  edges?: CanvasEdge[]
+  removedNodeIds?: string[]
+  removedEdgeIds?: string[]
 }
 
 const START_CONVERSATION_MUTATION = /* GraphQL */ `
@@ -118,11 +126,17 @@ function toTimelinePayload(graph: WorkspaceGraphResponse): { nodes: TimelineNode
   }
 }
 
-function applyGraphDelta(graph: WorkspaceGraphResponse, delta: { nodes?: CanvasNode[]; edges?: CanvasEdge[] }): WorkspaceGraphResponse {
+function removeById<T extends { id: string }>(current: T[], removedIds?: string[]) {
+  if (!removedIds || removedIds.length === 0) return current
+  const removed = new Set(removedIds)
+  return current.filter((item) => !removed.has(item.id))
+}
+
+function applyGraphDelta(graph: WorkspaceGraphResponse, delta: GraphDeltaPayload): WorkspaceGraphResponse {
   return {
     workspaceId: graph.workspaceId,
-    nodes: mergeById(graph.nodes, delta.nodes),
-    edges: mergeById(graph.edges, delta.edges)
+    nodes: mergeById(removeById(graph.nodes, delta.removedNodeIds), delta.nodes),
+    edges: mergeById(removeById(graph.edges, delta.removedEdgeIds), delta.edges)
   }
 }
 
@@ -545,6 +559,7 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
       syncTimeline(toTimelinePayload(latestGraph), { progressive: false })
 
       const watcher = watchConversation({
+        workspaceId,
         conversationId,
         onGraphAppended: (payload) => {
           latestGraph = payload as WorkspaceGraphResponse
@@ -553,13 +568,11 @@ const CanvasViewportInner = forwardRef<CanvasViewportHandle, CanvasViewportInner
         onGraphDiff: (payload) => {
           latestGraph = applyGraphDelta(
             latestGraph,
-            payload as {
-              nodes?: CanvasNode[]
-              edges?: CanvasEdge[]
-            }
+            payload as GraphDeltaPayload
           )
           syncTimeline(toTimelinePayload(latestGraph))
-        }
+        },
+        loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId)
       })
 
       await watcher.done

@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useEffect, useState } from 'react'
+import { memo } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { Card, CardHeader, CardTitle, CardContent } from '@/shared/components/ui/card'
 import { useComfyStore } from '../../store'
@@ -8,19 +8,10 @@ import { FileText } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
 export const ResultNode = memo(function ResultNode({ id }: NodeProps) {
-  const { edges, nodeDataMap } = useComfyStore()
-  const [result, setResult] = useState<string>('')
-
-  useEffect(() => {
-    // 查找连接到此节点的Agent节点
-    const inputEdge = edges.find(e => e.target === id)
-    if (inputEdge) {
-      const sourceData = nodeDataMap.get(inputEdge.source)
-      if (sourceData?.agentResult) {
-        setResult(sourceData.agentResult)
-      }
-    }
-  }, [edges, id, nodeDataMap])
+  const result = useComfyStore((state) => {
+    const inputEdge = state.edges.find((edge) => edge.target === id)
+    return inputEdge ? state.nodeDataMap.get(inputEdge.source)?.agentResult ?? '' : ''
+  })
 
   return (
     <>
@@ -29,7 +20,7 @@ export const ResultNode = memo(function ResultNode({ id }: NodeProps) {
         position={Position.Left}
         className="w-3 h-3 bg-blue-500 border-2 border-zinc-900"
       />
-      <Card className="w-96 bg-comfy-node border-comfy-nodeBorder shadow-lg comfy-node">
+      <Card className="w-96 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm flex items-center gap-2 text-zinc-100">
             <FileText className="w-4 h-4 text-green-400" />

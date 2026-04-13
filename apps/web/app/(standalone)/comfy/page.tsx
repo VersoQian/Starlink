@@ -1,11 +1,5 @@
-'use client'
-
-import { ComfyCanvas } from '@/features/comfy/components/canvas'
+import { redirect } from 'next/navigation'
 
 export default function ComfyStandalonePage() {
-  return (
-    <div className="h-screen w-screen overflow-hidden">
-      <ComfyCanvas workspaceId="comfy-standalone" />
-    </div>
-  )
+  redirect('/canvas')
 }

@@ -27,7 +27,7 @@ export default function AgentsPage({ params }: AgentsPageProps) {
       <header className={cn('rounded-2xl border p-6', theme.colors.border.default, theme.colors.background.card)}>
         <h2 className="text-xl font-semibold">Agent 协作总览</h2>
         <p className={cn('mt-2 text-sm', theme.colors.text.muted)}>
-          与商业画布实时联动，展示每个 Agent 的职责边界、阶段贡献、协作关系和证据来源。
+          这是 @experts 的详情页之一，用来查看每个 Agent 的职责边界、阶段贡献、协作关系和证据来源。
         </p>
         <p className={cn('mt-2 text-xs', theme.colors.text.muted)}>
           {runtimePhaseText}
@@ -55,6 +55,20 @@ export default function AgentsPage({ params }: AgentsPageProps) {
             </div>
           </div>
         )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link
+            href={`/workspace/${params.workspaceId}/experts`}
+            className={cn('rounded-lg border px-3 py-1.5 text-xs', theme.colors.border.default, theme.colors.interactive.hover)}
+          >
+            返回 Experts Hub
+          </Link>
+          <Link
+            href={`/workspace/${params.workspaceId}/canvas`}
+            className={cn('rounded-lg border px-3 py-1.5 text-xs', theme.colors.border.default, theme.colors.interactive.hover)}
+          >
+            返回智慧画布
+          </Link>
+        </div>
       </header>
 
       {isLoading && (

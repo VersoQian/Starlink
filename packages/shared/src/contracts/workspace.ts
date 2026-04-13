@@ -54,6 +54,22 @@ export const workspaceMetadataHistoryEntrySchema = z.object({
   version: z.number().int().nonnegative()
 })
 
+const permissionClosure: Record<string, string[]> = {
+  'workspace.read': ['workspace.read', 'workspace.write', 'workspace.publish', 'workspace.manage'],
+  'workspace.write': ['workspace.write', 'workspace.publish', 'workspace.manage'],
+  'workspace.publish': ['workspace.publish', 'workspace.manage'],
+  'workspace.manage': ['workspace.manage'],
+  'workspace.share': ['workspace.share', 'workspace.manage']
+}
+
+export function hasWorkspacePermission(
+  permissions: readonly string[],
+  requiredPermission: z.infer<typeof workspacePermissionSchema>
+) {
+  const allowed = permissionClosure[requiredPermission] ?? [requiredPermission]
+  return permissions.some((permission) => allowed.includes(permission))
+}
+
 export type WorkspaceDirectoryItem = z.infer<typeof workspaceDirectoryItemSchema>
 export type WorkspaceMember = z.infer<typeof workspaceMemberSchema>
 export type WorkspaceMetadataUpdateInput = z.infer<typeof workspaceMetadataUpdateInputSchema>

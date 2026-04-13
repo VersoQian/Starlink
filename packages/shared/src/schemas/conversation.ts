@@ -47,7 +47,9 @@ export const conversationEventSchema = z.discriminatedUnion('type', [
     conversationId: z.string(),
     payload: z.object({
       nodes: z.array(canvasGraphSchema.shape.nodes.element).optional(),
-      edges: z.array(canvasGraphSchema.shape.edges.element).optional()
+      edges: z.array(canvasGraphSchema.shape.edges.element).optional(),
+      removedNodeIds: z.array(z.string()).optional(),
+      removedEdgeIds: z.array(z.string()).optional()
     })
   }),
   z.object({

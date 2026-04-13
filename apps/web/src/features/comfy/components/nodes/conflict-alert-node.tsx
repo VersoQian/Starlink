@@ -39,8 +39,8 @@ const CONFLICT_TYPE_LABELS: Record<NonNullable<MacraNodeData['conflictType']>, s
 }
 
 export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: NodeProps) {
-  const { getMacraNode } = useComfyStore()
-  const nodeData = getMacraNode(id) || (data as MacraNodeData)
+  const macraNode = useComfyStore((state) => state.macraNodes.get(id))
+  const nodeData = macraNode || (data as MacraNodeData)
   const [isHovered, setIsHovered] = useState(false)
 
   const severity = nodeData?.severity || 'medium'
