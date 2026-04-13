@@ -42,7 +42,7 @@ const systemPageDefinitions: Array<Omit<MonitoredPage, 'href'>> = [
     summary: '作为唯一系统入口，负责选项目、恢复阶段和跳转补充模块。',
     inputs: ['工作区列表', '流程恢复点', '模块入口'],
     outputs: ['工作区跳转', '主链路总览'],
-    nextIds: ['knowledge', 'canvas', 'community', 'practice']
+    nextIds: ['knowledge', 'macra', 'canvas', 'community', 'practice']
   },
   {
     id: 'community',
@@ -129,6 +129,10 @@ function getWorkflowInputs(key: WorkspaceFlowKey) {
       return ['表格数据', '图表需求']
     case 'experts':
       return ['Agent 观点', 'Seminar 轨迹', '画布上下文']
+    case 'macra':
+      return ['商业问题', '知识背景', '工作区图谱']
+    case 'flow':
+      return ['工作流模板', '节点工具', '执行顺序']
     case 'canvas':
       return ['研究结论', '节点引用', '问题拆解']
     case 'comfy':
@@ -153,9 +157,13 @@ function getWorkflowNextIds(key: WorkspaceFlowKey): MonitoredPageId[] {
     case 'insights':
       return ['canvas']
     case 'experts':
-      return ['canvas', 'agents', 'seminar']
+      return ['macra', 'canvas', 'agents', 'seminar']
+    case 'macra':
+      return ['flow', 'canvas', 'comfy']
+    case 'flow':
+      return ['macra', 'canvas']
     case 'canvas':
-      return ['experts', 'comfy', 'agents', 'seminar']
+      return ['macra', 'experts', 'comfy', 'agents', 'seminar']
     case 'comfy':
       return ['agents', 'seminar']
     case 'agents':

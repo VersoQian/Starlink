@@ -1,5 +1,7 @@
 export * from './schemas/canvas.js';
 export * from './schemas/conversation.js';
+export * from './schemas/tool.js';
+export * from './schemas/flow.js';
 export * from './dify/index.js';
 export * from './logging/index.js';
 export * from './contracts/common.js';
@@ -7,3 +9,7 @@ export * from './contracts/task-events.js';
 export * from './contracts/knowledge.js';
 export * from './contracts/workspace.js';
 export * from './contracts/asset.js';
+export * from './tool-registry/types.js';
+export { BaseTool } from './tool-registry/tool.js';
+export * from './flow/types.js';
+export * from './execution/types.js';

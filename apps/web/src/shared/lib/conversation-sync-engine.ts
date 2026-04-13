@@ -42,6 +42,7 @@ type WatchConversationOptions = {
   conversationId: string
   onGraphAppended?: (payload: unknown) => void
   onGraphDiff?: (payload: unknown) => void
+  onEvent?: (event: ConversationProgressEvent) => void
   loadLatestGraph?: () => Promise<unknown>
 }
 
@@ -165,6 +166,8 @@ export function watchConversation(options: WatchConversationOptions) {
         conversationId: options.conversationId
       },
       (event) => {
+        options.onEvent?.(event)
+
         if (event.type === 'graph/appended' && event.payload) {
           options.onGraphAppended?.(event.payload)
         }

@@ -6,6 +6,8 @@ export type WorkspaceFlowKey =
   | 'deep-research'
   | 'insights'
   | 'experts'
+  | 'macra'
+  | 'flow'
   | 'canvas'
   | 'comfy'
   | 'agents'
@@ -122,6 +124,26 @@ const workspaceFlowDefinitions: WorkspaceFlowDefinition[] = [
     deliverable: '得到专家协作摘要、冲突点与行动建议',
     stageId: 'modeling',
     segment: 'experts',
+    navGroup: 'tools'
+  },
+  {
+    key: 'macra',
+    label: 'MACRA 分析',
+    shortLabel: 'MACRA',
+    description: '多智能体协同分析商业问题，生成 CC-BMC 九宫格与冲突视图。',
+    deliverable: 'CC-BMC 九宫格画布、冲突检测报告',
+    stageId: 'modeling',
+    segment: 'macra',
+    navGroup: 'primary'
+  },
+  {
+    key: 'flow',
+    label: '工作流编辑器',
+    shortLabel: '工作流',
+    description: '可视化拖拽 Tool 和 Agent 节点，自定义分析流程。',
+    deliverable: '可复用分析工作流模板',
+    stageId: 'modeling',
+    segment: 'flow',
     navGroup: 'tools'
   },
   {

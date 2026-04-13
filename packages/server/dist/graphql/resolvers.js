@@ -2,6 +2,7 @@ import GraphQLJSON from 'graphql-type-json';
 import { GraphQLError } from 'graphql';
 import { communityPostInputSchema, conversationMetadataSchema, practiceSessionInputSchema, workspaceAssetSchema, workspaceDirectoryItemSchema, workspaceMetadataHistoryEntrySchema, workspaceMetadataUpdateInputSchema } from '@starlink/shared';
 import { addKnowledgeSeed, createKnowledgeBase, getKnowledgeBaseStatus, importKnowledgeUrl, listKnowledgeBases, publishKnowledgeBase } from '../services/kb-task-service.js';
+import { pubsub, FLOW_EXECUTION_PROGRESS, publishExecutionEvent } from './subscriptions.js';
 export const resolvers = {
     JSON: GraphQLJSON,
     Query: {
@@ -64,6 +65,75 @@ export const resolvers = {
                 const history = await ctx.conversationStore.listWorkspaceHistory(args.workspaceId, ctx.userId);
                 return history.map((entry) => workspaceMetadataHistoryEntrySchema.parse(entry));
             });
+        },
+        // ── Flow / Tool queries ─────────────────────────────
+        availableTools: (_, __, ctx) => {
+            if (!ctx.toolRegistry)
+                return [];
+            return ctx.toolRegistry.listAll().map((def) => ({
+                name: def.identity.name,
+                label: def.display.label,
+                description: def.display.description,
+                category: def.display.category,
+                icon: def.display.icon,
+                color: def.display.color,
+                inputSchema: def.inputSchema,
+                outputSchema: def.outputSchema,
+                inputPorts: def.inputPorts,
+                outputPorts: def.outputPorts,
+                runtime: def.runtime
+            }));
+        },
+        toolByName: (_, args, ctx) => {
+            if (!ctx.toolRegistry || !ctx.toolRegistry.has(args.name))
+                return null;
+            const def = ctx.toolRegistry.getTool(args.name).definition;
+            return {
+                name: def.identity.name,
+                label: def.display.label,
+                description: def.display.description,
+                category: def.display.category,
+                icon: def.display.icon,
+                color: def.display.color,
+                inputSchema: def.inputSchema,
+                outputSchema: def.outputSchema,
+                inputPorts: def.inputPorts,
+                outputPorts: def.outputPorts,
+                runtime: def.runtime
+            };
+        },
+        flows: async (_, args, ctx) => {
+            if (!ctx.flowStore)
+                return [];
+            const flows = await ctx.flowStore.listFlows(args.workspaceId);
+            return flows.map(toFlowGQL);
+        },
+        flow: async (_, args, ctx) => {
+            if (!ctx.flowStore)
+                return null;
+            const flow = await ctx.flowStore.getFlow(args.id);
+            return flow ? toFlowGQL(flow) : null;
+        },
+        flowTemplates: async (_, __, ctx) => {
+            if (!ctx.flowStore)
+                return [];
+            const templates = await ctx.flowStore.listTemplates();
+            return templates.map(toFlowGQL);
+        },
+        flowExecution: async (_, args, ctx) => {
+            if (!ctx.executionStore)
+                return null;
+            const exec = await ctx.executionStore.getExecution(args.id);
+            if (!exec)
+                return null;
+            const nodeStates = await ctx.executionStore.getNodeStates(args.id);
+            return { ...exec, startedAt: exec.startedAt.toISOString(), completedAt: exec.completedAt?.toISOString() ?? null, nodeStates };
+        },
+        flowExecutions: async (_, args, ctx) => {
+            if (!ctx.executionStore)
+                return [];
+            const execs = await ctx.executionStore.listExecutions(args.flowId);
+            return execs.map((e) => ({ ...e, startedAt: e.startedAt.toISOString(), completedAt: e.completedAt?.toISOString() ?? null, nodeStates: [] }));
         }
     },
     Mutation: {
@@ -143,6 +213,85 @@ export const resolvers = {
                 return workspaceAssetSchema.parse(asset);
             });
         },
+        // ── Flow mutations ─────────────────────────────
+        createFlow: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                if (!ctx.flowStore)
+                    throw new Error('Flow store not available');
+                const flow = await ctx.flowStore.createFlow(args.workspaceId, args.name, args.definition, ctx.userId);
+                return toFlowGQL(flow);
+            });
+        },
+        updateFlow: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                if (!ctx.flowStore)
+                    throw new Error('Flow store not available');
+                const flow = await ctx.flowStore.updateFlow(args.id, { name: args.name ?? undefined, definition: args.definition ?? undefined });
+                if (!flow)
+                    throw new GraphQLError('Flow not found');
+                return toFlowGQL(flow);
+            });
+        },
+        deleteFlow: async (_, args, ctx) => {
+            if (!ctx.flowStore)
+                return false;
+            return await ctx.flowStore.deleteFlow(args.id);
+        },
+        saveAsTemplate: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                if (!ctx.flowStore)
+                    throw new Error('Flow store not available');
+                const flow = await ctx.flowStore.saveAsTemplate(args.flowId, args.name);
+                if (!flow)
+                    throw new GraphQLError('Source flow not found');
+                return toFlowGQL(flow);
+            });
+        },
+        executeFlow: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                if (!ctx.flowStore || !ctx.executionStore || !ctx.graphCompiler || !ctx.graphExecutor) {
+                    throw new Error('Execution infrastructure not available');
+                }
+                const flowStore = ctx.flowStore;
+                const executionStore = ctx.executionStore;
+                const graphCompiler = ctx.graphCompiler;
+                const graphExecutor = ctx.graphExecutor;
+                const flowRecord = await flowStore.getFlow(args.flowId);
+                if (!flowRecord)
+                    throw new GraphQLError('Flow not found');
+                const plan = graphCompiler.compile(flowRecord.definition);
+                const exec = await executionStore.createExecution(args.flowId, args.inputs ?? {});
+                await executionStore.updateExecutionStatus(exec.id, 'running');
+                // Run in background
+                const execCtx = { workspaceId: flowRecord.workspaceId, userId: ctx.userId, executionId: exec.id, abortController: new AbortController() };
+                void (async () => {
+                    try {
+                        for await (const event of graphExecutor.execute(plan, args.inputs ?? {}, execCtx)) {
+                            publishExecutionEvent(exec.id, event);
+                            if (event.type === 'node_complete') {
+                                await executionStore.updateNodeState(exec.id, event.nodeId, 'completed', event.output, undefined, event.duration);
+                            }
+                            else if (event.type === 'node_error') {
+                                await executionStore.updateNodeState(exec.id, event.nodeId, 'failed', undefined, event.error);
+                            }
+                            else if (event.type === 'flow_complete') {
+                                await executionStore.updateExecutionStatus(exec.id, 'completed', event.finalState);
+                            }
+                        }
+                    }
+                    catch (err) {
+                        await executionStore.updateExecutionStatus(exec.id, 'failed', undefined, err instanceof Error ? err.message : String(err));
+                    }
+                })();
+                return { ...exec, startedAt: exec.startedAt.toISOString(), completedAt: null, nodeStates: [] };
+            });
+        },
+        cancelExecution: async (_, args, ctx) => {
+            if (!ctx.executionStore)
+                return false;
+            await ctx.executionStore.updateExecutionStatus(args.executionId, 'cancelled');
+            return true;
+        },
         updateWorkspaceMetadata: async (_, args, ctx) => {
             return await resolveOrThrow(async () => {
                 const input = workspaceMetadataUpdateInputSchema.parse({
@@ -157,7 +306,16 @@ export const resolvers = {
             });
         }
     },
+    // ── Flow / Tool resolvers ────────────────────────────────
+    // These are merged into Query/Mutation via extend type in type-defs.
+    // Apollo merges them automatically.
     Subscription: {
+        flowExecutionProgress: {
+            subscribe: (_, args) => {
+                return pubsub.asyncIterableIterator(FLOW_EXECUTION_PROGRESS);
+            },
+            resolve: (payload) => payload.flowExecutionProgress
+        },
         conversationProgress: {
             subscribe: async (_, args, ctx) => {
                 return await resolveOrThrow(async () => {
@@ -172,6 +330,19 @@ export const resolvers = {
         }
     }
 };
+function toFlowGQL(flow) {
+    return {
+        id: flow.id,
+        workspaceId: flow.workspaceId,
+        name: flow.name,
+        description: flow.description ?? null,
+        definition: flow.definition,
+        isTemplate: flow.isTemplate,
+        version: flow.version,
+        createdAt: flow.createdAt.toISOString(),
+        updatedAt: flow.updatedAt.toISOString()
+    };
+}
 async function resolveOrThrow(operation) {
     try {
         return await operation();

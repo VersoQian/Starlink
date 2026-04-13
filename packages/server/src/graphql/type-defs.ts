@@ -241,7 +241,104 @@ export const typeDefs = gql`
     updateWorkspaceMetadata(input: UpdateWorkspaceMetadataInput!): WorkspaceDirectoryItem!
   }
 
+  # ── Flow / Tool Registry Types ──────────────────────────
+
+  type ToolRuntimeConfig {
+    timeout: Int!
+    retries: Int!
+    cacheable: Boolean!
+    streamable: Boolean!
+    parallel: Boolean!
+  }
+
+  type ToolPort {
+    name: String!
+    type: String!
+    description: String!
+    required: Boolean
+  }
+
+  type ToolDef {
+    name: String!
+    label: String!
+    description: String!
+    category: String!
+    icon: String!
+    color: String!
+    inputSchema: JSON!
+    outputSchema: JSON!
+    inputPorts: [ToolPort!]!
+    outputPorts: [ToolPort!]!
+    runtime: ToolRuntimeConfig!
+  }
+
+  type Flow {
+    id: ID!
+    workspaceId: ID!
+    name: String!
+    description: String
+    definition: JSON!
+    isTemplate: Boolean!
+    version: Int!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type FlowExecution {
+    id: ID!
+    flowId: ID!
+    status: String!
+    inputs: JSON
+    state: JSON
+    error: String
+    startedAt: String!
+    completedAt: String
+    nodeStates: [FlowNodeState!]!
+  }
+
+  type FlowNodeState {
+    nodeId: String!
+    status: String!
+    output: JSON
+    error: String
+    duration: Int
+  }
+
+  type FlowExecutionEvent {
+    executionId: ID!
+    type: String!
+    nodeId: String
+    nodeIds: [String!]
+    toolName: String
+    percent: Float
+    message: String
+    output: JSON
+    error: String
+    duration: Int
+    finalState: JSON
+  }
+
+  extend type Query {
+    availableTools: [ToolDef!]!
+    toolByName(name: String!): ToolDef
+    flows(workspaceId: ID!): [Flow!]!
+    flow(id: ID!): Flow
+    flowTemplates: [Flow!]!
+    flowExecution(id: ID!): FlowExecution
+    flowExecutions(flowId: ID!): [FlowExecution!]!
+  }
+
+  extend type Mutation {
+    createFlow(workspaceId: ID!, name: String!, definition: JSON!): Flow!
+    updateFlow(id: ID!, name: String, definition: JSON): Flow!
+    deleteFlow(id: ID!): Boolean!
+    saveAsTemplate(flowId: ID!, name: String!): Flow!
+    executeFlow(flowId: ID!, inputs: JSON): FlowExecution!
+    cancelExecution(executionId: ID!): Boolean!
+  }
+
   type Subscription {
     conversationProgress(workspaceId: ID!, conversationId: ID): ConversationEvent!
+    flowExecutionProgress(executionId: ID!): FlowExecutionEvent!
   }
 `

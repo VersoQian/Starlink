@@ -1,4 +1,5 @@
 import GraphQLJSON from 'graphql-type-json';
+import type { FlowDefinition } from '@starlink/shared';
 import type { GraphQLContext } from '../context/index.js';
 export declare const resolvers: {
     JSON: typeof GraphQLJSON;
@@ -370,6 +371,97 @@ export declare const resolvers: {
             changedBy: string;
             changedAt: string;
         }[]>;
+        availableTools: (_: unknown, __: unknown, ctx: GraphQLContext) => {
+            name: string;
+            label: string;
+            description: string;
+            category: import("@starlink/shared").ToolCategory;
+            icon: string;
+            color: string;
+            inputSchema: import("@starlink/shared").ToolInputSchema;
+            outputSchema: import("@starlink/shared").ToolOutputSchema;
+            inputPorts: import("@starlink/shared").PortDefinition[];
+            outputPorts: import("@starlink/shared").PortDefinition[];
+            runtime: import("@starlink/shared").ToolRuntimeConfig;
+        }[];
+        toolByName: (_: unknown, args: {
+            name: string;
+        }, ctx: GraphQLContext) => {
+            name: string;
+            label: string;
+            description: string;
+            category: import("@starlink/shared").ToolCategory;
+            icon: string;
+            color: string;
+            inputSchema: import("@starlink/shared").ToolInputSchema;
+            outputSchema: import("@starlink/shared").ToolOutputSchema;
+            inputPorts: import("@starlink/shared").PortDefinition[];
+            outputPorts: import("@starlink/shared").PortDefinition[];
+            runtime: import("@starlink/shared").ToolRuntimeConfig;
+        } | null;
+        flows: (_: unknown, args: {
+            workspaceId: string;
+        }, ctx: GraphQLContext) => Promise<{
+            id: string;
+            workspaceId: string;
+            name: string;
+            description: string | null;
+            definition: unknown;
+            isTemplate: boolean;
+            version: number;
+            createdAt: string;
+            updatedAt: string;
+        }[]>;
+        flow: (_: unknown, args: {
+            id: string;
+        }, ctx: GraphQLContext) => Promise<{
+            id: string;
+            workspaceId: string;
+            name: string;
+            description: string | null;
+            definition: unknown;
+            isTemplate: boolean;
+            version: number;
+            createdAt: string;
+            updatedAt: string;
+        } | null>;
+        flowTemplates: (_: unknown, __: unknown, ctx: GraphQLContext) => Promise<{
+            id: string;
+            workspaceId: string;
+            name: string;
+            description: string | null;
+            definition: unknown;
+            isTemplate: boolean;
+            version: number;
+            createdAt: string;
+            updatedAt: string;
+        }[]>;
+        flowExecution: (_: unknown, args: {
+            id: string;
+        }, ctx: GraphQLContext) => Promise<{
+            startedAt: string;
+            completedAt: string | null;
+            nodeStates: import("../application/execution-store.js").NodeStateRecord[];
+            id: string;
+            flowId: string;
+            status: import("@starlink/shared").ExecutionStatus;
+            inputs: Record<string, unknown>;
+            state: Record<string, unknown> | null;
+            error: string | null;
+        } | null>;
+        flowExecutions: (_: unknown, args: {
+            flowId: string;
+        }, ctx: GraphQLContext) => Promise<{
+            startedAt: string;
+            completedAt: string | null;
+            nodeStates: never[];
+            id: string;
+            flowId: string;
+            status: import("@starlink/shared").ExecutionStatus;
+            inputs: Record<string, unknown>;
+            state: Record<string, unknown> | null;
+            error: string | null;
+        }[]>;
     };
     Mutation: {
         startConversation: (_: unknown, args: {
@@ -601,6 +693,70 @@ export declare const resolvers: {
             content?: unknown;
             sourceTaskId?: string | null | undefined;
         }>;
+        createFlow: (_: unknown, args: {
+            workspaceId: string;
+            name: string;
+            definition: FlowDefinition;
+        }, ctx: GraphQLContext) => Promise<{
+            id: string;
+            workspaceId: string;
+            name: string;
+            description: string | null;
+            definition: unknown;
+            isTemplate: boolean;
+            version: number;
+            createdAt: string;
+            updatedAt: string;
+        }>;
+        updateFlow: (_: unknown, args: {
+            id: string;
+            name?: string;
+            definition?: FlowDefinition;
+        }, ctx: GraphQLContext) => Promise<{
+            id: string;
+            workspaceId: string;
+            name: string;
+            description: string | null;
+            definition: unknown;
+            isTemplate: boolean;
+            version: number;
+            createdAt: string;
+            updatedAt: string;
+        }>;
+        deleteFlow: (_: unknown, args: {
+            id: string;
+        }, ctx: GraphQLContext) => Promise<boolean>;
+        saveAsTemplate: (_: unknown, args: {
+            flowId: string;
+            name: string;
+        }, ctx: GraphQLContext) => Promise<{
+            id: string;
+            workspaceId: string;
+            name: string;
+            description: string | null;
+            definition: unknown;
+            isTemplate: boolean;
+            version: number;
+            createdAt: string;
+            updatedAt: string;
+        }>;
+        executeFlow: (_: unknown, args: {
+            flowId: string;
+            inputs?: Record<string, unknown>;
+        }, ctx: GraphQLContext) => Promise<{
+            startedAt: string;
+            completedAt: null;
+            nodeStates: never[];
+            id: string;
+            flowId: string;
+            status: import("@starlink/shared").ExecutionStatus;
+            inputs: Record<string, unknown>;
+            state: Record<string, unknown> | null;
+            error: string | null;
+        }>;
+        cancelExecution: (_: unknown, args: {
+            executionId: string;
+        }, ctx: GraphQLContext) => Promise<boolean>;
         updateWorkspaceMetadata: (_: unknown, args: {
             input: {
                 workspaceId: string;
@@ -636,6 +792,14 @@ export declare const resolvers: {
         }>;
     };
     Subscription: {
+        flowExecutionProgress: {
+            subscribe: (_: unknown, args: {
+                executionId: string;
+            }) => import("graphql-subscriptions/dist/pubsub-async-iterable-iterator.js").PubSubAsyncIterableIterator<unknown>;
+            resolve: (payload: {
+                flowExecutionProgress: unknown;
+            }) => unknown;
+        };
         conversationProgress: {
             subscribe: (_: unknown, args: {
                 workspaceId: string;

@@ -6,6 +6,8 @@ export type WorkspaceModuleId =
   | 'deep-research'
   | 'insights'
   | 'experts'
+  | 'macra'
+  | 'flow'
   | 'canvas'
   | 'comfy'
   | 'agents'

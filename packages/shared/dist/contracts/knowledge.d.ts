@@ -37,7 +37,7 @@ export declare const knowledgeTaskSchema: z.ZodObject<{
     createdAt: z.ZodString;
     updatedAt: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    type: "url" | "seed" | "file";
+    type: "url" | "file" | "seed";
     status: "failed" | "pending" | "processing" | "succeeded";
     id: string;
     workspaceId: string;
@@ -47,7 +47,7 @@ export declare const knowledgeTaskSchema: z.ZodObject<{
     payload?: Record<string, unknown> | undefined;
     error?: string | null | undefined;
 }, {
-    type: "url" | "seed" | "file";
+    type: "url" | "file" | "seed";
     status: "failed" | "pending" | "processing" | "succeeded";
     id: string;
     workspaceId: string;
@@ -70,7 +70,7 @@ export declare const kbTaskStatusSnapshotSchema: z.ZodObject<{
     status: "failed" | "pending" | "processing" | "succeeded";
     workspaceId: string;
     updatedAt: string;
-    taskType: "url" | "seed" | "file";
+    taskType: "url" | "file" | "seed";
     taskId: string;
     kbId: string;
     lastEventId: string;
@@ -79,7 +79,7 @@ export declare const kbTaskStatusSnapshotSchema: z.ZodObject<{
     status: "failed" | "pending" | "processing" | "succeeded";
     workspaceId: string;
     updatedAt: string;
-    taskType: "url" | "seed" | "file";
+    taskType: "url" | "file" | "seed";
     taskId: string;
     kbId: string;
     lastEventId: string;
@@ -169,7 +169,7 @@ export declare const knowledgeBaseStatusResponseSchema: z.ZodObject<{
         createdAt: z.ZodString;
         updatedAt: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        type: "url" | "seed" | "file";
+        type: "url" | "file" | "seed";
         status: "failed" | "pending" | "processing" | "succeeded";
         id: string;
         workspaceId: string;
@@ -179,7 +179,7 @@ export declare const knowledgeBaseStatusResponseSchema: z.ZodObject<{
         payload?: Record<string, unknown> | undefined;
         error?: string | null | undefined;
     }, {
-        type: "url" | "seed" | "file";
+        type: "url" | "file" | "seed";
         status: "failed" | "pending" | "processing" | "succeeded";
         id: string;
         workspaceId: string;
@@ -200,7 +200,7 @@ export declare const knowledgeBaseStatusResponseSchema: z.ZodObject<{
         publishedAt?: string | null | undefined;
     } | undefined;
     tasks?: {
-        type: "url" | "seed" | "file";
+        type: "url" | "file" | "seed";
         status: "failed" | "pending" | "processing" | "succeeded";
         id: string;
         workspaceId: string;
@@ -221,7 +221,7 @@ export declare const knowledgeBaseStatusResponseSchema: z.ZodObject<{
         publishedAt?: string | null | undefined;
     } | undefined;
     tasks?: {
-        type: "url" | "seed" | "file";
+        type: "url" | "file" | "seed";
         status: "failed" | "pending" | "processing" | "succeeded";
         id: string;
         workspaceId: string;
