@@ -1,11 +1,18 @@
-import { FileText, Sparkles, Zap } from 'lucide-react'
+import { FileText, PanelsTopLeft, LayoutGrid, Sparkles, Zap } from 'lucide-react'
 
 type CanvasHeaderProps = {
   isAnimating: boolean
   onOpenTutorial: () => void
+  viewMode?: 'freeform' | 'bmc'
+  onViewModeChange?: (mode: 'freeform' | 'bmc') => void
 }
 
-export function CanvasHeader({ isAnimating, onOpenTutorial }: CanvasHeaderProps) {
+export function CanvasHeader({
+  isAnimating,
+  onOpenTutorial,
+  viewMode = 'freeform',
+  onViewModeChange
+}: CanvasHeaderProps) {
   return (
     <header
       className={`flex items-center justify-between px-8 py-4 glass-effect border-b border-white/10 z-20 ${
@@ -24,6 +31,30 @@ export function CanvasHeader({ isAnimating, onOpenTutorial }: CanvasHeaderProps)
       </div>
 
       <div className="flex gap-4 items-center">
+        <div className="flex items-center gap-1 rounded-2xl border border-white/15 bg-slate-950/40 p-1 shadow-xl shadow-slate-950/30">
+          <button
+            onClick={() => onViewModeChange?.('freeform')}
+            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${
+              viewMode === 'freeform'
+                ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-white shadow-lg shadow-amber-500/30'
+                : 'text-slate-400 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <PanelsTopLeft className="w-4 h-4" />
+            自由画布
+          </button>
+          <button
+            onClick={() => onViewModeChange?.('bmc')}
+            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${
+              viewMode === 'bmc'
+                ? 'bg-gradient-to-r from-cyan-400 to-sky-500 text-white shadow-lg shadow-cyan-500/30'
+                : 'text-slate-400 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <LayoutGrid className="w-4 h-4" />
+            BMC 九宫格
+          </button>
+        </div>
         <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl glass-effect border border-white/20 hover:border-amber-400/50 hover:bg-white/10 transition-all text-sm font-semibold text-slate-200 hover:text-white">
           <FileText className="w-4 h-4" />
           导出

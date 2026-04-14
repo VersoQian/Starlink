@@ -10,7 +10,9 @@ import { CanvasSidebar } from './canvas-sidebar'
 import { CanvasFlow } from './canvas'
 import { CanvasTutorialDialog } from './canvas-tutorial-dialog'
 import { useConversationRuntime } from '@/features/workspace/hooks'
-import { AlertTriangle, Check, MessageCircle, X } from 'lucide-react'
+import { BmcGrid } from '@/features/macra/components/BmcGrid'
+import type { MacraNodeData } from '@/types/macra'
+import { AlertTriangle, Check, LayoutGrid, MessageCircle, PanelsTopLeft, X } from 'lucide-react'
 
 type CanvasPageProps = {
   workspaceId?: string
@@ -37,9 +39,11 @@ export function CanvasPage({
   const appendChatMessage = useComfyStore((state) => state.appendChatMessage)
   const setChatInput = useComfyStore((state) => state.setChatInput)
   const approveDecision = useComfyStore((state) => state.approveDecision)
-  const dismissInterrupt = useComfyStore((state) => state.dismissInterrupt)
+  const macraNodes = useComfyStore((state) => state.macraNodes)
+  const openDetailPanel = useComfyStore((state) => state.openDetailPanel)
 
   const runtime = useConversationRuntime(workspaceId)
+  const [viewMode, setViewMode] = useState<'freeform' | 'bmc'>('freeform')
 
   // 检测 HITL 决策请求
   const pendingDecisionRequest = useMemo(() => {
@@ -63,6 +67,17 @@ export function CanvasPage({
   const [showTutorial, setShowTutorial] = useState(false)
   const [tutorialStep, setTutorialStep] = useState(0)
   const [isAnimating, setIsAnimating] = useState(true)
+  const structuredNodes = useMemo(
+    () =>
+      Array.from(macraNodes.values()).filter((node): node is MacraNodeData =>
+        typeof node.domain === 'string' && node.type === 'cc-bmc-card'
+      ),
+    [macraNodes]
+  )
+  const conflictAlertCount = useMemo(
+    () => Array.from(macraNodes.values()).filter((node) => node.type === 'conflict-alert').length,
+    [macraNodes]
+  )
 
   useEffect(() => {
     const timer = setTimeout(() => setIsAnimating(false), 1200)
@@ -174,6 +189,8 @@ export function CanvasPage({
         <CanvasHeader
           isAnimating={isAnimating}
           onOpenTutorial={() => setShowTutorial(true)}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
 
         <div className="flex flex-1 overflow-hidden">
@@ -190,14 +207,75 @@ export function CanvasPage({
             knowledgeEvidence={knowledgeEvidence}
           />
 
-          <CanvasFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            isAnimating={isAnimating}
-          />
+          {viewMode === 'freeform' ? (
+            <CanvasFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              isAnimating={isAnimating}
+            />
+          ) : (
+            <main
+              className={`relative flex-1 overflow-hidden ${
+                isAnimating ? 'opacity-0' : 'animate-fade-in-up'
+              }`}
+              style={{ animationDelay: '0.3s' }}
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.12),transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]" />
+              <div className="absolute inset-0 overflow-hidden">
+                <div className="absolute left-12 top-12 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
+                <div className="absolute bottom-10 right-16 h-64 w-64 rounded-full bg-sky-500/10 blur-3xl" />
+              </div>
+              <div className="relative flex h-full flex-col px-6 pb-6 pt-5">
+                <div className="mb-4 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur-xl">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-cyan-300">
+                      <LayoutGrid className="h-4 w-4" />
+                      <span className="text-xs font-bold uppercase tracking-[0.24em]">Structured Business Model</span>
+                    </div>
+                    <h2 className="text-lg font-black text-white title-font">CC-BMC 结构化输出视图</h2>
+                    <p className="text-xs text-slate-400">
+                      用于答辩演示、结构化审阅和维度冲突检查。自由画布负责推演，九宫格负责归档表达。
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-center">
+                      <div className="text-xl font-black text-white">{structuredNodes.length}</div>
+                      <div className="text-[10px] uppercase tracking-[0.24em] text-cyan-200">BMC Nodes</div>
+                    </div>
+                    <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-center">
+                      <div className="text-xl font-black text-white">{conflictAlertCount}</div>
+                      <div className="text-[10px] uppercase tracking-[0.24em] text-amber-200">Conflict Alerts</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="relative min-h-0 flex-1 rounded-[28px] border border-white/10 bg-slate-950/70 backdrop-blur-xl">
+                  {structuredNodes.length > 0 ? (
+                    <BmcGrid
+                      nodes={structuredNodes}
+                      conflicts={[]}
+                      onNodeClick={(node) => openDetailPanel(node.id)}
+                    />
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-white/10 bg-white/5">
+                        <PanelsTopLeft className="h-7 w-7 text-cyan-300" />
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="text-base font-bold text-white">还没有可展示的 BMC 结构节点</h3>
+                        <p className="max-w-md text-sm text-slate-400">
+                          先在自由画布中运行多智能体分析或补充业务节点，系统会把带有商业维度的结果自动归入九宫格视图。
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </main>
+          )}
 
           {/* HITL 决策弹窗 */}
           {pendingDecisionRequest && (
