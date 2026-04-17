@@ -34,8 +34,8 @@ type DecisionPayload = {
 }
 
 const START_CONVERSATION_MUTATION = /* GraphQL */ `
-  mutation StartConversation($workspaceId: ID!, $question: String!) {
-    startConversation(workspaceId: $workspaceId, question: $question) {
+  mutation StartConversation($workspaceId: ID!, $question: String!, $kbId: ID) {
+    startConversation(workspaceId: $workspaceId, question: $question, kbId: $kbId) {
       metadata {
         id
       }
@@ -468,7 +468,7 @@ export function useMacraConversation(workspaceId: string) {
   }, [updateConflicts, updatePhase, updateStage, workspaceId])
 
   const startAnalysis = useCallback(async (question: string, options: StartAnalysisOptions = {}) => {
-    void options.knowledgeBaseId
+    const kbId = options.knowledgeBaseId
 
     watcherCancelRef.current?.()
     watcherCancelRef.current = null
@@ -499,7 +499,8 @@ export function useMacraConversation(workspaceId: string) {
         }
       }>(START_CONVERSATION_MUTATION, {
         workspaceId,
-        question
+        question,
+        kbId: kbId ?? undefined
       })
 
       const nextConversationId = response.startConversation.metadata.id

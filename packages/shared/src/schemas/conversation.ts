@@ -36,6 +36,13 @@ export const seminarDecisionRequestedPayloadSchema = z.object({
   occurredAt: z.string()
 })
 
+export const knowledgeEvidenceSchema = z.object({
+  docId: z.string(),
+  snippet: z.string(),
+  score: z.number(),
+  metadata: z.record(z.unknown()).optional()
+})
+
 export const conversationEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('graph/appended'),
@@ -51,6 +58,11 @@ export const conversationEventSchema = z.discriminatedUnion('type', [
       removedNodeIds: z.array(z.string()).optional(),
       removedEdgeIds: z.array(z.string()).optional()
     })
+  }),
+  z.object({
+    type: z.literal('evidence/updated'),
+    conversationId: z.string(),
+    payload: z.array(knowledgeEvidenceSchema)
   }),
   z.object({
     type: z.literal('status'),
@@ -86,13 +98,6 @@ export const conversationMetadataSchema = z.object({
   updatedAt: z.date(),
   status: conversationStatusSchema,
   latestQuestion: z.string().optional()
-})
-
-export const knowledgeEvidenceSchema = z.object({
-  docId: z.string(),
-  snippet: z.string(),
-  score: z.number(),
-  metadata: z.record(z.unknown()).optional()
 })
 
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>

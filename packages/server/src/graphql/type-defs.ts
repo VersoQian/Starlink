@@ -228,7 +228,7 @@ export const typeDefs = gql`
   }
 
   type Mutation {
-    startConversation(workspaceId: ID!, question: String!): StartConversationPayload!
+    startConversation(workspaceId: ID!, question: String!, kbId: ID): StartConversationPayload!
     approveDecision(conversationId: ID!, decision: String): Boolean!
     addNode(workspaceId: ID!, input: NodeInput!): CanvasNode!
     connectNodes(workspaceId: ID!, input: EdgeInput!): CanvasEdge!

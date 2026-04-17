@@ -127,6 +127,91 @@ kbRouter.post('/kb/:id/import/url', async (req, res, next) => {
   }
 })
 
+kbRouter.get('/kb/:id/search', async (req, res, next) => {
+  try {
+    const workspaceId = readWorkspaceId(req.query.workspaceId)
+    const query = typeof req.query.query === 'string' ? req.query.query.trim() : ''
+    const topK = Math.min(Math.max(Number(req.query.topK) || 5, 1), 20)
+
+    if (!query) {
+      res.status(400).json({ code: 400, message: 'query 参数不能为空' })
+      return
+    }
+
+    const kb = await KbService.getById(req.params.id, workspaceId)
+
+    const keywords = query
+      .split(/[\s,，。、；;！!？?\-_/]+/)
+      .map((k) => k.trim())
+      .filter((k) => k.length >= 2)
+
+    if (keywords.length === 0) {
+      res.json({ results: [] })
+      return
+    }
+
+    const seedWhere = keywords.map((kw) => ({
+      text: { contains: kw, mode: 'insensitive' as const }
+    }))
+
+    const seeds = await prisma.seed.findMany({
+      where: {
+        kbId: kb.id,
+        OR: seedWhere
+      },
+      take: topK * 2,
+      orderBy: { createdAt: 'desc' }
+    })
+
+    const documents = await prisma.document.findMany({
+      where: {
+        kbId: kb.id,
+        OR: keywords.map((kw) => ({
+          title: { contains: kw, mode: 'insensitive' as const }
+        }))
+      },
+      take: topK,
+      orderBy: { createdAt: 'desc' }
+    })
+
+    type ScoredResult = { docId: string; snippet: string; score: number; metadata: Record<string, unknown> }
+    const results: ScoredResult[] = []
+
+    for (const seed of seeds) {
+      const matchCount = keywords.filter((kw) =>
+        seed.text.toLowerCase().includes(kw.toLowerCase())
+      ).length
+      const score = matchCount / keywords.length
+      const snippet = seed.text.length > 300 ? seed.text.substring(0, 300) + '...' : seed.text
+      results.push({
+        docId: seed.id,
+        snippet,
+        score,
+        metadata: { type: 'seed', kbId: kb.id }
+      })
+    }
+
+    for (const doc of documents) {
+      const matchCount = keywords.filter((kw) =>
+        doc.title.toLowerCase().includes(kw.toLowerCase())
+      ).length
+      const score = (matchCount / keywords.length) * 0.8
+      results.push({
+        docId: doc.id,
+        snippet: `[文档] ${doc.title}`,
+        score,
+        metadata: { type: 'document', kbId: kb.id, path: doc.path, mime: doc.mime }
+      })
+    }
+
+    results.sort((a, b) => b.score - a.score)
+
+    res.json({ results: results.slice(0, topK) })
+  } catch (error) {
+    next(error)
+  }
+})
+
 kbRouter.get('/kb/:id/status', async (req, res, next) => {
   try {
     const workspaceId = readWorkspaceId(req.query.workspaceId)

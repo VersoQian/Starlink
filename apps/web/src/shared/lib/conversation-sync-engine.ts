@@ -8,6 +8,7 @@ export type ConversationProgressEvent = {
   type:
     | 'graph/appended'
     | 'graph/diff'
+    | 'evidence/updated'
     | 'status'
     | 'phase.changed'
     | 'seminar.turn.completed'
@@ -42,6 +43,7 @@ type WatchConversationOptions = {
   conversationId: string
   onGraphAppended?: (payload: unknown) => void
   onGraphDiff?: (payload: unknown) => void
+  onEvidence?: (payload: unknown) => void
   onEvent?: (event: ConversationProgressEvent) => void
   loadLatestGraph?: () => Promise<unknown>
 }
@@ -174,6 +176,10 @@ export function watchConversation(options: WatchConversationOptions) {
 
         if (event.type === 'graph/diff' && event.payload) {
           options.onGraphDiff?.(event.payload)
+        }
+
+        if (event.type === 'evidence/updated' && event.payload) {
+          options.onEvidence?.(event.payload)
         }
 
         if (event.type === 'status') {

@@ -53,8 +53,8 @@ const createInitialChatMessages = (): ChatMessage[] => [
 ]
 
 const START_CONVERSATION_MUTATION = /* GraphQL */ `
-  mutation StartConversation($workspaceId: ID!, $question: String!) {
-    startConversation(workspaceId: $workspaceId, question: $question) {
+  mutation StartConversation($workspaceId: ID!, $question: String!, $kbId: ID) {
+    startConversation(workspaceId: $workspaceId, question: $question, kbId: $kbId) {
       metadata {
         id
       }
@@ -205,7 +205,7 @@ interface MacraState {
   applyCanvasActions: (actions: CanvasAction[]) => Promise<void>
 
   // Business LangGraph 调用（通过 GraphQL startConversation）
-  callLangGraph: (userPrompt: string, mode?: 'seed' | 'completion' | 'general') => Promise<void>
+  callLangGraph: (userPrompt: string, mode?: 'seed' | 'completion' | 'general', kbId?: string) => Promise<void>
 
   // AI Critic 调用（通过 GraphQL 后端自动触发，前端保留手动触发接口）
   callCritic: () => Promise<void>
@@ -440,7 +440,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   },
 
   // ============== Business LangGraph 调用 ==============
-  callLangGraph: async (userPrompt, _mode = 'general') => {
+  callLangGraph: async (userPrompt, _mode = 'general', kbId) => {
     void _mode
     set({ isOrchestratorProcessing: true })
 
@@ -470,7 +470,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         startConversation: { metadata: { id: string }; graph: WorkspaceGraphResponse }
       }>(START_CONVERSATION_MUTATION, {
         workspaceId,
-        question: userPrompt
+        question: userPrompt,
+        kbId: kbId ?? undefined
       })
 
       const conversationId = response.startConversation.metadata.id
@@ -593,6 +594,12 @@ export const useComfyStore = create<MacraState>((set, get) => ({
             removedNodeIds?: string[]
             removedEdgeIds?: string[]
           })
+        },
+        onEvidence: (payload) => {
+          const evidence = payload as KnowledgeEvidence[]
+          if (Array.isArray(evidence)) {
+            set({ knowledgeEvidence: evidence })
+          }
         },
         loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId)
       })

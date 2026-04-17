@@ -160,14 +160,15 @@ export const resolvers = {
   Mutation: {
     startConversation: async (
       _: unknown,
-      args: { workspaceId: string; question: string },
+      args: { workspaceId: string; question: string; kbId?: string | null },
       ctx: GraphQLContext
     ) => {
       return await resolveOrThrow(async () => {
         const record = await ctx.conversationStore.startConversation(
           args.workspaceId,
           ctx.userId,
-          args.question
+          args.question,
+          args.kbId ?? undefined
         )
         const metadata = conversationMetadataSchema.parse(record.metadata)
         return {

@@ -91,10 +91,23 @@ export class ConversationStore {
   async startConversation(
     workspaceId: string,
     userId: string,
-    question: string
+    question: string,
+    kbId?: string
   ): Promise<ConversationRecord> {
     await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
     const existingGraph = await this.getGraph(workspaceId)
+
+    let knowledgeEvidence: KnowledgeEvidence[] = []
+    if (kbId) {
+      const { searchKnowledgeBase } = await import('../services/kb-task-service.js')
+      const results = await searchKnowledgeBase(kbId, question, 5)
+      knowledgeEvidence = results.map((r) => ({
+        docId: r.docId,
+        snippet: r.snippet,
+        score: r.score,
+        metadata: r.metadata
+      }))
+    }
 
     const id = nanoid()
     const startedAt = new Date()
@@ -109,7 +122,7 @@ export class ConversationStore {
     const record: ConversationRecord = {
       metadata,
       graph: existingGraph,
-      knowledgeEvidence: []
+      knowledgeEvidence
     }
 
     await this.sessionStore.createConversation(id, record)
@@ -120,7 +133,8 @@ export class ConversationStore {
       userId,
       question,
       traceId: id,
-      baseGraph: existingGraph
+      baseGraph: existingGraph,
+      knowledgeEvidence
     })
     let initialized = false
 
@@ -139,6 +153,15 @@ export class ConversationStore {
           payload: currentGraph
         }
         await this.publishEvent(workspaceId, baseEvent)
+
+        if (knowledgeEvidence.length > 0) {
+          const evidenceEvent: ConversationEvent = {
+            type: 'evidence/updated',
+            conversationId: id,
+            payload: knowledgeEvidence
+          }
+          await this.publishEvent(workspaceId, evidenceEvent)
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -586,6 +609,14 @@ export class ConversationStore {
               payload: currentGraph
             }
             await this.publishEvent(workspaceId, appendedEvent)
+          }
+          if (record.knowledgeEvidence.length > 0) {
+            const evidenceEvent: ConversationEvent = {
+              type: 'evidence/updated',
+              conversationId,
+              payload: record.knowledgeEvidence
+            }
+            await this.publishEvent(workspaceId, evidenceEvent)
           }
           continue
         }

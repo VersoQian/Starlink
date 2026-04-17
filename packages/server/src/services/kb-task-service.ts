@@ -188,6 +188,45 @@ export async function importKnowledgeUrl(
   }
 }
 
+export type KnowledgeSearchResult = {
+  docId: string
+  snippet: string
+  score: number
+  metadata?: Record<string, unknown>
+}
+
+export async function searchKnowledgeBase(
+  kbId: string,
+  query: string,
+  topK = 5
+): Promise<KnowledgeSearchResult[]> {
+  const baseUrl = getTaskServiceBaseUrl()
+  const endpoint = new URL(`/kb/${kbId}/search`, baseUrl)
+  endpoint.searchParams.set('query', query)
+  endpoint.searchParams.set('topK', String(topK))
+
+  try {
+    const response = await fetch(endpoint.toString(), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    })
+
+    if (!response.ok) {
+      console.warn('[kb-task-service] search failed', {
+        status: response.status,
+        statusText: response.statusText
+      })
+      return []
+    }
+
+    const payload = (await response.json()) as { results?: KnowledgeSearchResult[] }
+    return Array.isArray(payload.results) ? payload.results : []
+  } catch (error) {
+    console.warn('[kb-task-service] search request failed', { error: String(error) })
+    return []
+  }
+}
+
 export async function getKnowledgeBaseStatus(workspaceId: string, kbId: string): Promise<{
   knowledgeBase: GatewayKnowledgeBase
   tasks: GatewayKbTask[]
