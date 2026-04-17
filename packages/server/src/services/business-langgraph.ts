@@ -12,7 +12,7 @@ import {
   type KnowledgeEvidence,
   type SeminarPhase
 } from '@starlink/shared'
-import { computeGroundingRate, parseCitations } from './citation-parser.js'
+import { computeGroundingRate, parseCitations } from './citation/index.js'
 import type { Evidence } from '@starlink/shared'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
