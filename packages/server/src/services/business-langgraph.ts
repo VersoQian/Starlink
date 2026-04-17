@@ -5,12 +5,15 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { Annotation, StateGraph, START, END } from '@langchain/langgraph'
 import {
   createAuditLogger,
+  deriveSnippetId,
   type CanvasEdge,
   type CanvasGraph,
   type CanvasNode,
   type KnowledgeEvidence,
   type SeminarPhase
 } from '@starlink/shared'
+import { computeGroundingRate, parseCitations } from './citation-parser.js'
+import type { Evidence } from '@starlink/shared'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
@@ -160,6 +163,7 @@ const BusinessState = Annotation.Root({
   roundNumber: Annotation<number>(),
   supervisorDirective: Annotation<SupervisorDirective | null>(),
   crossContext: Annotation<CrossContext>(),
+  knowledgeEvidence: Annotation<KnowledgeEvidence[]>(),
   generalNodes: Annotation<MacraNodeData[]>(),
   marketNodes: Annotation<MacraNodeData[]>(),
   productNodes: Annotation<MacraNodeData[]>(),
@@ -221,6 +225,7 @@ export class BusinessLangGraphService {
     question: string
     traceId?: string
     baseGraph?: CanvasGraph
+    knowledgeEvidence?: KnowledgeEvidence[]
   }): AsyncGenerator<BusinessStreamUpdate> {
     const traceId = context.traceId ?? nanoid(10)
     const streamStartedAt = Date.now()
@@ -266,7 +271,11 @@ export class BusinessLangGraphService {
       status: 'started'
     })
 
-    yield { type: 'init', graph: builder.getGraph() }
+    yield {
+      type: 'init',
+      graph: builder.getGraph(),
+      knowledgeEvidence: context.knowledgeEvidence
+    }
 
     if (!this.model) {
       auditLogger.warn({
@@ -297,6 +306,7 @@ export class BusinessLangGraphService {
           roundNumber: 0,
           supervisorDirective: null,
           crossContext: initialCrossContext,
+          knowledgeEvidence: context.knowledgeEvidence ?? [],
           generalNodes: [],
           marketNodes: seededState.marketNodes,
           productNodes: seededState.productNodes,
@@ -686,6 +696,8 @@ ${conflictSummary}
       return { generalNodes: [fallbackNode] }
     }
 
+    const knowledgeContext = this.buildKnowledgePrompt(state)
+
     try {
       const response = await this.model.invoke([
         new SystemMessage(`你是 Orchestrator，负责直接回答用户的问题。
@@ -694,7 +706,7 @@ ${conflictSummary}
 1. 回答必须直接、具体，优先解决用户当前问题
 2. 如果当前工作区已经有商业画布，请结合既有上下文回答
 3. 使用简洁 Markdown
-4. 不要输出 JSON，不要解释你的系统角色`),
+4. 不要输出 JSON，不要解释你的系统角色${knowledgeContext}`),
         new HumanMessage(state.question)
       ])
       const content = readModelText(response) || '当前没有足够信息生成明确答复。'
@@ -759,6 +771,94 @@ ${conflictSummary}
     return `\n\n---\n以下是其他 Agent 的分析结果和 Supervisor 的指导，请确保你的分析与之保持一致性：\n${parts.join('\n')}`
   }
 
+  private buildKnowledgePrompt(state: BusinessStateType): string {
+    const evidence = state.knowledgeEvidence
+    if (!evidence || evidence.length === 0) return ''
+
+    const snippets = evidence
+      .map((e) => {
+        const snippetId = deriveSnippetId(
+          e.docId,
+          e.metadata as { chunkIndex?: number } | undefined,
+          e.snippet
+        )
+        return `[ref:${e.docId}#${snippetId}] ${e.snippet}`
+      })
+      .join('\n\n')
+
+    return `\n\n---\n## 知识库参考资料（可被引用）
+
+以下是从工作区知识库检索到的资料。生成 \`content\` 字段时**必须**遵循引用规则：
+
+1. 每个具体判断后面必须紧跟引用标记 \`[[ref:docId#snippetId]]\`
+2. 无 evidence 支撑的判断必须明确标记 \`[[no-ref]]\`
+3. 禁止编造 docId 或 snippetId；只能使用下方出现的标识
+4. 引用标记紧跟在被引用的短语之后，不单独成行
+
+### Evidence 索引
+
+${snippets}
+
+### Few-shot 示例
+
+"主力客群是 Z 世代都市青年[[ref:d42#chunk-3]]，集中在一二线城市[[ref:d8#chunk-1]]。该群体消费能力较父辈提升约 30%[[no-ref]]。"`
+  }
+
+  /**
+   * Collect evidenceSet in the format expected by citation-parser, deriving
+   * snippetId when the raw KnowledgeEvidence entries lack one.
+   */
+  private toParserEvidence(evidence: KnowledgeEvidence[] | undefined): Evidence[] {
+    if (!evidence || evidence.length === 0) return []
+    return evidence.map((e, i) => {
+      const snippetId = deriveSnippetId(
+        e.docId,
+        e.metadata as { chunkIndex?: number } | undefined,
+        e.snippet
+      )
+      return {
+        id: `${e.docId}-${snippetId}`,
+        docId: e.docId,
+        snippetId,
+        text: e.snippet,
+        score: e.score,
+        metadata: (e.metadata ?? {}) as Evidence['metadata']
+      }
+    })
+  }
+
+  /**
+   * Post-process validated LLM agent output. For each node's `content` field,
+   * parse inline `[[ref:docId#snippetId]]` / `[[no-ref]]` tokens and:
+   *   - replace `content` with the clean text (tokens removed)
+   *   - attach citation/no-ref/invalidRefs/groundingRate info to node.metadata
+   */
+  private applyCitationParsing(
+    nodes: MacraNodeData[],
+    evidence: KnowledgeEvidence[] | undefined
+  ): MacraNodeData[] {
+    const parserEvidence = this.toParserEvidence(evidence)
+    return nodes.map((node) => {
+      const rawContent = typeof node.content === 'string' ? node.content : ''
+      if (!rawContent.includes('[[')) {
+        return node
+      }
+      const parsed = parseCitations(rawContent, parserEvidence)
+      const groundingRate = computeGroundingRate(parsed)
+      return {
+        ...node,
+        content: parsed.cleanText,
+        metadata: {
+          ...(node.metadata ?? {}),
+          citations: parsed.spans,
+          noRefRanges: parsed.noRefRanges,
+          invalidRefs: parsed.invalidRefs,
+          groundingRate
+        }
+      }
+    })
+  }
+
   private isAgentActive(state: BusinessStateType, agentNodeName: string): boolean {
     const directive = state.supervisorDirective
     if (!directive) return true
@@ -790,6 +890,7 @@ ${conflictSummary}
     }
 
     const crossContext = this.buildCrossContextPrompt(state, 'market')
+    const knowledgeContext = this.buildKnowledgePrompt(state)
 
     const prompt = `你是 Market_Agent（市场分析专家），负责生成 CC-BMC 商业模型画布中的三个维度：
 
@@ -798,7 +899,7 @@ ${conflictSummary}
 3. **客户关系** (CUSTOMER_RELATIONSHIPS)：如何维系客户、服务模式、用户粘性
 
 用户问题：${state.question}
-${crossContext}${this.getRevisionSuffix(state)}
+${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 
 请生成 3 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
 - id: 自动生成（格式 market-xxxxx）
@@ -855,7 +956,7 @@ ${crossContext}${this.getRevisionSuffix(state)}
           usage: extractUsageMetadata(response)
         }
       })
-      return { marketNodes: validatedNodes }
+      return { marketNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runMarketAgent',
@@ -898,6 +999,7 @@ ${crossContext}${this.getRevisionSuffix(state)}
     }
 
     const crossContext = this.buildCrossContextPrompt(state, 'product')
+    const knowledgeContext = this.buildKnowledgePrompt(state)
 
     const prompt = `你是 Product_Agent（产品策略专家），负责生成 CC-BMC 商业模型画布中的四个维度：
 
@@ -907,7 +1009,7 @@ ${crossContext}${this.getRevisionSuffix(state)}
 4. **重要合作** (KEY_PARTNERSHIPS)：关键伙伴、生态协作、供应链与战略联盟
 
 用户问题：${state.question}
-${crossContext}${this.getRevisionSuffix(state)}
+${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 
 请生成 4 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
 - id: 自动生成（格式 product-xxxxx）
@@ -966,7 +1068,7 @@ ${crossContext}${this.getRevisionSuffix(state)}
           usage: extractUsageMetadata(response)
         }
       })
-      return { productNodes: validatedNodes }
+      return { productNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runProductAgent',
@@ -1009,6 +1111,7 @@ ${crossContext}${this.getRevisionSuffix(state)}
     }
 
     const crossContext = this.buildCrossContextPrompt(state, 'finance')
+    const knowledgeContext = this.buildKnowledgePrompt(state)
 
     const prompt = `你是 Finance_Agent（财务分析专家），负责生成 CC-BMC 商业模型画布中的两个维度：
 
@@ -1016,7 +1119,7 @@ ${crossContext}${this.getRevisionSuffix(state)}
 2. **成本结构** (COST_STRUCTURE)：主要成本、成本控制、盈利能力
 
 用户问题：${state.question}
-${crossContext}${this.getRevisionSuffix(state)}
+${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 
 请生成 2 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
 - id: 自动生成（格式 finance-xxxxx）
@@ -1073,7 +1176,7 @@ ${crossContext}${this.getRevisionSuffix(state)}
           usage: extractUsageMetadata(response)
         }
       })
-      return { financeNodes: validatedNodes }
+      return { financeNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runFinanceAgent',
@@ -1727,6 +1830,7 @@ function createBlankState(params: {
     roundNumber: 0,
     supervisorDirective: null,
     crossContext: EMPTY_CROSS_CONTEXT,
+    knowledgeEvidence: [],
     generalNodes: [],
     marketNodes: [],
     productNodes: [],
