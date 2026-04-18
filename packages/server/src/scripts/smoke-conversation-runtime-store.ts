@@ -124,7 +124,8 @@ function buildRecord(
       nodes: [],
       edges: []
     },
-    knowledgeEvidence: []
+    knowledgeEvidence: [],
+    citations: []
   }
 }
 

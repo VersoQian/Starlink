@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { canvasGraphSchema } from './canvas.js'
+import { cardCitationSchema } from './citation.js'
 
 export const conversationStatusSchema = z.enum(['idle', 'running', 'paused', 'failed', 'completed'])
 export const seminarPhaseSchema = z.enum(['planning', 'execution', 'review', 'decision'])
@@ -63,6 +64,15 @@ export const conversationEventSchema = z.discriminatedUnion('type', [
     type: z.literal('evidence/updated'),
     conversationId: z.string(),
     payload: z.array(knowledgeEvidenceSchema)
+  }),
+  z.object({
+    type: z.literal('card/cited'),
+    conversationId: z.string(),
+    payload: z.object({
+      cardId: z.string(),
+      citation: cardCitationSchema,
+      groundingRate: z.number()
+    })
   }),
   z.object({
     type: z.literal('status'),

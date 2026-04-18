@@ -51,10 +51,29 @@ export const typeDefs = gql`
     metadata: JSON
   }
 
+  type EvidenceRef {
+    evidenceId: ID!
+    docId: ID!
+    snippetId: String!
+  }
+
+  type CitationSpan {
+    textStart: Int!
+    textEnd: Int!
+    refs: [EvidenceRef!]!
+  }
+
+  type CardCitation {
+    cardId: ID!
+    fieldName: String!
+    spans: [CitationSpan!]!
+  }
+
   type StartConversationPayload {
     metadata: ConversationMetadata!
     graph: CanvasGraph!
     knowledgeEvidence: [KnowledgeEvidence!]!
+    citations: [CardCitation!]!
   }
 
   type KbTaskStatus {
@@ -219,6 +238,7 @@ export const typeDefs = gql`
     workspaceGraph(workspaceId: ID!): CanvasGraph!
     conversation(id: ID!): StartConversationPayload
     conversationRuntimeEvents(workspaceId: ID!, conversationId: ID): [ConversationEvent!]!
+    cardsReferencingEvidence(conversationId: ID!, evidenceId: ID!): [ID!]!
     kbTaskStatus(workspaceId: ID!, kbId: ID!): [KbTaskStatus!]!
     knowledgeBases(workspaceId: ID!): [KnowledgeBase!]!
     knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!

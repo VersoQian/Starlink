@@ -40,8 +40,29 @@ export const resolvers = {
             updatedAt: record.metadata.updatedAt.toISOString()
           },
           graph: record.graph,
-          knowledgeEvidence: record.knowledgeEvidence ?? []
+          knowledgeEvidence: record.knowledgeEvidence ?? [],
+          citations: record.citations ?? []
         }
+      })
+    },
+    cardsReferencingEvidence: async (
+      _: unknown,
+      args: { conversationId: string; evidenceId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const record = await ctx.conversationStore.getConversation(args.conversationId, ctx.userId)
+        if (!record) return []
+        const cardIds = new Set<string>()
+        for (const citation of record.citations ?? []) {
+          for (const span of citation.spans) {
+            if (span.refs.some((r) => r.evidenceId === args.evidenceId)) {
+              cardIds.add(citation.cardId)
+              break
+            }
+          }
+        }
+        return Array.from(cardIds)
       })
     },
     conversationRuntimeEvents: async (
@@ -178,7 +199,8 @@ export const resolvers = {
             updatedAt: metadata.updatedAt.toISOString()
           },
           graph: record.graph,
-          knowledgeEvidence: record.knowledgeEvidence ?? []
+          knowledgeEvidence: record.knowledgeEvidence ?? [],
+          citations: record.citations ?? []
         }
       })
     },

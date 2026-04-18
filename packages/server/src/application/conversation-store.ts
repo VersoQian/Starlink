@@ -2,6 +2,8 @@ import { nanoid } from 'nanoid'
 import type {
   CanvasEdge,
   CanvasGraph,
+  CardCitation,
+  CitationSpan,
   WorkspaceMetadataUpdateInput,
   CanvasNode,
   CommunityPostInput,
@@ -122,7 +124,8 @@ export class ConversationStore {
     const record: ConversationRecord = {
       metadata,
       graph: existingGraph,
-      knowledgeEvidence
+      knowledgeEvidence,
+      citations: []
     }
 
     await this.sessionStore.createConversation(id, record)
@@ -650,6 +653,21 @@ export class ConversationStore {
 
           const deltaNodes = update.delta.nodes ?? []
           for (const node of deltaNodes) {
+            const nodeCitations = extractCitationsFromNode(node)
+            if (nodeCitations) {
+              record.citations = upsertCardCitation(record.citations, nodeCitations)
+              const groundingRate = extractGroundingRate(node)
+              await publishEvent({
+                type: 'card/cited',
+                conversationId,
+                payload: {
+                  cardId: nodeCitations.cardId,
+                  citation: nodeCitations,
+                  groundingRate
+                }
+              })
+            }
+
             const info = extractRuntimeInfo(node)
             if (!info) continue
 
@@ -937,4 +955,72 @@ function findLatestDecision(graph: CanvasGraph): string {
     .filter((item): item is ExtractRuntimeInfo => item !== null)
     .filter((item) => item.stage === 'decision')
   return decisionNodes[decisionNodes.length - 1]?.summary ?? ''
+}
+
+/**
+ * Pull `citations` (CitationSpan[]) from a node's metadata and wrap it into
+ * a `CardCitation` entry keyed by cardId + fieldName='content'.
+ *
+ * Returns null if the node has no citation metadata (e.g., non-BMC node,
+ * or agent output that didn't contain [[ref:...]] tokens).
+ */
+function extractCitationsFromNode(node: CanvasNode): CardCitation | null {
+  const data = node.data as { meta?: { citations?: unknown } } | undefined
+  const meta = data?.meta
+  if (!meta || typeof meta !== 'object') return null
+  const rawCitations = (meta as { citations?: unknown }).citations
+  if (!Array.isArray(rawCitations) || rawCitations.length === 0) return null
+
+  const spans: CitationSpan[] = []
+  for (const entry of rawCitations) {
+    if (!entry || typeof entry !== 'object') continue
+    const span = entry as Partial<CitationSpan>
+    if (
+      typeof span.textStart === 'number' &&
+      typeof span.textEnd === 'number' &&
+      Array.isArray(span.refs)
+    ) {
+      spans.push({
+        textStart: span.textStart,
+        textEnd: span.textEnd,
+        refs: span.refs.map((r) => ({
+          evidenceId: String((r as { evidenceId?: unknown }).evidenceId ?? ''),
+          docId: String((r as { docId?: unknown }).docId ?? ''),
+          snippetId: String((r as { snippetId?: unknown }).snippetId ?? '')
+        }))
+      })
+    }
+  }
+
+  if (spans.length === 0) return null
+  return {
+    cardId: node.id,
+    fieldName: 'content',
+    spans
+  }
+}
+
+/**
+ * Insert-or-replace: keep a single CardCitation per (cardId, fieldName) key.
+ * A newer emission for the same card replaces the previous one (supports
+ * Stage 4 revision rounds, DEC-3 soft-delete handled at Stage 4).
+ */
+function upsertCardCitation(
+  list: CardCitation[],
+  next: CardCitation
+): CardCitation[] {
+  const idx = list.findIndex(
+    (c) => c.cardId === next.cardId && c.fieldName === next.fieldName
+  )
+  if (idx === -1) return [...list, next]
+  const copy = [...list]
+  copy[idx] = next
+  return copy
+}
+
+function extractGroundingRate(node: CanvasNode): number {
+  const meta = (node.data as { meta?: { groundingRate?: unknown } } | undefined)?.meta
+  if (!meta || typeof meta !== 'object') return 0
+  const value = (meta as { groundingRate?: unknown }).groundingRate
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }

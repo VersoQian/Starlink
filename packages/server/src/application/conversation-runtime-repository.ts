@@ -1,6 +1,7 @@
 import { Redis } from 'ioredis'
 import type {
   CanvasGraph,
+  CardCitation,
   ConversationEvent,
   ConversationMetadata,
   KnowledgeEvidence,
@@ -11,6 +12,8 @@ export type ConversationRecord = {
   metadata: ConversationMetadata
   graph: CanvasGraph
   knowledgeEvidence: KnowledgeEvidence[]
+  /** Cell-level citations collected across agent outputs. */
+  citations: CardCitation[]
 }
 
 export type PendingApprovalData = {
@@ -47,6 +50,7 @@ type SerializableConversationRecord = {
   }
   graph: CanvasGraph
   knowledgeEvidence: KnowledgeEvidence[]
+  citations: CardCitation[]
 }
 
 type RepositoryConfig = {
@@ -641,7 +645,8 @@ function serializeRecord(record: ConversationRecord): SerializableConversationRe
       updatedAt: record.metadata.updatedAt.toISOString()
     },
     graph: cloneGraph(record.graph),
-    knowledgeEvidence: cloneKnowledgeEvidence(record.knowledgeEvidence)
+    knowledgeEvidence: cloneKnowledgeEvidence(record.knowledgeEvidence),
+    citations: cloneCitations(record.citations)
   }
 }
 
@@ -654,7 +659,8 @@ function deserializeRecord(payload: string): ConversationRecord {
       updatedAt: new Date(parsed.metadata.updatedAt)
     },
     graph: cloneGraph(parsed.graph),
-    knowledgeEvidence: cloneKnowledgeEvidence(parsed.knowledgeEvidence ?? [])
+    knowledgeEvidence: cloneKnowledgeEvidence(parsed.knowledgeEvidence ?? []),
+    citations: cloneCitations(parsed.citations ?? [])
   }
 }
 
@@ -666,7 +672,8 @@ function cloneRecord(record: ConversationRecord): ConversationRecord {
       updatedAt: new Date(record.metadata.updatedAt)
     },
     graph: cloneGraph(record.graph),
-    knowledgeEvidence: cloneKnowledgeEvidence(record.knowledgeEvidence)
+    knowledgeEvidence: cloneKnowledgeEvidence(record.knowledgeEvidence),
+    citations: cloneCitations(record.citations)
   }
 }
 
@@ -682,6 +689,18 @@ function cloneKnowledgeEvidence(knowledgeEvidence: KnowledgeEvidence[]) {
   return knowledgeEvidence.map((item) => ({
     ...item,
     metadata: item.metadata ? { ...item.metadata } : undefined
+  }))
+}
+
+function cloneCitations(citations: CardCitation[]): CardCitation[] {
+  return citations.map((c) => ({
+    cardId: c.cardId,
+    fieldName: c.fieldName,
+    spans: c.spans.map((s) => ({
+      textStart: s.textStart,
+      textEnd: s.textEnd,
+      refs: s.refs.map((r) => ({ ...r }))
+    }))
   }))
 }
 
