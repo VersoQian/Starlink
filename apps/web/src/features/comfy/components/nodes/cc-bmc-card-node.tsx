@@ -6,6 +6,8 @@ import { useComfyStore } from '../../store'
 import { CC_BMC_DOMAINS, type CCBMCDomain, type MacraNodeData } from '@/types/macra'
 import { Edit3, Check, X, Info, ChevronDown, Maximize2, Minimize2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import { CitationBadge } from '../citation-badge'
+import { useCardHighlightClass } from '../../hooks/use-citation-highlight'
 
 // 新配色方案 - Tech-Luxe Gradient
 const DOMAIN_COLORS: Record<CCBMCDomain, { main: string; light: string; accent: string; icon: string; gradient: string }> = {
@@ -66,6 +68,18 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
   const rawData = data as Record<string, unknown>
   const meta = rawData.meta as { summary?: string; fullContent?: string } | undefined
 
+  // Citation 相关
+  const cardCitations = useComfyStore((state) => state.citations[id])
+  const knowledgeEvidence = useComfyStore((state) => state.knowledgeEvidence)
+  const openEvidenceDrawer = useComfyStore((state) => state.openEvidenceDrawer)
+  const highlightClass = useCardHighlightClass(id)
+  const contentCitation = cardCitations?.find((c) => c.fieldName === 'content')
+  const metaForCitation = rawData.meta as
+    | { citations?: unknown; noRefRanges?: unknown[]; groundingRate?: number; invalidRefs?: unknown[] }
+    | undefined
+  const groundingRate = metaForCitation?.groundingRate
+  const noRefCount = Array.isArray(metaForCitation?.noRefRanges) ? metaForCitation!.noRefRanges.length : 0
+
   // 从 meta 中获取 summary 和 fullContent
   const summary = meta?.summary || nodeData?.content || ''
   const fullContent = meta?.fullContent || nodeData?.content || ''
@@ -105,7 +119,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
       />
 
       <div
-        className="w-[360px] rounded-3xl overflow-hidden transition-all duration-500 hover:scale-105 relative group"
+        className={`w-[360px] rounded-3xl overflow-hidden transition-all duration-500 hover:scale-105 relative group ${highlightClass}`}
         style={{
           background: 'rgba(255, 255, 255, 0.03)',
           backdropFilter: 'blur(16px)',
@@ -260,6 +274,47 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
               >
                 <ReactMarkdown>{isExpanded ? fullContent : summary || '*暂无内容*'}</ReactMarkdown>
               </div>
+
+              {(contentCitation || noRefCount > 0 || typeof groundingRate === 'number') && (
+                <div
+                  className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-300/15 bg-sky-400/5 px-3 py-2 text-[10px] text-slate-400"
+                  data-testid="citation-footer"
+                >
+                  <span className="font-medium uppercase tracking-[0.18em] text-sky-200">
+                    Citations
+                  </span>
+                  {contentCitation?.spans.map((span, i) => {
+                    const primary = span.refs[0]
+                    if (!primary) return null
+                    const evidence = knowledgeEvidence.find((e) => {
+                      const r = e as { id?: string; docId?: string }
+                      return r.id === primary.evidenceId || r.docId === primary.docId
+                    })
+                    const score = (evidence as { score?: number } | undefined)?.score
+                    return (
+                      <CitationBadge
+                        key={`${primary.evidenceId}-${i}`}
+                        variant="ref"
+                        index={i + 1}
+                        docId={primary.docId}
+                        score={score}
+                        onClick={() => openEvidenceDrawer(primary.evidenceId, i)}
+                      />
+                    )
+                  })}
+                  {noRefCount > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-2 py-0.5 text-amber-300">
+                      <CitationBadge variant="no-ref" className="mx-0 h-4 w-4" />
+                      <span>{noRefCount} 处无引用</span>
+                    </span>
+                  )}
+                  {typeof groundingRate === 'number' && (
+                    <span className="ml-auto text-[10px] text-slate-500">
+                      grounding {(groundingRate * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* 展开/折叠按钮 */}
               {hasExtendedContent && (

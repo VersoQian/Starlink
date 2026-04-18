@@ -32,6 +32,8 @@ import {
 import { useComfyStore } from '@/features/comfy/store'
 import { useKnowledgeBaseStatus, useKnowledgeBases } from '@/features/knowledge/hooks'
 import { KbSelector } from '@/features/knowledge/components'
+import { EvidenceDrawer } from '@/features/comfy/components/evidence-drawer'
+import { useCitationHighlight } from '@/features/comfy/hooks/use-citation-highlight'
 import { useConversationRuntime, useWorkspaceGraph } from '@/features/workspace/hooks'
 import { buildAgentWorkspaceSnapshot, buildSeminarSnapshot } from '@/features/workspace/lib/agent-runtime'
 import {
@@ -792,8 +794,11 @@ export default function WorkspaceCanvasPage({ params }: WorkspaceCanvasPageProps
   const callCritic = useComfyStore((state) => state.callCritic)
   const isCriticProcessing = useComfyStore((state) => state.isCriticProcessing)
   const knowledgeEvidence = useComfyStore((state) => state.knowledgeEvidence)
+  const currentConversationId = useComfyStore((state) => state.currentConversationId)
   const appendChatMessage = useComfyStore((state) => state.appendChatMessage)
   const approveDecision = useComfyStore((state) => state.approveDecision)
+
+  useCitationHighlight()
 
   const [promptInput, setPromptInput] = useState('')
   const [hitlInput, setHitlInput] = useState('')
@@ -2482,6 +2487,7 @@ export default function WorkspaceCanvasPage({ params }: WorkspaceCanvasPageProps
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2">v1 module map</span>
         </div>
       </div>
+      <EvidenceDrawer conversationId={currentConversationId} />
     </div>
   )
 }

@@ -44,6 +44,24 @@ type KnowledgeEvidence = {
   score?: number
 }
 
+type EvidenceRef = {
+  evidenceId: string
+  docId: string
+  snippetId: string
+}
+
+type CitationSpan = {
+  textStart: number
+  textEnd: number
+  refs: EvidenceRef[]
+}
+
+type CardCitation = {
+  cardId: string
+  fieldName: string
+  spans: CitationSpan[]
+}
+
 const createInitialChatMessages = (): ChatMessage[] => [
   {
     role: 'assistant',
@@ -174,6 +192,26 @@ interface MacraState {
   knowledgeEvidence: KnowledgeEvidence[]
   setKnowledgeEvidence: (evidence: KnowledgeEvidence[]) => void
 
+  // Cell-level citations (Stage 3 创新核心 UI)
+  citations: Record<string /* cardId */, CardCitation[]>
+  setCardCitation: (cardId: string, citation: CardCitation) => void
+  clearCitations: () => void
+
+  // Evidence Drawer 交互状态
+  evidenceDrawer: {
+    isOpen: boolean
+    focusedEvidenceId: string | null
+    focusedSpanIndex: number | null
+    highlightedCardIds: string[]
+  }
+  openEvidenceDrawer: (evidenceId: string, spanIndex?: number) => void
+  closeEvidenceDrawer: () => void
+  highlightCardsReferencingEvidence: (cardIds: string[]) => void
+  clearCitationHighlight: () => void
+
+  // 当前会话 id (供前端反查 / drawer 使用)
+  currentConversationId: string | null
+
   // Chat 状态（新增）
   chatInput: string
   chatMessages: ChatMessage[]
@@ -241,16 +279,72 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   maxRounds: 3,
   pendingInterrupt: null,
   knowledgeEvidence: [],
+  citations: {},
+  evidenceDrawer: {
+    isOpen: false,
+    focusedEvidenceId: null,
+    focusedSpanIndex: null,
+    highlightedCardIds: []
+  },
+  currentConversationId: null,
   chatInput: '',
   chatMessages: createInitialChatMessages(),
   detailPanel: {
     isOpen: false,
     nodeId: null
   },
-
   setKnowledgeEvidence: (evidence) => {
     if (get().knowledgeEvidence === evidence) return
     set({ knowledgeEvidence: evidence })
+  },
+
+  setCardCitation: (cardId, citation) => {
+    set((state) => ({
+      citations: { ...state.citations, [cardId]: [...(state.citations[cardId] ?? []).filter((c) => c.fieldName !== citation.fieldName), citation] }
+    }))
+  },
+
+  clearCitations: () => {
+    set({ citations: {} })
+  },
+
+  openEvidenceDrawer: (evidenceId, spanIndex) => {
+    set({
+      evidenceDrawer: {
+        isOpen: true,
+        focusedEvidenceId: evidenceId,
+        focusedSpanIndex: spanIndex ?? null,
+        highlightedCardIds: []
+      }
+    })
+  },
+
+  closeEvidenceDrawer: () => {
+    set((state) => ({
+      evidenceDrawer: {
+        ...state.evidenceDrawer,
+        isOpen: false,
+        focusedSpanIndex: null
+      }
+    }))
+  },
+
+  highlightCardsReferencingEvidence: (cardIds) => {
+    set((state) => ({
+      evidenceDrawer: {
+        ...state.evidenceDrawer,
+        highlightedCardIds: cardIds
+      }
+    }))
+  },
+
+  clearCitationHighlight: () => {
+    set((state) => ({
+      evidenceDrawer: {
+        ...state.evidenceDrawer,
+        highlightedCardIds: []
+      }
+    }))
   },
 
   setChatInput: (chatInput) => {
@@ -442,7 +536,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   // ============== Business LangGraph 调用 ==============
   callLangGraph: async (userPrompt, _mode = 'general', kbId) => {
     void _mode
-    set({ isOrchestratorProcessing: true })
+    set({ isOrchestratorProcessing: true, citations: {} })
 
     if (activeSubscription) {
       activeSubscription()
@@ -476,6 +570,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
       const conversationId = response.startConversation.metadata.id
       activeConversationId = conversationId
+      set({ currentConversationId: conversationId })
 
       const extractMacraNodeData = (canvasNode: CanvasNode): MacraNodeData | null => {
         const data = (canvasNode.data ?? {}) as Record<string, unknown>
@@ -599,6 +694,12 @@ export const useComfyStore = create<MacraState>((set, get) => ({
           const evidence = payload as KnowledgeEvidence[]
           if (Array.isArray(evidence)) {
             set({ knowledgeEvidence: evidence })
+          }
+        },
+        onCardCited: (payload) => {
+          const data = payload as { cardId?: string; citation?: CardCitation; groundingRate?: number }
+          if (data && data.citation && data.cardId) {
+            get().setCardCitation(data.cardId, data.citation)
           }
         },
         loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId)
@@ -869,6 +970,14 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       roundNumber: 0,
       pendingInterrupt: null,
       knowledgeEvidence: [],
+      citations: {},
+      evidenceDrawer: {
+        isOpen: false,
+        focusedEvidenceId: null,
+        focusedSpanIndex: null,
+        highlightedCardIds: []
+      },
+      currentConversationId: null,
       chatInput: '',
       chatMessages: createInitialChatMessages(),
       detailPanel: {
