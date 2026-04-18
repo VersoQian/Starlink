@@ -102,13 +102,24 @@ export class ConversationStore {
     let knowledgeEvidence: KnowledgeEvidence[] = []
     if (kbId) {
       const { searchKnowledgeBase } = await import('../services/kb-task-service.js')
+      const { deriveSnippetId } = await import('@starlink/shared')
       const results = await searchKnowledgeBase(kbId, question, 5)
-      knowledgeEvidence = results.map((r) => ({
-        docId: r.docId,
-        snippet: r.snippet,
-        score: r.score,
-        metadata: r.metadata
-      }))
+      knowledgeEvidence = results.map((r) => {
+        const snippetId = deriveSnippetId(
+          r.docId,
+          r.metadata as { chunkIndex?: number } | undefined,
+          r.snippet
+        )
+        return {
+          docId: r.docId,
+          snippet: r.snippet,
+          score: r.score,
+          metadata: {
+            ...(r.metadata ?? {}),
+            snippetId
+          }
+        }
+      })
     }
 
     const id = nanoid()

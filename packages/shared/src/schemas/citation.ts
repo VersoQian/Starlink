@@ -92,7 +92,13 @@ export type CitationParseResult = z.infer<typeof citationParseResultSchema>
 
 /**
  * Derive a stable snippetId from legacy evidence that lacks one.
- * Uses metadata.chunkIndex if present, otherwise a hash of the docId + text.
+ *
+ * snippetId is scoped to the document (does NOT include docId); global
+ * uniqueness is achieved via the (docId, snippetId) pair, mirrored in
+ * `Evidence.id = ${docId}-${snippetId}`.
+ *
+ * Uses metadata.chunkIndex when present, otherwise a deterministic hash of
+ * the snippet text.
  */
 export function deriveSnippetId(
   docId: string,
@@ -100,12 +106,11 @@ export function deriveSnippetId(
   textFallback: string
 ): string {
   if (metadata && typeof metadata.chunkIndex === 'number') {
-    return `${docId}-chunk-${metadata.chunkIndex}`
+    return `chunk-${metadata.chunkIndex}`
   }
-  // Minimal deterministic fallback without crypto dep
   let hash = 0
   for (let i = 0; i < textFallback.length; i++) {
     hash = ((hash << 5) - hash + textFallback.charCodeAt(i)) | 0
   }
-  return `${docId}-h${Math.abs(hash).toString(36)}`
+  return `h${Math.abs(hash).toString(36)}`
 }
