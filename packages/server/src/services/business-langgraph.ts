@@ -159,6 +159,7 @@ const BusinessState = Annotation.Root({
   workspaceId: Annotation<string>(),
   userId: Annotation<string>(),
   question: Annotation<string>(),
+  contextPrompt: Annotation<string>(),
   intent: Annotation<Intent | null>(),
   roundNumber: Annotation<number>(),
   supervisorDirective: Annotation<SupervisorDirective | null>(),
@@ -226,6 +227,7 @@ export class BusinessLangGraphService {
     traceId?: string
     baseGraph?: CanvasGraph
     knowledgeEvidence?: KnowledgeEvidence[]
+    contextPrompt?: string
   }): AsyncGenerator<BusinessStreamUpdate> {
     const traceId = context.traceId ?? nanoid(10)
     const streamStartedAt = Date.now()
@@ -233,7 +235,8 @@ export class BusinessLangGraphService {
       traceId,
       workspaceId: context.workspaceId,
       userId: context.userId,
-      question: context.question
+      question: context.question,
+      contextPrompt: context.contextPrompt ?? ''
     })
     const initialIntent = this.model
       ? await this.classifyIntent(baseState)
@@ -302,6 +305,7 @@ export class BusinessLangGraphService {
           workspaceId: context.workspaceId,
           userId: context.userId,
           question: context.question,
+          contextPrompt: context.contextPrompt ?? '',
           intent: initialIntent,
           roundNumber: 0,
           supervisorDirective: null,
@@ -640,6 +644,7 @@ ${conflictSummary}
     const prompt = `你是意图路由器，需要判断用户的需求类型。
 
 用户问题：${state.question}
+${this.buildWorkspaceContextPrompt(state)}
 
 请分析用户意图，返回以下之一：
 - generate_bmc: 用户希望生成完整的商业模型画布（CC-BMC 九大维度）
@@ -696,6 +701,7 @@ ${conflictSummary}
       return { generalNodes: [fallbackNode] }
     }
 
+    const workspaceContext = this.buildWorkspaceContextPrompt(state)
     const knowledgeContext = this.buildKnowledgePrompt(state)
 
     try {
@@ -706,7 +712,7 @@ ${conflictSummary}
 1. 回答必须直接、具体，优先解决用户当前问题
 2. 如果当前工作区已经有商业画布，请结合既有上下文回答
 3. 使用简洁 Markdown
-4. 不要输出 JSON，不要解释你的系统角色${knowledgeContext}`),
+4. 不要输出 JSON，不要解释你的系统角色${workspaceContext}${knowledgeContext}`),
         new HumanMessage(state.question)
       ])
       const content = readModelText(response) || '当前没有足够信息生成明确答复。'
@@ -804,6 +810,12 @@ ${snippets}
 "主力客群是 Z 世代都市青年[[ref:d42#chunk-3]]，集中在一二线城市[[ref:d8#chunk-1]]。该群体消费能力较父辈提升约 30%[[no-ref]]。"`
   }
 
+  private buildWorkspaceContextPrompt(state: BusinessStateType): string {
+    const prompt = state.contextPrompt?.trim()
+    if (!prompt) return ''
+    return `\n\n---\n## 工作区记忆、Session 与 Canvas 上下文\n${prompt}`
+  }
+
   /**
    * Collect evidenceSet in the format expected by citation-parser, deriving
    * snippetId when the raw KnowledgeEvidence entries lack one.
@@ -889,6 +901,7 @@ ${snippets}
       return { marketNodes: [] }
     }
 
+    const workspaceContext = this.buildWorkspaceContextPrompt(state)
     const crossContext = this.buildCrossContextPrompt(state, 'market')
     const knowledgeContext = this.buildKnowledgePrompt(state)
 
@@ -899,7 +912,7 @@ ${snippets}
 3. **客户关系** (CUSTOMER_RELATIONSHIPS)：如何维系客户、服务模式、用户粘性
 
 用户问题：${state.question}
-${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
+${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 
 请生成 3 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
 - id: 自动生成（格式 market-xxxxx）
@@ -998,6 +1011,7 @@ ${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
       return { productNodes: [] }
     }
 
+    const workspaceContext = this.buildWorkspaceContextPrompt(state)
     const crossContext = this.buildCrossContextPrompt(state, 'product')
     const knowledgeContext = this.buildKnowledgePrompt(state)
 
@@ -1009,7 +1023,7 @@ ${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 4. **重要合作** (KEY_PARTNERSHIPS)：关键伙伴、生态协作、供应链与战略联盟
 
 用户问题：${state.question}
-${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
+${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 
 请生成 4 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
 - id: 自动生成（格式 product-xxxxx）
@@ -1110,6 +1124,7 @@ ${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
       return { financeNodes: [] }
     }
 
+    const workspaceContext = this.buildWorkspaceContextPrompt(state)
     const crossContext = this.buildCrossContextPrompt(state, 'finance')
     const knowledgeContext = this.buildKnowledgePrompt(state)
 
@@ -1119,7 +1134,7 @@ ${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 2. **成本结构** (COST_STRUCTURE)：主要成本、成本控制、盈利能力
 
 用户问题：${state.question}
-${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
+${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
 
 请生成 2 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
 - id: 自动生成（格式 finance-xxxxx）
@@ -1392,6 +1407,7 @@ ${crossContext}${knowledgeContext}${this.getRevisionSuffix(state)}
     const nodesSummary = allNodes
       .map((n) => `[${n.metadata.agent_signature ?? 'unknown'}] ${n.domain ?? n.label}: ${n.content.substring(0, 120)}`)
       .join('\n')
+    const workspaceContext = this.buildWorkspaceContextPrompt(state)
 
     const CriticOutputSchema = z.object({
       conflicts: z.array(z.object({
@@ -1423,6 +1439,8 @@ ${nodesSummary}
 4. 收入模式与客户关系是否可行
 
 对每个冲突，指明 relatedAgents 字段（使用这些名称：Market_Agent, Product_Agent, Finance_Agent），表示哪些 Agent 需要修正。
+
+${workspaceContext}
 
 如果没有发现冲突，返回空数组。不要制造不存在的冲突。`),
         new HumanMessage(state.question)
@@ -1753,6 +1771,20 @@ function normalizeDomainNodes(
     }
   }
 
+  const missing = options.allowedDomains.filter((d) => !byDomain.has(d))
+  if (missing.length > 0) {
+    auditLogger.warn({
+      action: 'business-langgraph.normalizeDomainNodes.missingDomains',
+      metadata: {
+        agentType: options.agentType,
+        round: options.round,
+        expected: options.allowedDomains,
+        produced: [...byDomain.keys()],
+        missing
+      }
+    })
+  }
+
   return options.allowedDomains.flatMap((domain) => {
     const node = byDomain.get(domain)
     if (!node) return []
@@ -1770,6 +1802,24 @@ function normalizeDomainNodes(
       }
     }]
   })
+}
+
+/**
+ * Validate that a generated graph covers the full 9-dimension CC-BMC spec.
+ * Used as an integration-level invariant check: if any dimension is absent
+ * from agent output, the system should at minimum surface this as a
+ * structural issue rather than silently accept an 8-dimension graph.
+ *
+ * Returns the list of missing dimensions (empty = complete).
+ */
+export function validateNineBmcDimensions(nodes: MacraNodeData[]): CCBMCDomain[] {
+  const produced = new Set<CCBMCDomain>()
+  for (const node of nodes) {
+    const d = node.domain as CCBMCDomain | undefined
+    if (d) produced.add(d)
+  }
+  const allDomains = Object.values(CC_BMC_DOMAINS) as CCBMCDomain[]
+  return allDomains.filter((d) => !produced.has(d))
 }
 
 function buildDeterministicNodeId(agentType: AgentType, domain: CCBMCDomain) {
@@ -1820,12 +1870,14 @@ function createBlankState(params: {
   workspaceId: string
   userId: string
   question: string
+  contextPrompt?: string
 }): BusinessStateType {
   return {
     traceId: params.traceId,
     workspaceId: params.workspaceId,
     userId: params.userId,
     question: params.question,
+    contextPrompt: params.contextPrompt ?? '',
     intent: null,
     roundNumber: 0,
     supervisorDirective: null,

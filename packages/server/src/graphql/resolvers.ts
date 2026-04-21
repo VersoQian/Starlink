@@ -2,9 +2,14 @@ import GraphQLJSON from 'graphql-type-json'
 import { GraphQLError } from 'graphql'
 import {
   communityPostInputSchema,
+  conversationMessageSchema,
   conversationMetadataSchema,
+  conversationSessionSchema,
+  deriveSnippetId,
+  memoryItemSchema,
   practiceSessionInputSchema,
   workspaceAssetSchema,
+  workspaceContextSnapshotSchema,
   workspaceDirectoryItemSchema,
   workspaceMetadataHistoryEntrySchema,
   workspaceMetadataUpdateInputSchema
@@ -17,7 +22,8 @@ import {
   getKnowledgeBaseStatus,
   importKnowledgeUrl,
   listKnowledgeBases,
-  publishKnowledgeBase
+  publishKnowledgeBase,
+  searchKnowledgeBase
 } from '../services/kb-task-service.js'
 import { pubsub, FLOW_EXECUTION_PROGRESS, publishExecutionEvent } from './subscriptions.js'
 
@@ -45,6 +51,35 @@ export const resolvers = {
         }
       })
     },
+    conversationSessions: async (
+      _: unknown,
+      args: { workspaceId: string; limit?: number | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const sessions = await ctx.conversationStore.listConversationSessions(
+          args.workspaceId,
+          ctx.userId,
+          args.limit ?? undefined
+        )
+        return sessions.map((session) => conversationSessionSchema.parse(session))
+      })
+    },
+    conversationMessages: async (
+      _: unknown,
+      args: { workspaceId: string; conversationId: string; limit?: number | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const messages = await ctx.conversationStore.listConversationMessages(
+          args.workspaceId,
+          ctx.userId,
+          args.conversationId,
+          args.limit ?? undefined
+        )
+        return messages.map((message) => conversationMessageSchema.parse(message))
+      })
+    },
     cardsReferencingEvidence: async (
       _: unknown,
       args: { conversationId: string; evidenceId: string },
@@ -63,6 +98,39 @@ export const resolvers = {
           }
         }
         return Array.from(cardIds)
+      })
+    },
+    workspaceMemories: async (
+      _: unknown,
+      args: { workspaceId: string; query?: string | null; scope?: string | null; kind?: string | null; limit?: number | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const memories = await ctx.conversationStore.listWorkspaceMemories(args.workspaceId, ctx.userId, {
+          query: args.query,
+          scope: args.scope,
+          kind: args.kind,
+          limit: args.limit
+        })
+        return memories.map((memory) => memoryItemSchema.parse(memory))
+      })
+    },
+    workspaceContextSnapshot: async (
+      _: unknown,
+      args: { workspaceId: string; conversationId?: string | null; query: string; kbId?: string | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const snapshot = await ctx.conversationStore.buildWorkspaceContextSnapshot(
+          args.workspaceId,
+          ctx.userId,
+          args.query,
+          {
+            conversationId: args.conversationId ?? null,
+            kbId: args.kbId ?? null
+          }
+        )
+        return workspaceContextSnapshotSchema.parse(snapshot)
       })
     },
     conversationRuntimeEvents: async (
@@ -98,6 +166,29 @@ export const resolvers = {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
         return await getKnowledgeBaseStatus(args.workspaceId, args.kbId)
+      })
+    },
+    knowledgeBaseSearch: async (
+      _: unknown,
+      args: { workspaceId: string; kbId: string; query: string; topK?: number | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
+        const results = await searchKnowledgeBase(args.workspaceId, args.kbId, args.query, args.topK ?? 5)
+        return results.map((result) => ({
+          docId: result.docId,
+          snippet: result.snippet,
+          score: result.score,
+          metadata: {
+            ...(result.metadata ?? {}),
+            snippetId: deriveSnippetId(
+              result.docId,
+              result.metadata as { chunkIndex?: number } | undefined,
+              result.snippet
+            )
+          }
+        }))
       })
     },
     workspaces: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
@@ -216,6 +307,76 @@ export const resolvers = {
           args.decision ?? undefined
         )
       ))
+    },
+    appendConversationMessage: async (
+      _: unknown,
+      args: {
+        input: {
+          conversationId: string
+          workspaceId: string
+          role: string
+          content: string
+          metadata?: Record<string, unknown> | null
+        }
+      },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const message = await ctx.conversationStore.appendConversationMessage({
+          conversationId: args.input.conversationId,
+          workspaceId: args.input.workspaceId,
+          role: args.input.role,
+          content: args.input.content,
+          metadata: args.input.metadata ?? undefined
+        }, ctx.userId)
+        return conversationMessageSchema.parse(message)
+      })
+    },
+    createMemoryItem: async (
+      _: unknown,
+      args: {
+        input: {
+          workspaceId: string
+          scope?: string | null
+          kind?: string | null
+          title: string
+          content: string
+          sourceType?: string | null
+          sourceId?: string | null
+          importance?: number | null
+          confidence?: number | null
+          tags?: string[] | null
+          metadata?: Record<string, unknown> | null
+        }
+      },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const memory = await ctx.conversationStore.createMemoryItem({
+          workspaceId: args.input.workspaceId,
+          scope: args.input.scope,
+          kind: args.input.kind,
+          title: args.input.title,
+          content: args.input.content,
+          sourceType: args.input.sourceType ?? undefined,
+          sourceId: args.input.sourceId ?? undefined,
+          importance: args.input.importance ?? undefined,
+          confidence: args.input.confidence ?? undefined,
+          tags: args.input.tags ?? undefined,
+          metadata: args.input.metadata ?? undefined
+        }, ctx.userId)
+        return memoryItemSchema.parse(memory)
+      })
+    },
+    extractConversationMemory: async (
+      _: unknown,
+      args: { conversationId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const memories = await ctx.conversationStore.extractConversationMemory(args.conversationId, ctx.userId)
+        return memories.map((memory) => memoryItemSchema.parse(memory))
+      })
     },
     addNode: async (
       _: unknown,

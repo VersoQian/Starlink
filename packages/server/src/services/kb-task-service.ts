@@ -2,8 +2,10 @@ import {
   knowledgeBaseListResponseSchema,
   knowledgeBaseSchema,
   knowledgeBaseStatusResponseSchema,
+  knowledgeSearchResponseSchema,
   knowledgeTaskSchema,
   type KnowledgeBase,
+  type KnowledgeSearchResult as SharedKnowledgeSearchResult,
   type KnowledgeTask
 } from '@starlink/shared'
 
@@ -188,20 +190,17 @@ export async function importKnowledgeUrl(
   }
 }
 
-export type KnowledgeSearchResult = {
-  docId: string
-  snippet: string
-  score: number
-  metadata?: Record<string, unknown>
-}
+export type KnowledgeSearchResult = SharedKnowledgeSearchResult
 
 export async function searchKnowledgeBase(
+  workspaceId: string,
   kbId: string,
   query: string,
   topK = 5
 ): Promise<KnowledgeSearchResult[]> {
   const baseUrl = getTaskServiceBaseUrl()
   const endpoint = new URL(`/kb/${kbId}/search`, baseUrl)
+  endpoint.searchParams.set('workspaceId', workspaceId)
   endpoint.searchParams.set('query', query)
   endpoint.searchParams.set('topK', String(topK))
 
@@ -219,7 +218,7 @@ export async function searchKnowledgeBase(
       return []
     }
 
-    const payload = (await response.json()) as { results?: KnowledgeSearchResult[] }
+    const payload = knowledgeSearchResponseSchema.parse(await response.json())
     return Array.isArray(payload.results) ? payload.results : []
   } catch (error) {
     console.warn('[kb-task-service] search request failed', { error: String(error) })

@@ -1,5 +1,6 @@
 export * from './schemas/canvas.js'
 export * from './schemas/conversation.js'
+export * from './schemas/memory.js'
 export * from './schemas/citation.js'
 export * from './schemas/tool.js'
 export * from './schemas/flow.js'

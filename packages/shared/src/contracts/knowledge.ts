@@ -49,7 +49,19 @@ export const knowledgeBaseStatusResponseSchema = z.object({
   tasks: z.array(knowledgeTaskSchema).optional()
 })
 
+export const knowledgeSearchResultSchema = z.object({
+  docId: z.string().min(1),
+  snippet: z.string().min(1),
+  score: z.number(),
+  metadata: z.record(z.unknown()).optional()
+})
+
+export const knowledgeSearchResponseSchema = z.object({
+  results: z.array(knowledgeSearchResultSchema).optional()
+})
+
 export type KbStatus = z.infer<typeof kbStatusSchema>
 export type KnowledgeBase = z.infer<typeof knowledgeBaseSchema>
 export type KnowledgeTask = z.infer<typeof knowledgeTaskSchema>
 export type KbTaskStatusSnapshot = z.infer<typeof kbTaskStatusSnapshotSchema>
+export type KnowledgeSearchResult = z.infer<typeof knowledgeSearchResultSchema>

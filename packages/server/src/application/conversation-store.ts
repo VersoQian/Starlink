@@ -9,11 +9,16 @@ import type {
   CommunityPostInput,
   ConversationEvent,
   ConversationMetadata,
+  ConversationMessage,
   KnowledgeEvidence,
+  MemoryItem,
+  MemoryKind,
+  MemoryScope,
   PracticeSessionInput,
   WorkspaceDirectoryItem,
   WorkspaceMetadataHistoryEntry,
   WorkspaceAsset,
+  WorkspaceContextSnapshot,
   SeminarPhase
 } from '@starlink/shared'
 import {
@@ -33,6 +38,8 @@ import { ConversationSessionStore } from './conversation-session-store.js'
 import { WorkspaceGraphStore } from './workspace-graph-store.js'
 import { WorkspaceAssetStore } from './workspace-asset-store.js'
 import { RuntimeEventStore } from './runtime-event-store.js'
+import { ConversationMemoryStore, type AppendMessageInput, type UpsertMemoryInput } from './conversation-memory-store.js'
+import { WorkspaceContextBuilder } from './workspace-context-builder.js'
 import { applyGraphDelta } from './graph-delta.js'
 import {
   getWorkspaceMetadata as getWorkspaceMetadataPg,
@@ -70,6 +77,8 @@ export class ConversationStore {
   private readonly graphStore: WorkspaceGraphStore
   private readonly assetStore: WorkspaceAssetStore
   private readonly eventStore: RuntimeEventStore
+  private readonly memoryStore: ConversationMemoryStore
+  private readonly contextBuilder: WorkspaceContextBuilder
   private readonly businessLangGraphService: BusinessLangGraphService
   private readonly pendingDecisionTimeouts = new Map<string, NodeJS.Timeout>()
   private readonly pendingDecisionResolvers = new Map<string, (decision: string) => void>()
@@ -88,6 +97,8 @@ export class ConversationStore {
     this.graphStore = new WorkspaceGraphStore(runtimeRepository)
     this.assetStore = new WorkspaceAssetStore(runtimeRepository)
     this.eventStore = new RuntimeEventStore(runtimeRepository, eventBus)
+    this.memoryStore = new ConversationMemoryStore()
+    this.contextBuilder = new WorkspaceContextBuilder(this.memoryStore)
   }
 
   async startConversation(
@@ -98,31 +109,16 @@ export class ConversationStore {
   ): Promise<ConversationRecord> {
     await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
     const existingGraph = await this.getGraph(workspaceId)
-
-    let knowledgeEvidence: KnowledgeEvidence[] = []
-    if (kbId) {
-      const { searchKnowledgeBase } = await import('../services/kb-task-service.js')
-      const { deriveSnippetId } = await import('@starlink/shared')
-      const results = await searchKnowledgeBase(kbId, question, 5)
-      knowledgeEvidence = results.map((r) => {
-        const snippetId = deriveSnippetId(
-          r.docId,
-          r.metadata as { chunkIndex?: number } | undefined,
-          r.snippet
-        )
-        return {
-          docId: r.docId,
-          snippet: r.snippet,
-          score: r.score,
-          metadata: {
-            ...(r.metadata ?? {}),
-            snippetId
-          }
-        }
-      })
-    }
-
     const id = nanoid()
+    const contextSnapshot = await this.contextBuilder.build({
+      workspaceId,
+      userId,
+      conversationId: id,
+      query: question,
+      kbId,
+      graph: existingGraph
+    })
+    const knowledgeEvidence: KnowledgeEvidence[] = contextSnapshot.knowledgeEvidence
     const startedAt = new Date()
     const metadata: ConversationMetadata = {
       id,
@@ -141,6 +137,26 @@ export class ConversationStore {
 
     await this.sessionStore.createConversation(id, record)
     await this.graphStore.setWorkspaceGraph(workspaceId, record.graph)
+    await this.memoryStore.createSession({
+      id,
+      workspaceId,
+      userId,
+      title: buildConversationTitle(question),
+      status: 'running',
+      latestQuestion: question,
+      contextSnapshot: contextSnapshot as unknown as Record<string, unknown>
+    })
+    await this.memoryStore.appendMessage({
+      conversationId: id,
+      workspaceId,
+      userId,
+      role: 'user',
+      content: question,
+      metadata: {
+        kbId: kbId ?? null,
+        evidenceCount: knowledgeEvidence.length
+      }
+    })
 
     const stream = this.businessLangGraphService.streamConversation({
       workspaceId,
@@ -148,7 +164,8 @@ export class ConversationStore {
       question,
       traceId: id,
       baseGraph: existingGraph,
-      knowledgeEvidence
+      knowledgeEvidence,
+      contextPrompt: contextSnapshot.promptBlock
     })
     let initialized = false
 
@@ -200,6 +217,7 @@ export class ConversationStore {
         stream,
         record,
         workspaceId,
+        userId,
         conversationId: id,
         initialized
       })
@@ -232,6 +250,114 @@ export class ConversationStore {
     }
     const events = await this.eventStore.listConversationEvents(workspaceId, conversationId)
     return events.map((event) => conversationEventSchema.parse(event))
+  }
+
+  async listConversationSessions(
+    workspaceId: string,
+    userId: string,
+    limit?: number
+  ) {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    return await this.memoryStore.listSessions(workspaceId, limit ?? 20)
+  }
+
+  async listConversationMessages(
+    workspaceId: string,
+    userId: string,
+    conversationId: string,
+    limit?: number
+  ): Promise<ConversationMessage[]> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    await this.assertConversationBelongsToWorkspaceOrSession(workspaceId, conversationId)
+    return await this.memoryStore.listMessages(conversationId, limit ?? 30)
+  }
+
+  async listWorkspaceMemories(
+    workspaceId: string,
+    userId: string,
+    options: {
+      query?: string | null
+      scope?: string | null
+      kind?: string | null
+      limit?: number | null
+    } = {}
+  ): Promise<MemoryItem[]> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    return await this.memoryStore.listMemories(workspaceId, {
+      query: options.query ?? undefined,
+      scope: parseMemoryScope(options.scope),
+      kind: parseMemoryKind(options.kind),
+      limit: options.limit ?? undefined
+    })
+  }
+
+  async buildWorkspaceContextSnapshot(
+    workspaceId: string,
+    userId: string,
+    query: string,
+    options: { conversationId?: string | null; kbId?: string | null } = {}
+  ): Promise<WorkspaceContextSnapshot> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read')
+    if (options.conversationId) {
+      await this.assertConversationBelongsToWorkspaceOrSession(workspaceId, options.conversationId)
+    }
+    const graph = await this.getGraph(workspaceId)
+    return await this.contextBuilder.build({
+      workspaceId,
+      userId,
+      query,
+      conversationId: options.conversationId ?? null,
+      kbId: options.kbId ?? null,
+      graph
+    })
+  }
+
+  async appendConversationMessage(
+    input: Omit<AppendMessageInput, 'role'> & { role: string },
+    userId: string
+  ): Promise<ConversationMessage> {
+    await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write')
+    await this.assertConversationBelongsToWorkspaceOrSession(input.workspaceId, input.conversationId)
+    return await this.memoryStore.appendMessage({
+      ...input,
+      userId: input.role === 'user' ? userId : input.userId ?? userId,
+      role: parseMessageRole(input.role)
+    })
+  }
+
+  async createMemoryItem(
+    input: Omit<UpsertMemoryInput, 'scope' | 'kind'> & { scope?: string | null; kind?: string | null },
+    userId: string
+  ): Promise<MemoryItem> {
+    await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write')
+    return await this.memoryStore.upsertMemory({
+      ...input,
+      userId: input.userId ?? userId,
+      scope: parseMemoryScope(input.scope) ?? 'workspace',
+      kind: parseMemoryKind(input.kind) ?? 'insight',
+      sourceType: input.sourceType ?? 'manual'
+    })
+  }
+
+  async extractConversationMemory(conversationId: string, userId: string): Promise<MemoryItem[]> {
+    const record = await this.sessionStore.getConversation(conversationId)
+    const persistedSession = await this.memoryStore.getSession(conversationId)
+    const workspaceId = record?.graph.workspaceId ?? persistedSession?.workspaceId
+    if (!workspaceId) return []
+
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
+    const graph = record?.graph ?? await this.getGraph(workspaceId)
+    const question = record?.metadata.latestQuestion ?? persistedSession?.latestQuestion ?? null
+    const decision = findLatestDecision(graph)
+    return await this.memoryStore.captureConversationOutcome({
+      workspaceId,
+      userId,
+      conversationId,
+      question,
+      graph,
+      decision,
+      evidenceCount: record?.knowledgeEvidence.length ?? 0
+    })
   }
 
   async assertWorkspaceAccess(
@@ -559,10 +685,11 @@ export class ConversationStore {
     stream: AsyncGenerator<BusinessStreamUpdate>
     record: ConversationRecord
     workspaceId: string
+    userId: string
     conversationId: string
     initialized: boolean
   }) {
-    let { stream, record, workspaceId, conversationId, initialized } = options
+    let { stream, record, workspaceId, userId, conversationId, initialized } = options
     let currentGraph = record.graph
     const emittedTurnNodeIds = new Set<string>()
     let currentPhase: SeminarPhase | null = null
@@ -778,6 +905,14 @@ export class ConversationStore {
         updatedAt: new Date()
       }
       await this.sessionStore.updateConversation(conversationId, record)
+      await this.persistConversationCompletion({
+        workspaceId,
+        userId,
+        conversationId,
+        record,
+        graph: currentGraph,
+        decision: latestDecision
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const stack = error instanceof Error ? error.stack : undefined
@@ -799,6 +934,76 @@ export class ConversationStore {
         updatedAt: new Date()
       }
       await this.sessionStore.updateConversation(conversationId, record)
+      await this.persistConversationFailure({
+        workspaceId,
+        userId,
+        conversationId,
+        message
+      })
+    }
+  }
+
+  private async persistConversationCompletion(options: {
+    workspaceId: string
+    userId: string
+    conversationId: string
+    record: ConversationRecord
+    graph: CanvasGraph
+    decision: string
+  }) {
+    try {
+      await this.memoryStore.updateSessionStatus(options.conversationId, 'completed', {
+        latestQuestion: options.record.metadata.latestQuestion ?? null,
+        completed: true
+      })
+      await this.memoryStore.appendMessage({
+        conversationId: options.conversationId,
+        workspaceId: options.workspaceId,
+        userId: options.userId,
+        role: 'assistant',
+        content: buildAssistantOutcome(options.decision, options.graph),
+        metadata: {
+          source: 'langgraph',
+          nodeCount: options.graph.nodes.length,
+          edgeCount: options.graph.edges.length,
+          evidenceCount: options.record.knowledgeEvidence.length
+        }
+      })
+      await this.memoryStore.captureConversationOutcome({
+        workspaceId: options.workspaceId,
+        userId: options.userId,
+        conversationId: options.conversationId,
+        question: options.record.metadata.latestQuestion ?? null,
+        graph: options.graph,
+        decision: options.decision,
+        evidenceCount: options.record.knowledgeEvidence.length
+      })
+    } catch (error) {
+      console.error('[conversation-store] failed to persist conversation completion memory', error)
+    }
+  }
+
+  private async persistConversationFailure(options: {
+    workspaceId: string
+    userId: string
+    conversationId: string
+    message: string
+  }) {
+    try {
+      await this.memoryStore.updateSessionStatus(options.conversationId, 'failed')
+      await this.memoryStore.appendMessage({
+        conversationId: options.conversationId,
+        workspaceId: options.workspaceId,
+        userId: options.userId,
+        role: 'system',
+        content: options.message,
+        metadata: {
+          source: 'langgraph',
+          status: 'failed'
+        }
+      })
+    } catch (error) {
+      console.error('[conversation-store] failed to persist conversation failure memory', error)
     }
   }
 
@@ -888,6 +1093,22 @@ export class ConversationStore {
       throw new Error('INVALID_CONVERSATION_SCOPE')
     }
   }
+
+  private async assertConversationBelongsToWorkspaceOrSession(workspaceId: string, conversationId: string) {
+    const record = await this.sessionStore.getConversation(conversationId)
+    if (record) {
+      if (record.graph.workspaceId !== workspaceId) {
+        throw new Error('INVALID_CONVERSATION_SCOPE')
+      }
+      return
+    }
+
+    const session = await this.memoryStore.getSession(conversationId)
+    if (!session) return
+    if (session.workspaceId !== workspaceId) {
+      throw new Error('INVALID_CONVERSATION_SCOPE')
+    }
+  }
 }
 
 function shouldPersistRuntimeEvent(event: ConversationEvent) {
@@ -896,6 +1117,69 @@ function shouldPersistRuntimeEvent(event: ConversationEvent) {
     || event.type === 'seminar.turn.completed'
     || event.type === 'seminar.decision.made'
     || event.type === 'seminar.decision.requested'
+}
+
+function buildConversationTitle(question: string) {
+  const compact = question.replace(/\s+/g, ' ').trim()
+  return compact ? truncate(compact, 48) : '未命名会话'
+}
+
+function buildAssistantOutcome(decision: string, graph: CanvasGraph) {
+  if (decision.trim()) {
+    return `最终决策：\n${decision.trim()}`
+  }
+
+  const highlights = graph.nodes
+    .map((node) => {
+      const data = node.data as { title?: string; content?: string } | undefined
+      if (!data?.title || !data.content) return null
+      return `- ${data.title}: ${truncate(data.content.replace(/\s+/g, ' '), 120)}`
+    })
+    .filter((item): item is string => item !== null)
+    .slice(0, 8)
+
+  if (highlights.length === 0) {
+    return `本轮已更新画布：${graph.nodes.length} 个节点，${graph.edges.length} 条连线。`
+  }
+
+  return [
+    `本轮已更新画布：${graph.nodes.length} 个节点，${graph.edges.length} 条连线。`,
+    ...highlights
+  ].join('\n')
+}
+
+function parseMessageRole(role: string): ConversationMessage['role'] {
+  if (role === 'user' || role === 'assistant' || role === 'system' || role === 'tool') {
+    return role
+  }
+  throw new Error(`INVALID_MESSAGE_ROLE:${role}`)
+}
+
+function parseMemoryScope(scope?: string | null): MemoryScope | undefined {
+  if (!scope) return undefined
+  if (scope === 'workspace' || scope === 'user' || scope === 'agent') return scope
+  throw new Error(`INVALID_MEMORY_SCOPE:${scope}`)
+}
+
+function parseMemoryKind(kind?: string | null): MemoryKind | undefined {
+  if (!kind) return undefined
+  if (
+    kind === 'preference'
+    || kind === 'decision'
+    || kind === 'insight'
+    || kind === 'constraint'
+    || kind === 'summary'
+    || kind === 'canvas'
+  ) {
+    return kind
+  }
+  throw new Error(`INVALID_MEMORY_KIND:${kind}`)
+}
+
+function truncate(text: string, max: number) {
+  const value = text.trim()
+  if (value.length <= max) return value
+  return `${value.slice(0, Math.max(0, max - 1))}…`
 }
 
 type ExtractRuntimeInfo = {
