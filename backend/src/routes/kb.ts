@@ -4,6 +4,7 @@ import { ImportService } from '../services/ImportService'
 import { UsageService } from '../services/UsageService'
 import { upload, mapUploadedFiles } from '../utils/upload'
 import { prisma } from '../prisma'
+import { RagService } from '../services/RagService'
 
 export const kbRouter = Router()
 
@@ -139,6 +140,11 @@ kbRouter.get('/kb/:id/search', async (req, res, next) => {
     }
 
     const kb = await KbService.getById(req.params.id, workspaceId)
+    const ragResults = await RagService.search(kb.id, query, topK)
+    if (ragResults.length > 0) {
+      res.json({ results: ragResults })
+      return
+    }
 
     const keywords = query
       .split(/[\s,，。、；;！!？?\-_/]+/)

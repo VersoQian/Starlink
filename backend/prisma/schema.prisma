@@ -29,6 +29,7 @@ model KnowledgeBase {
   seeds             Seed[]
   documents         Document[]
   tasks             ImportTask[]
+  chunks            KnowledgeChunk[]
 
   @@index([workspaceId])
 }
@@ -51,6 +52,26 @@ model Document {
   createdAt DateTime @default(now())
   kb        KnowledgeBase @relation(fields: [kbId], references: [id])
   kbId      String
+}
+
+model KnowledgeChunk {
+  id         String   @id @default(uuid())
+  kbId       String   @map("kb_id")
+  sourceId   String   @map("source_id")
+  sourceType String   @map("source_type")
+  title      String?
+  chunkIndex Int      @map("chunk_index")
+  text       String
+  embedding  Json
+  tokenCount Int      @map("token_count")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+  kb         KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+
+  @@unique([kbId, sourceType, sourceId, chunkIndex])
+  @@index([kbId])
+  @@index([sourceId])
+  @@map("knowledge_chunks")
 }
 
 model ImportTask {

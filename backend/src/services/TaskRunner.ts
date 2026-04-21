@@ -78,8 +78,14 @@ export class TaskRunner {
     const success = !FORCE_FAILURE
     setTimeout(async () => {
       if (success) {
-        const updated = await ImportService.markTaskStatus(taskId, 'succeeded')
-        await ImportService.finalizeTask(updated)
+        try {
+          await ImportService.processTask(task)
+          const updated = await ImportService.markTaskStatus(taskId, 'succeeded')
+          await ImportService.finalizeTask(updated)
+        } catch (error) {
+          await ImportService.markTaskStatus(taskId, 'failed', error instanceof Error ? error.message : '任务处理异常')
+          await KbService.setStatus(task.kbId, 'draft')
+        }
       } else {
         await ImportService.markTaskStatus(taskId, 'failed', '任务处理失败')
         await KbService.setStatus(task.kbId, 'draft')
@@ -98,6 +104,7 @@ export class TaskRunner {
 
       await delay(PROCESSING_DELAY_MS)
       if (!FORCE_FAILURE) {
+        await ImportService.processTask(task)
         const updated = await ImportService.markTaskStatus(taskId, 'succeeded')
         await ImportService.finalizeTask(updated)
       } else {

@@ -17,6 +17,7 @@ jest.mock('../services/ImportService', () => ({
   ImportService: {
     claimPendingTask: jest.fn(),
     markTaskStatus: jest.fn(),
+    processTask: jest.fn(),
     finalizeTask: jest.fn(),
   },
 }))
@@ -46,20 +47,22 @@ afterEach(() => {
 describe('TaskRunner.enqueue', () => {
   it('processes task lifecycle in legacy mode', async () => {
     const task = { id: 'task-1', kbId: 'kb-1', status: 'pending', type: 'seed' } as any
+    const processingTask = { ...task, status: 'processing' }
     ;(prismaMock.importTask.findUnique as jest.Mock).mockResolvedValueOnce(task)
     importServiceMock.markTaskStatus
-      .mockResolvedValueOnce({ ...task, status: 'processing' })
+      .mockResolvedValueOnce(processingTask)
       .mockResolvedValueOnce({ ...task, status: 'succeeded' })
 
     TaskRunner.enqueue(task)
 
-    jest.runOnlyPendingTimers()
-    await Promise.resolve()
-    jest.runOnlyPendingTimers()
-    await Promise.resolve()
+    await jest.runOnlyPendingTimersAsync()
+    await jest.runOnlyPendingTimersAsync()
 
     expect(prismaMock.importTask.findUnique).toHaveBeenCalledWith({ where: { id: 'task-1' } })
     expect(importServiceMock.markTaskStatus).toHaveBeenCalledWith('task-1', 'processing')
+    expect(importServiceMock.processTask).toHaveBeenCalledWith(processingTask)
+    expect(importServiceMock.markTaskStatus).toHaveBeenCalledWith('task-1', 'succeeded')
+    expect(importServiceMock.finalizeTask).toHaveBeenCalled()
   })
 
   it('claims and completes task in db mode', async () => {
@@ -74,6 +77,7 @@ describe('TaskRunner.enqueue', () => {
     await jest.runOnlyPendingTimersAsync()
 
     expect(importServiceMock.claimPendingTask).toHaveBeenCalledWith('task-2')
+    expect(importServiceMock.processTask).toHaveBeenCalledWith(task)
     expect(importServiceMock.markTaskStatus).toHaveBeenCalledWith('task-2', 'succeeded')
     expect(importServiceMock.finalizeTask).toHaveBeenCalled()
   })

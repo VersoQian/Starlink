@@ -15,6 +15,27 @@ npx prisma migrate dev
 npm run dev
 ```
 
+## Supabase Postgres
+
+For the production RAG/knowledge-base loop, point Prisma at Supabase Postgres instead of local PostgreSQL.
+
+1. Open Supabase Dashboard -> Project `bwzaknpmxvksyamtrgae` -> Connect.
+2. Prefer `Prisma` -> `Supavisor Session pooler` if direct IPv6 connection is unstable.
+3. Copy `backend/.env.supabase.example` to `backend/.env.supabase.local`.
+4. Replace `[YOUR-PASSWORD]` with the Supabase database password.
+5. Load that env and deploy migrations:
+
+```bash
+set -a
+source backend/.env.supabase.local
+set +a
+cd backend
+npx prisma generate
+npx prisma migrate deploy
+```
+
+After `migrate deploy`, the RAG table `knowledge_chunks` exists in Supabase Postgres and import tasks can index seed/file/url content into the remote database.
+
 ## Scripts
 
 | Script | Description |

@@ -3,6 +3,7 @@ import { kbRouter } from '../routes/kb'
 import { KbService } from '../services/KbService'
 import { UsageService } from '../services/UsageService'
 import { ImportService } from '../services/ImportService'
+import { RagService } from '../services/RagService'
 import { prisma } from '../prisma'
 
 jest.mock('../services/KbService', () => ({
@@ -27,6 +28,12 @@ jest.mock('../services/ImportService', () => ({
     addSeed: jest.fn(),
     addFiles: jest.fn(),
     addUrl: jest.fn(),
+  },
+}))
+
+jest.mock('../services/RagService', () => ({
+  RagService: {
+    search: jest.fn(),
   },
 }))
 
@@ -55,6 +62,7 @@ declare module 'express-serve-static-core' {
 const kbServiceMock = KbService as any
 const usageServiceMock = UsageService as any
 const importServiceMock = ImportService as any
+const ragServiceMock = RagService as any
 const prismaMock = prisma as any
 
 function createMockRes() {
@@ -161,6 +169,38 @@ describe('kb routes (unit)', () => {
     expect(kbServiceMock.getById).toHaveBeenCalledWith('kb-1', 'demo')
     expect(importServiceMock.addSeed).toHaveBeenCalledWith('kb-1', 'Hello')
     expect(res.status).toHaveBeenCalledWith(202)
+  })
+
+  it('GET /kb/:id/search returns RAG chunks when indexed evidence exists', async () => {
+    const handler = getHandler('get', '/kb/:id/search')
+    const res = createMockRes()
+    ;(kbServiceMock.getById as jest.Mock).mockResolvedValue({ id: 'kb-1', workspaceId: 'demo' })
+    ;(ragServiceMock.search as jest.Mock).mockResolvedValue([
+      {
+        docId: 'chunk-source-1',
+        snippet: '市场政策风险证据',
+        score: 0.92,
+        metadata: { chunkId: 'chunk-1', sourceType: 'seed' }
+      }
+    ])
+
+    await handler(
+      { params: { id: 'kb-1' }, query: { workspaceId: 'demo', query: '政策风险', topK: '3' } } as unknown as Request,
+      res,
+      jest.fn()
+    )
+
+    expect(kbServiceMock.getById).toHaveBeenCalledWith('kb-1', 'demo')
+    expect(ragServiceMock.search).toHaveBeenCalledWith('kb-1', '政策风险', 3)
+    expect(res.json).toHaveBeenCalledWith({
+      results: [
+        expect.objectContaining({
+          docId: 'chunk-source-1',
+          snippet: '市场政策风险证据',
+          score: 0.92
+        })
+      ]
+    })
   })
 
   it('GET /usage returns usage payload', async () => {
