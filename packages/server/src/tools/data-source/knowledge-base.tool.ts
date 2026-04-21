@@ -4,6 +4,7 @@ import {
   type ToolContext,
   type ToolMessage,
 } from '@starlink/shared'
+import { searchKnowledgeBase } from '../../services/kb-task-service.js'
 
 export default class KnowledgeBaseTool extends BaseTool {
   readonly definition: ToolDefinition = {
@@ -38,7 +39,7 @@ export default class KnowledgeBaseTool extends BaseTool {
           default: 5,
         },
       },
-      required: ['kbId', 'query', 'topK'],
+      required: ['kbId', 'query'],
     },
     outputSchema: {
       type: 'object',
@@ -75,18 +76,25 @@ export default class KnowledgeBaseTool extends BaseTool {
 
     yield { type: 'progress', percent: 0, message: '正在检索知识库…' }
 
-    // Placeholder: generate mock results until real vector store is integrated
-    const results = Array.from({ length: topK }, (_, i) => ({
-      id: `doc-${kbId}-${i + 1}`,
-      content: `这是知识库 ${kbId} 中与"${query}"相关的模拟文档片段 #${i + 1}`,
-      score: Number((1 - i * 0.1).toFixed(2)),
-      metadata: {
-        source: `knowledge-base/${kbId}/chunk-${i + 1}.txt`,
-        page: i + 1,
-      },
-    }))
+    const results = await searchKnowledgeBase(
+      _context.workspaceId,
+      kbId,
+      query,
+      Math.max(1, Math.min(20, Math.floor(topK)))
+    )
 
-    yield { type: 'progress', percent: 100, message: '检索完成（模拟数据）' }
-    yield { type: 'json', data: { results, kbId } }
+    yield { type: 'progress', percent: 100, message: '检索完成' }
+    yield {
+      type: 'json',
+      data: {
+        results: results.map((result) => ({
+          docId: result.docId,
+          snippet: result.snippet,
+          score: result.score,
+          metadata: result.metadata ?? {}
+        })),
+        kbId
+      }
+    }
   }
 }

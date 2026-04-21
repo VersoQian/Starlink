@@ -1,14 +1,24 @@
 # 数据库迁移指南
 
-## 步骤 1：在 Supabase 中执行迁移
+## 推荐方式：使用迁移命令
+
+在 `packages/server/.env` 配置 `DATABASE_URL` 后，从仓库根目录执行：
+
+```bash
+pnpm --filter @starlink/server db:migrate
+```
+
+该命令会按顺序执行 `packages/server/migrations/` 下的 `.sql` 文件和 `*/migration.sql`，并把已执行记录写入 `schema_migrations`。
+
+## 手动方式：在 Supabase 中执行迁移
 
 1. 登录 [Supabase Dashboard](https://app.supabase.com)
 2. 选择你的项目
 3. 进入 **SQL Editor**
-4. 复制 `001_enable_pgvector.sql` 的全部内容
-5. 点击 **Run** 执行
+4. 按文件名顺序执行 `packages/server/migrations/` 下的 SQL
+5. 点击 **Run** 执行每个迁移
 
-## 步骤 2：验证安装
+## 验证安装
 
 运行以下 SQL 验证 pgvector 是否启用：
 
@@ -18,7 +28,7 @@ SELECT * FROM pg_extension WHERE extname = 'vector';
 
 应该返回一行记录。
 
-## 步骤 3：测试向量搜索
+## 测试向量搜索
 
 ```sql
 -- 插入测试数据（需要先获取 embedding，这里用随机向量演示）
@@ -37,7 +47,7 @@ SELECT * FROM match_knowledge_documents(
 );
 ```
 
-## 步骤 4：配置环境变量
+## 配置环境变量
 
 确保 `.env` 或 `.env.local` 中配置了 Supabase 凭据：
 

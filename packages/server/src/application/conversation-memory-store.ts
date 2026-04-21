@@ -14,6 +14,7 @@ import {
   memoryItemSchema
 } from '@starlink/shared'
 import { pool } from '../infrastructure/db/pool.js'
+import { embedText, toPgVector } from '../services/embedding-service.js'
 
 type JsonRecord = Record<string, unknown>
 
@@ -69,7 +70,9 @@ type CaptureConversationOutcomeInput = {
   evidenceCount?: number
 }
 
-const initTables = pool.query(`
+const runtimeDdlEnabled = process.env.CONVERSATION_MEMORY_RUNTIME_DDL === 'true'
+
+const initTables = runtimeDdlEnabled ? pool.query(`
   CREATE TABLE IF NOT EXISTS conversation_sessions (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
@@ -108,6 +111,9 @@ const initTables = pool.query(`
     kind TEXT NOT NULL,
     title TEXT NOT NULL,
     content TEXT NOT NULL,
+    embedding VECTOR(1536),
+    embedding_model TEXT,
+    embedding_dimensions INTEGER,
     source_type TEXT NOT NULL,
     source_id TEXT,
     importance DOUBLE PRECISION NOT NULL DEFAULT 0.5,
@@ -120,13 +126,23 @@ const initTables = pool.query(`
     archived_at TIMESTAMPTZ
   );
 
+  ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding VECTOR(1536);
+  ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+  ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding_dimensions INTEGER;
+
   CREATE INDEX IF NOT EXISTS idx_memory_items_workspace_updated
     ON memory_items (workspace_id, updated_at DESC);
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_items_source_unique
     ON memory_items (workspace_id, source_type, source_id, kind, title)
     WHERE source_id IS NOT NULL AND archived_at IS NULL;
-`)
+
+  CREATE INDEX IF NOT EXISTS idx_memory_items_embedding
+    ON memory_items
+    USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 100)
+    WHERE embedding IS NOT NULL AND archived_at IS NULL;
+`) : Promise.resolve()
 
 export class ConversationMemoryStore {
   private ready: Promise<void> | null = null
@@ -256,12 +272,21 @@ export class ConversationMemoryStore {
   async upsertMemory(input: UpsertMemoryInput): Promise<MemoryItem> {
     await this.ensureTables()
     const id = input.id ?? await this.findMemoryIdBySource(input) ?? nanoid()
+    const embedding = await embedText(renderMemoryEmbeddingInput(input))
+    const metadata = {
+      ...(input.metadata ?? {}),
+      embeddingProvider: embedding.provider
+    }
     const result = await pool.query(
       `INSERT INTO memory_items (
         id, workspace_id, user_id, scope, kind, title, content, source_type,
-        source_id, importance, confidence, tags, metadata
+        source_id, importance, confidence, tags, metadata,
+        embedding, embedding_model, embedding_dimensions
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text[], $13::jsonb)
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text[], $13::jsonb,
+        $14::vector, $15, $16
+      )
       ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title,
         content = EXCLUDED.content,
@@ -269,6 +294,9 @@ export class ConversationMemoryStore {
         confidence = EXCLUDED.confidence,
         tags = EXCLUDED.tags,
         metadata = EXCLUDED.metadata,
+        embedding = EXCLUDED.embedding,
+        embedding_model = EXCLUDED.embedding_model,
+        embedding_dimensions = EXCLUDED.embedding_dimensions,
         updated_at = now(),
         archived_at = NULL
       RETURNING *`,
@@ -285,14 +313,21 @@ export class ConversationMemoryStore {
         clampScore(input.importance ?? 0.5),
         clampScore(input.confidence ?? 0.7),
         input.tags ?? [],
-        JSON.stringify(input.metadata ?? {})
+        JSON.stringify(metadata),
+        toPgVector(embedding.vector),
+        embedding.model,
+        embedding.dimensions
       ]
     )
 
     const stored = rowToMemory(result.rows[0])
     if (!input.sourceId) return stored
 
-    return await this.mergeMemoryBySource(stored)
+    return await this.mergeMemoryBySource(stored, {
+      embeddingVector: toPgVector(embedding.vector),
+      embeddingModel: embedding.model,
+      embeddingDimensions: embedding.dimensions
+    })
   }
 
   async listMemories(
@@ -301,18 +336,14 @@ export class ConversationMemoryStore {
   ): Promise<MemoryItem[]> {
     await this.ensureTables()
     const limit = clampLimit(options.limit ?? 30, 1, 100)
-    const params: unknown[] = [workspaceId]
-    const filters = ['workspace_id = $1', 'archived_at IS NULL']
-
-    if (options.scope) {
-      params.push(options.scope)
-      filters.push(`scope = $${params.length}`)
-    }
-    if (options.kind) {
-      params.push(options.kind)
-      filters.push(`kind = $${params.length}`)
+    if (options.query?.trim()) {
+      return await this.searchMemories(workspaceId, options.query, limit, {
+        scope: options.scope,
+        kind: options.kind
+      })
     }
 
+    const { filters, params } = buildMemoryFilters(workspaceId, options)
     params.push(limit)
     const result = await pool.query(
       `SELECT * FROM memory_items
@@ -322,26 +353,69 @@ export class ConversationMemoryStore {
       params
     )
 
-    const memories = result.rows.map(rowToMemory)
-    if (!options.query?.trim()) return memories
+    return result.rows.map(rowToMemory)
+  }
 
-    const scored = scoreMemories(memories, options.query)
+  async searchMemories(
+    workspaceId: string,
+    query: string,
+    limit = 8,
+    options: Pick<MemorySearchOptions, 'scope' | 'kind'> = {}
+  ): Promise<MemoryItem[]> {
+    await this.ensureTables()
+    const normalizedQuery = query.trim()
+    if (!normalizedQuery) return []
+
+    const semantic = await this.searchMemoriesByVector(workspaceId, normalizedQuery, limit, options)
+    if (semantic.length > 0) return semantic
+
+    const { filters, params } = buildMemoryFilters(workspaceId, options)
+    params.push(200)
+    const result = await pool.query(
+      `SELECT * FROM memory_items
+       WHERE ${filters.join(' AND ')}
+       ORDER BY updated_at DESC
+       LIMIT $${params.length}`,
+      params
+    )
+    const scored = scoreMemories(result.rows.map(rowToMemory), normalizedQuery).slice(0, clampLimit(limit, 1, 30))
     await this.touchMemories(scored.map((item) => item.id))
     return scored
   }
 
-  async searchMemories(workspaceId: string, query: string, limit = 8): Promise<MemoryItem[]> {
-    await this.ensureTables()
-    const result = await pool.query(
-      `SELECT * FROM memory_items
-       WHERE workspace_id = $1 AND archived_at IS NULL
-       ORDER BY updated_at DESC
-       LIMIT 200`,
-      [workspaceId]
-    )
-    const scored = scoreMemories(result.rows.map(rowToMemory), query).slice(0, clampLimit(limit, 1, 30))
-    await this.touchMemories(scored.map((item) => item.id))
-    return scored
+  private async searchMemoriesByVector(
+    workspaceId: string,
+    query: string,
+    limit: number,
+    options: Pick<MemorySearchOptions, 'scope' | 'kind'>
+  ): Promise<MemoryItem[]> {
+    try {
+      const embedding = await embedText(query)
+      const { filters, params } = buildMemoryFilters(workspaceId, options)
+      filters.push('embedding IS NOT NULL')
+      params.push(toPgVector(embedding.vector))
+      const vectorParamIndex = params.length
+      params.push(clampLimit(limit, 1, 30))
+
+      const result = await pool.query(
+        `SELECT * FROM memory_items
+         WHERE ${filters.join(' AND ')}
+         ORDER BY embedding <=> $${vectorParamIndex}::vector ASC,
+                  importance DESC,
+                  updated_at DESC
+         LIMIT $${params.length}`,
+        params
+      )
+
+      const memories: MemoryItem[] = result.rows.map(rowToMemory)
+      await this.touchMemories(memories.map((item) => item.id))
+      return memories
+    } catch (error) {
+      console.warn('[conversation-memory-store] vector memory search failed, falling back to lexical search', {
+        error: String(error)
+      })
+      return []
+    }
   }
 
   async captureConversationOutcome(input: CaptureConversationOutcomeInput): Promise<MemoryItem[]> {
@@ -416,7 +490,10 @@ export class ConversationMemoryStore {
     return result.rowCount ? result.rows[0].id as string : null
   }
 
-  private async mergeMemoryBySource(memory: MemoryItem): Promise<MemoryItem> {
+  private async mergeMemoryBySource(
+    memory: MemoryItem,
+    vector: { embeddingVector: string; embeddingModel: string; embeddingDimensions: number }
+  ): Promise<MemoryItem> {
     if (!memory.sourceId) return memory
     const result = await pool.query(
       `SELECT * FROM memory_items
@@ -439,6 +516,9 @@ export class ConversationMemoryStore {
            confidence = $4,
            tags = $5::text[],
            metadata = $6::jsonb,
+           embedding = $7::vector,
+           embedding_model = $8,
+           embedding_dimensions = $9,
            updated_at = now()
        WHERE id = $1`,
       [
@@ -447,7 +527,10 @@ export class ConversationMemoryStore {
         memory.importance,
         memory.confidence,
         memory.tags,
-        JSON.stringify(memory.metadata)
+        JSON.stringify(memory.metadata),
+        vector.embeddingVector,
+        vector.embeddingModel,
+        vector.embeddingDimensions
       ]
     )
     await pool.query(
@@ -465,6 +548,37 @@ export class ConversationMemoryStore {
       [ids]
     )
   }
+}
+
+function buildMemoryFilters(
+  workspaceId: string,
+  options: Pick<MemorySearchOptions, 'scope' | 'kind'> = {}
+) {
+  const params: unknown[] = [workspaceId]
+  const filters = ['workspace_id = $1', 'archived_at IS NULL']
+
+  if (options.scope) {
+    params.push(options.scope)
+    filters.push(`scope = $${params.length}`)
+  }
+  if (options.kind) {
+    params.push(options.kind)
+    filters.push(`kind = $${params.length}`)
+  }
+
+  return { filters, params }
+}
+
+function renderMemoryEmbeddingInput(input: UpsertMemoryInput) {
+  return [
+    input.title,
+    input.content,
+    input.kind ?? 'insight',
+    input.scope ?? 'workspace',
+    ...(input.tags ?? [])
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function rowToSession(row: Record<string, unknown>): ConversationSession {

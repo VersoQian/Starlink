@@ -72,7 +72,7 @@ export class AgentExecutor {
       const calls = response.toolCalls.map((tc) => ({
         id: tc.id,
         name: tc.function.name,
-        args: JSON.parse(tc.function.arguments) as Record<string, unknown>,
+        args: parseToolArguments(tc.function.arguments),
       }))
 
       yield { type: 'tool_calls', calls }
@@ -82,12 +82,18 @@ export class AgentExecutor {
       for (const call of calls) {
         try {
           const tool = this.registry.getTool(call.name)
+          const validation = tool.validate(call.args)
+          if (!validation.valid) {
+            throw new Error(
+              validation.errors.map((error) => `${error.path}: ${error.message}`).join('; ')
+            )
+          }
 
           const toolCtx: ToolContext = {
             workspaceId: context.workspaceId,
             userId: context.userId,
             executionId: context.executionId,
-            state: {},
+            state: (context as ExecutionContext & { state?: Record<string, unknown> }).state ?? {},
             credentials: {},
             abortSignal: context.abortController.signal,
             streamWriter: () => {},
@@ -131,5 +137,17 @@ export class AgentExecutor {
     if (round >= MAX_ROUNDS) {
       yield { type: 'error', error: `Agent reached maximum rounds (${MAX_ROUNDS})` }
     }
+  }
+}
+
+function parseToolArguments(raw: string): Record<string, unknown> {
+  if (!raw.trim()) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
   }
 }

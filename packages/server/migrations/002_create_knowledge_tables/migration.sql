@@ -1,6 +1,11 @@
-CREATE TYPE knowledge_base_status AS ENUM ('DRAFT', 'READY');
+DO $$
+BEGIN
+  CREATE TYPE knowledge_base_status AS ENUM ('DRAFT', 'READY');
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
 
-CREATE TABLE knowledge_base (
+CREATE TABLE IF NOT EXISTS knowledge_base (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL DEFAULT 'Knowledge Base',
   status knowledge_base_status NOT NULL DEFAULT 'DRAFT',
@@ -8,7 +13,7 @@ CREATE TABLE knowledge_base (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE document (
+CREATE TABLE IF NOT EXISTS document (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   kb_id UUID NOT NULL REFERENCES knowledge_base(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -19,7 +24,7 @@ CREATE TABLE document (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE vector_chunk (
+CREATE TABLE IF NOT EXISTS vector_chunk (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   kb_id UUID NOT NULL REFERENCES knowledge_base(id) ON DELETE CASCADE,
   document_id UUID REFERENCES document(id) ON DELETE SET NULL,
@@ -29,5 +34,5 @@ CREATE TABLE vector_chunk (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX vector_chunk_kb_id_idx ON vector_chunk(kb_id);
-CREATE INDEX vector_chunk_embedding_idx ON vector_chunk USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS vector_chunk_kb_id_idx ON vector_chunk(kb_id);
+CREATE INDEX IF NOT EXISTS vector_chunk_embedding_idx ON vector_chunk USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
