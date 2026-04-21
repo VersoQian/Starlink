@@ -24,9 +24,13 @@ type EvidenceDrawerProps = {
  * this same evidence.
  *
  * Controlled entirely by the comfy-store `evidenceDrawer` state.
+ * When rendered without a `conversationId` prop (e.g., registered as an
+ * overlay panel via panel-registry), falls back to `store.currentConversationId`.
  */
-export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProps) {
+export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProps = {}) {
   const drawer = useComfyStore((state) => state.evidenceDrawer)
+  const storeConversationId = useComfyStore((state) => state.currentConversationId)
+  const effectiveConversationId = conversationId ?? storeConversationId
   const knowledgeEvidence = useComfyStore((state) => state.knowledgeEvidence)
   const closeDrawer = useComfyStore((state) => state.closeEvidenceDrawer)
   const highlightCards = useComfyStore((state) => state.highlightCardsReferencingEvidence)
@@ -43,18 +47,18 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
   }, [knowledgeEvidence, drawer.focusedEvidenceId])
 
   const { data: referencingCardIds, isLoading } = useQuery({
-    queryKey: ['cardsReferencingEvidence', conversationId, drawer.focusedEvidenceId],
+    queryKey: ['cardsReferencingEvidence', effectiveConversationId, drawer.focusedEvidenceId],
     enabled:
       drawer.isOpen &&
-      !!conversationId &&
+      !!effectiveConversationId &&
       !!drawer.focusedEvidenceId,
     staleTime: 5000,
     queryFn: async () => {
-      if (!conversationId || !drawer.focusedEvidenceId) return [] as string[]
+      if (!effectiveConversationId || !drawer.focusedEvidenceId) return [] as string[]
       const client = getGraphQLClient()
       const response = await client.request<{ cardsReferencingEvidence: string[] }>(
         CARDS_REFERENCING_QUERY,
-        { conversationId, evidenceId: drawer.focusedEvidenceId }
+        { conversationId: effectiveConversationId, evidenceId: drawer.focusedEvidenceId }
       )
       return response.cardsReferencingEvidence ?? []
     }

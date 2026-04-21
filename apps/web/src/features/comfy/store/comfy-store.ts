@@ -12,9 +12,33 @@ import type {
   CriticResponse
 } from '@/types/macra'
 import type { CanvasNode, CanvasEdge, WorkspaceGraphResponse } from '@/types/graph'
+import {
+  canTransitionWorkflowStage,
+  type WorkflowStage
+} from './workflow-stage'
 
 // Chat 消息类型
 type ChatMessage = { role: 'user' | 'assistant'; content: string; timestamp: string }
+
+export type ToolRunStatus = 'idle' | 'running' | 'completed' | 'failed'
+
+export type ToolRunState = {
+  status: ToolRunStatus
+  startedAt: string | null
+  completedAt: string | null
+  error: string | null
+  resultSummary: string | null
+  result: unknown | null
+}
+
+const idleToolRunState = (): ToolRunState => ({
+  status: 'idle',
+  startedAt: null,
+  completedAt: null,
+  error: null,
+  resultSummary: null,
+  result: null
+})
 
 // 节点数据类型（保留旧接口以兼容）
 export type NodeStatus = 'idle' | 'processing' | 'done' | 'error'
@@ -99,7 +123,6 @@ const START_CONVERSATION_MUTATION = /* GraphQL */ `
 `
 
 let activeSubscription: (() => void) | null = null
-let activeConversationId: string | null = null
 
 const APPROVE_DECISION_MUTATION = /* GraphQL */ `
   mutation ApproveDecision($conversationId: ID!, $decision: String) {
@@ -212,6 +235,21 @@ interface MacraState {
   // 当前会话 id (供前端反查 / drawer 使用)
   currentConversationId: string | null
 
+  workflowStage: WorkflowStage
+  workflowMeta: {
+    startedAt: string | null
+    lastError: string | null
+    lastTransitionReason: string | null
+  }
+  setWorkflowStage: (stage: WorkflowStage, reason?: string) => void
+
+  // Tool drawer / invocation UI
+  activeToolId: string | null
+  toolRunStates: Record<string, ToolRunState>
+  openToolDrawer: (toolId: string) => void
+  closeToolDrawer: () => void
+  setToolRunState: (toolId: string, patch: Partial<ToolRunState>) => void
+
   // Chat 状态（新增）
   chatInput: string
   chatMessages: ChatMessage[]
@@ -287,6 +325,14 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     highlightedCardIds: []
   },
   currentConversationId: null,
+  workflowStage: 'idle',
+  workflowMeta: {
+    startedAt: null,
+    lastError: null,
+    lastTransitionReason: null
+  },
+  activeToolId: null,
+  toolRunStates: {},
   chatInput: '',
   chatMessages: createInitialChatMessages(),
   detailPanel: {
@@ -343,6 +389,53 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       evidenceDrawer: {
         ...state.evidenceDrawer,
         highlightedCardIds: []
+      }
+    }))
+  },
+
+  setWorkflowStage: (stage, reason) => {
+    const currentStage = get().workflowStage
+    if (!canTransitionWorkflowStage(currentStage, stage)) {
+      console.warn(`[workflow] illegal transition ${currentStage} -> ${stage}`)
+      return
+    }
+
+    set((state) => ({
+      workflowStage: stage,
+      workflowMeta: {
+        startedAt:
+          stage === 'thinking'
+            ? new Date().toISOString()
+            : state.workflowMeta.startedAt,
+        lastError:
+          stage === 'failed'
+            ? state.workflowMeta.lastError ?? 'Workflow failed'
+            : state.workflowMeta.lastError,
+        lastTransitionReason: reason ?? null
+      }
+    }))
+  },
+
+  openToolDrawer: (toolId) => {
+    set({ activeToolId: toolId })
+    const currentStage = get().workflowStage
+    if (canTransitionWorkflowStage(currentStage, 'input')) {
+      get().setWorkflowStage('input', `tool-opened:${toolId}`)
+    }
+  },
+
+  closeToolDrawer: () => {
+    set({ activeToolId: null })
+  },
+
+  setToolRunState: (toolId, patch) => {
+    set((state) => ({
+      toolRunStates: {
+        ...state.toolRunStates,
+        [toolId]: {
+          ...(state.toolRunStates[toolId] ?? idleToolRunState()),
+          ...patch
+        }
       }
     }))
   },
@@ -536,7 +629,15 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   // ============== Business LangGraph 调用 ==============
   callLangGraph: async (userPrompt, _mode = 'general', kbId) => {
     void _mode
-    set({ isOrchestratorProcessing: true, citations: {} })
+    get().setWorkflowStage('thinking', 'analysis-submitted')
+    set((state) => ({
+      isOrchestratorProcessing: true,
+      citations: {},
+      workflowMeta: {
+        ...state.workflowMeta,
+        lastError: null
+      }
+    }))
 
     if (activeSubscription) {
       activeSubscription()
@@ -555,6 +656,14 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     const workspaceId = get().workspaceId
     if (!workspaceId) {
       set({ isOrchestratorProcessing: false })
+      set((state) => ({
+        workflowStage: 'failed',
+        workflowMeta: {
+          ...state.workflowMeta,
+          lastError: 'workspaceId 未设置',
+          lastTransitionReason: 'missing-workspace-id'
+        }
+      }))
       throw new Error('workspaceId 未设置')
     }
 
@@ -569,7 +678,6 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       })
 
       const conversationId = response.startConversation.metadata.id
-      activeConversationId = conversationId
       set({ currentConversationId: conversationId })
 
       const extractMacraNodeData = (canvasNode: CanvasNode): MacraNodeData | null => {
@@ -714,7 +822,15 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       set({ isOrchestratorProcessing: false })
     } catch (error) {
       console.error('❌ Business LangGraph 调用失败:', error)
-      set({ isOrchestratorProcessing: false })
+      set((state) => ({
+        isOrchestratorProcessing: false,
+        workflowStage: 'failed',
+        workflowMeta: {
+          ...state.workflowMeta,
+          lastError: error instanceof Error ? error.message : '未知错误',
+          lastTransitionReason: 'analysis-failed'
+        }
+      }))
       throw error
     }
   },
@@ -815,6 +931,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   // ============== HITL 决策 ==============
   approveDecision: async (conversationId, decision) => {
     try {
+      get().setWorkflowStage('revising', 'decision-approved')
       const client = getGraphQLClient()
       await client.request(APPROVE_DECISION_MUTATION, {
         conversationId,
@@ -823,12 +940,21 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       set({ pendingInterrupt: null })
     } catch (error) {
       console.error('❌ 决策审批失败:', error)
+      set((state) => ({
+        workflowStage: 'failed',
+        workflowMeta: {
+          ...state.workflowMeta,
+          lastError: error instanceof Error ? error.message : '决策审批失败',
+          lastTransitionReason: 'decision-approve-failed'
+        }
+      }))
       throw error
     }
   },
 
   dismissInterrupt: () => {
     set({ pendingInterrupt: null })
+    get().setWorkflowStage('output', 'interrupt-dismissed')
   },
 
   // ============== 详情面板操作 ==============
@@ -978,6 +1104,14 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         highlightedCardIds: []
       },
       currentConversationId: null,
+      workflowStage: 'idle',
+      workflowMeta: {
+        startedAt: null,
+        lastError: null,
+        lastTransitionReason: null
+      },
+      activeToolId: null,
+      toolRunStates: {},
       chatInput: '',
       chatMessages: createInitialChatMessages(),
       detailPanel: {

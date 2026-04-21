@@ -1,17 +1,20 @@
 import { FileText, PanelsTopLeft, LayoutGrid, Sparkles, Zap } from 'lucide-react'
+import { WORKFLOW_STAGE_LABELS, WORKFLOW_STAGE_ORDER, type WorkflowStage } from '../store/workflow-stage'
 
 type CanvasHeaderProps = {
   isAnimating: boolean
   onOpenTutorial: () => void
   viewMode?: 'freeform' | 'bmc'
   onViewModeChange?: (mode: 'freeform' | 'bmc') => void
+  workflowStage: WorkflowStage
 }
 
 export function CanvasHeader({
   isAnimating,
   onOpenTutorial,
   viewMode = 'freeform',
-  onViewModeChange
+  onViewModeChange,
+  workflowStage
 }: CanvasHeaderProps) {
   return (
     <header
@@ -31,6 +34,24 @@ export function CanvasHeader({
       </div>
 
       <div className="flex gap-4 items-center">
+        <div className="hidden items-center gap-2 rounded-2xl border border-white/15 bg-slate-950/40 px-3 py-2 shadow-xl shadow-slate-950/30 xl:flex">
+          {WORKFLOW_STAGE_ORDER.map((stage) => (
+            <span
+              key={stage}
+              className={`rounded-xl px-2.5 py-1 text-[11px] font-bold transition ${
+                workflowStage === stage
+                  ? 'bg-gradient-to-r from-cyan-400 to-sky-500 text-white shadow-lg shadow-cyan-500/20'
+                  : 'text-slate-500'
+              }`}
+            >
+              {WORKFLOW_STAGE_LABELS[stage]}
+            </span>
+          ))}
+        </div>
+        <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-center">
+          <div className="text-[10px] uppercase tracking-[0.24em] text-cyan-200">Workflow</div>
+          <div className="mt-1 text-xs font-bold text-white">{WORKFLOW_STAGE_LABELS[workflowStage]}</div>
+        </div>
         <div className="flex items-center gap-1 rounded-2xl border border-white/15 bg-slate-950/40 p-1 shadow-xl shadow-slate-950/30">
           <button
             onClick={() => onViewModeChange?.('freeform')}
