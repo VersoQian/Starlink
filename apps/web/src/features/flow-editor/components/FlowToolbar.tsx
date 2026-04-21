@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { Edge, Node } from 'reactflow'
 import { useReactFlow } from 'reactflow'
@@ -45,9 +45,14 @@ export function FlowToolbar({ flowName, onFlowNameChange, nodes, edges }: FlowTo
 
   const importRef = useRef<HTMLInputElement>(null)
   const resolvedFlowName = flowName ?? storeFlowName
-  const currentDefinition = nodes && edges
-    ? { id: null, name: resolvedFlowName, nodes, edges }
-    : toFlowDefinition()
+  const currentDefinition = useMemo(
+    () => (
+      nodes && edges
+        ? { id: null, name: resolvedFlowName, nodes, edges }
+        : toFlowDefinition()
+    ),
+    [edges, nodes, resolvedFlowName, toFlowDefinition],
+  )
 
   const handleSave = useCallback(() => {
     console.log('Save flow:', currentDefinition)

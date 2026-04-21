@@ -18,7 +18,7 @@ interface BmcCellProps {
 
 export function BmcCell({ domain, label, color, nodes, conflicts, onNodeClick, isLoading }: BmcCellProps) {
   return (
-    <div className="flex flex-col h-full p-3 overflow-hidden">
+    <div className="flex flex-col h-full p-3 overflow-hidden" data-domain={domain}>
       {/* Header */}
       <div className="flex items-center gap-2 mb-2 flex-shrink-0">
         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />

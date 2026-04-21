@@ -133,7 +133,7 @@ export function useFlowExecution() {
   )
 
   const cancel = useCallback(
-    (_executionId: string) => {
+    () => {
       unsubRef.current?.()
       onFlowComplete('failed')
     },

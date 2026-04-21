@@ -14,7 +14,7 @@ interface FlowEditorProps {
   flowId?: string
 }
 
-export function FlowEditor({ workspaceId, flowId }: FlowEditorProps) {
+export function FlowEditor({ workspaceId }: FlowEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)

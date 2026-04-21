@@ -5,7 +5,6 @@
  * 这是论文"多 Agent 协同可见性"的核心展示组件。
  */
 
-import { useMemo } from 'react'
 import type { AgentType } from '@/types/macra'
 import { AGENT_TYPES } from '@/types/macra'
 
