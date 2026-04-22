@@ -5,7 +5,7 @@
 import type { FlowDefinition } from '@starlink/shared'
 import type { FlowStore } from '../application/flow-store.js'
 
-const BMC_TEMPLATE: FlowDefinition = {
+export const BMC_TEMPLATE: FlowDefinition = {
   id: 'tpl-bmc',
   name: 'CC-BMC 商业分析',
   description: '使用市场/产品/财务 Agent 进行 9 维度商业模型画布分析',
@@ -14,7 +14,7 @@ const BMC_TEMPLATE: FlowDefinition = {
     { id: 'market-1', toolName: 'market_agent', type: 'agent', label: '市场分析', position: { x: 350, y: 50 }, config: {}, inputPorts: [{ name: 'question', type: 'string', description: '分析问题' }], outputPorts: [{ name: 'bmcCards', type: 'array', description: 'BMC 卡片' }] },
     { id: 'product-1', toolName: 'product_agent', type: 'agent', label: '产品策略', position: { x: 350, y: 200 }, config: {}, inputPorts: [{ name: 'question', type: 'string', description: '分析问题' }], outputPorts: [{ name: 'bmcCards', type: 'array', description: 'BMC 卡片' }] },
     { id: 'finance-1', toolName: 'finance_agent', type: 'agent', label: '财务分析', position: { x: 350, y: 350 }, config: {}, inputPorts: [{ name: 'question', type: 'string', description: '分析问题' }], outputPorts: [{ name: 'bmcCards', type: 'array', description: 'BMC 卡片' }] },
-    { id: 'agg-1', toolName: 'aggregator', type: 'control', label: '聚合', position: { x: 650, y: 200 }, config: { strategy: 'concat' }, inputPorts: [{ name: 'inputs', type: 'array', description: '多个输入' }], outputPorts: [{ name: 'result', type: 'object', description: '聚合结果' }] },
+    { id: 'agg-1', toolName: 'aggregator', type: 'control', label: '聚合', position: { x: 650, y: 200 }, config: { strategy: 'concat' }, inputPorts: [{ name: 'inputs', type: 'array', description: '多个输入' }], outputPorts: [{ name: 'result', type: 'array', description: '聚合结果' }] },
     { id: 'critic-1', toolName: 'critic_agent', type: 'agent', label: '审查', position: { x: 900, y: 200 }, config: {}, inputPorts: [{ name: 'allNodes', type: 'array', description: '所有节点' }], outputPorts: [{ name: 'conflicts', type: 'array', description: '冲突列表' }] },
     { id: 'bmc-1', toolName: 'bmc_renderer', type: 'tool', label: 'BMC 渲染', position: { x: 1150, y: 200 }, config: {}, inputPorts: [{ name: 'nodes', type: 'array', description: 'BMC 节点' }], outputPorts: [{ name: 'canvas', type: 'object', description: 'BMC 画布' }] },
   ],

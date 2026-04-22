@@ -28,6 +28,11 @@ export class GraphExecutor {
         const startTime = Date.now()
 
         try {
+          if (step.toolName === '__input') {
+            state[nodeId] = initialInputs
+            return { nodeId, output: initialInputs, duration: Date.now() - startTime }
+          }
+
           const tool = this.registry.getTool(step.toolName)
 
           // Resolve inputs from upstream outputs
@@ -92,17 +97,31 @@ export class GraphExecutor {
     config: Record<string, unknown>,
   ): Record<string, unknown> {
     const input: Record<string, unknown> = { ...config }
+    const byTargetPort = new Map<string, InputMapping[]>()
 
     for (const mapping of mappings) {
-      const sourceOutput = state[mapping.sourceNodeId]
-      if (sourceOutput && typeof sourceOutput === 'object' && !Array.isArray(sourceOutput)) {
-        const obj = sourceOutput as Record<string, unknown>
-        input[mapping.targetPort] = obj[mapping.sourcePort] ?? sourceOutput
-      } else {
-        input[mapping.targetPort] = sourceOutput
-      }
+      const existing = byTargetPort.get(mapping.targetPort) ?? []
+      existing.push(mapping)
+      byTargetPort.set(mapping.targetPort, existing)
+    }
+
+    for (const [targetPort, targetMappings] of byTargetPort) {
+      const values = targetMappings.map((mapping) => this.resolveSingleInput(mapping, state))
+      input[targetPort] = values.length === 1 ? values[0] : values
     }
 
     return input
+  }
+
+  private resolveSingleInput(
+    mapping: InputMapping,
+    state: Record<string, unknown>,
+  ): unknown {
+    const sourceOutput = state[mapping.sourceNodeId]
+    if (sourceOutput && typeof sourceOutput === 'object' && !Array.isArray(sourceOutput)) {
+      const obj = sourceOutput as Record<string, unknown>
+      return obj[mapping.sourcePort] ?? sourceOutput
+    }
+    return sourceOutput
   }
 }
