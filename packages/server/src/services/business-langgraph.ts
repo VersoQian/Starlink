@@ -9,6 +9,7 @@ import {
   type CanvasEdge,
   type CanvasGraph,
   type CanvasNode,
+  type BmcCompactCardContext,
   type KnowledgeEvidence,
   type SeminarPhase
 } from '@starlink/shared'
@@ -18,6 +19,7 @@ import type { Evidence } from '@starlink/shared'
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
 const MAX_ROUNDS = 3
+const MAX_CONTEXT_CLAIMS_PER_CARD = 4
 
 // ============== CC-BMC 九大维度（与前端保持一致） ==============
 const CC_BMC_DOMAINS = {
@@ -91,7 +93,7 @@ export const MacraNodeDataSchema = z.object({
     source: z.string().optional(),
     tags: z.array(z.string()).optional(),
     stage: z.enum(['planning', 'execution', 'review', 'decision']).optional()
-  }),
+  }).passthrough(),
   agentType: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
   isInteractive: z.boolean().optional(),
   severity: z.enum(['high', 'medium', 'low']).optional(),
@@ -1250,7 +1252,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 
   private buildCrossContext(state: BusinessStateType): CrossContext {
     const summarizeNodes = (nodes: MacraNodeData[]) =>
-      nodes.map((n) => `- **${n.domain ?? n.label}**: ${n.content.substring(0, 80)}`).join('\n')
+      renderCompactBmcCardsForPrompt(nodes)
 
     const marketSummary = summarizeNodes(state.marketNodes)
     const productSummary = summarizeNodes(state.productNodes)
@@ -1404,9 +1406,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
       return { conflicts, roundNumber: state.roundNumber }
     }
 
-    const nodesSummary = allNodes
-      .map((n) => `[${n.metadata.agent_signature ?? 'unknown'}] ${n.domain ?? n.label}: ${n.content.substring(0, 120)}`)
-      .join('\n')
+    const nodesSummary = renderCompactBmcCardsForPrompt(allNodes)
     const workspaceContext = this.buildWorkspaceContextPrompt(state)
 
     const CriticOutputSchema = z.object({
@@ -1849,6 +1849,105 @@ export function buildDeterministicNodeId(agentType: AgentType, domain: CCBMCDoma
 function appendRoundTag(tags: string[], round: number) {
   if (round <= 1) return [...new Set(tags)]
   return [...new Set([...tags, `round-${round}`])]
+}
+
+export function buildCompactBmcCardContext(node: MacraNodeData): BmcCompactCardContext {
+  const keyClaims = extractKeyClaims(node.content)
+  return {
+    id: node.id,
+    domain: node.domain as BmcCompactCardContext['domain'],
+    label: node.label,
+    agentSignature: node.metadata.agent_signature as BmcCompactCardContext['agentSignature'],
+    confidence: node.metadata.confidence,
+    keyClaims,
+    assumptions: findContextSignals(keyClaims, ['假设', '预计', '可能', '依赖', '如果']),
+    risks: findContextSignals(keyClaims, ['风险', '冲突', '不足', '不确定', '成本', '监管', '依赖']),
+    evidenceRefs: extractEvidenceRefs(node.metadata)
+  }
+}
+
+export function renderCompactBmcCardsForPrompt(nodes: MacraNodeData[]): string {
+  if (nodes.length === 0) return ''
+
+  return nodes
+    .map(buildCompactBmcCardContext)
+    .map((card) => {
+      const lines = [
+        `- **${card.domain ?? card.label}** (${card.agentSignature ?? 'unknown'}, confidence: ${card.confidence ?? 'unknown'})`
+      ]
+      for (const [index, claim] of card.keyClaims.entries()) {
+        lines.push(`  - claim ${index + 1}: ${claim}`)
+      }
+      if (card.assumptions.length > 0) {
+        lines.push(`  - assumptions: ${card.assumptions.join('；')}`)
+      }
+      if (card.risks.length > 0) {
+        lines.push(`  - risks: ${card.risks.join('；')}`)
+      }
+      if (card.evidenceRefs.length > 0) {
+        lines.push(`  - evidence: ${card.evidenceRefs.join(', ')}`)
+      }
+      return lines.join('\n')
+    })
+    .join('\n')
+}
+
+function extractKeyClaims(content: string): string[] {
+  const normalized = content
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\[\[(?:ref:[^\]]+|no-ref)\]\]/g, '')
+    .replace(/[#*_`>]/g, '')
+    .replace(/\r/g, '\n')
+
+  const lineClaims = normalized
+    .split('\n')
+    .map(cleanClaim)
+    .filter(isUsefulClaim)
+
+  const claims = lineClaims.length > 0
+    ? lineClaims
+    : normalized
+        .split(/[。！？!?；;]/)
+        .map(cleanClaim)
+        .filter(isUsefulClaim)
+
+  return [...new Set(claims)].slice(0, MAX_CONTEXT_CLAIMS_PER_CARD)
+}
+
+function cleanClaim(value: string) {
+  return value
+    .replace(/^\s*[-+*•\d.、）)]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isUsefulClaim(value: string) {
+  return value.length >= 6 && !/^[-\s]+$/.test(value)
+}
+
+function findContextSignals(claims: string[], keywords: string[]) {
+  return claims
+    .filter((claim) => keywords.some((keyword) => claim.includes(keyword)))
+    .slice(0, 3)
+}
+
+function extractEvidenceRefs(metadata: MacraNodeData['metadata']) {
+  const citations = (metadata as { citations?: unknown }).citations
+  if (!Array.isArray(citations)) return []
+
+  const refs = new Set<string>()
+  for (const citation of citations) {
+    const citationRefs = (citation as { refs?: unknown }).refs
+    if (!Array.isArray(citationRefs)) continue
+    for (const ref of citationRefs) {
+      const evidenceRef = ref as { docId?: unknown; snippetId?: unknown }
+      if (typeof evidenceRef.docId === 'string' && typeof evidenceRef.snippetId === 'string') {
+        refs.add(`${evidenceRef.docId}#${evidenceRef.snippetId}`)
+      }
+    }
+  }
+
+  return [...refs].slice(0, 8)
 }
 
 function shouldReuseWorkspaceGraph(intent?: Intent['intent'] | null) {

@@ -1,4 +1,5 @@
 export * from './schemas/canvas.js'
+export * from './schemas/bmc.js'
 export * from './schemas/conversation.js'
 export * from './schemas/memory.js'
 export * from './schemas/citation.js'

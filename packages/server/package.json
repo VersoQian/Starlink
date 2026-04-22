@@ -12,7 +12,7 @@
     "clean": "rimraf dist",
     "lint": "tsc --noEmit",
     "db:migrate": "pnpm run build && node --env-file=.env dist/infrastructure/db/migrate.js",
-    "test": "pnpm --filter @starlink/shared build && pnpm run build && node --test dist/**/*.test.js",
+    "test": "pnpm --filter @starlink/shared build && pnpm run clean && pnpm run build && find dist -name '*.test.js' -print | xargs node --test",
     "smoke:access-subscriptions": "pnpm run build && node dist/scripts/smoke-access-subscriptions.js",
     "smoke:task-events": "pnpm run build && node dist/scripts/smoke-task-event-store.js",
     "smoke:conversation-runtime": "pnpm run build && node dist/scripts/smoke-conversation-runtime-store.js",
