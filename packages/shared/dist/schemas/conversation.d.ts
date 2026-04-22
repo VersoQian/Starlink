@@ -77,6 +77,22 @@ export declare const seminarDecisionRequestedPayloadSchema: z.ZodObject<{
     phase: "decision";
     occurredAt: string;
 }>;
+export declare const knowledgeEvidenceSchema: z.ZodObject<{
+    docId: z.ZodString;
+    snippet: z.ZodString;
+    score: z.ZodNumber;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, "strip", z.ZodTypeAny, {
+    docId: string;
+    score: number;
+    snippet: string;
+    metadata?: Record<string, unknown> | undefined;
+}, {
+    docId: string;
+    score: number;
+    snippet: string;
+    metadata?: Record<string, unknown> | undefined;
+}>;
 export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z.ZodObject<{
     type: z.ZodLiteral<"graph/appended">;
     conversationId: z.ZodString;
@@ -1025,6 +1041,183 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
         removedEdgeIds?: string[] | undefined;
     };
 }>, z.ZodObject<{
+    type: z.ZodLiteral<"evidence/updated">;
+    conversationId: z.ZodString;
+    payload: z.ZodArray<z.ZodObject<{
+        docId: z.ZodString;
+        snippet: z.ZodString;
+        score: z.ZodNumber;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, "strip", z.ZodTypeAny, {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }, {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }>, "many">;
+}, "strip", z.ZodTypeAny, {
+    type: "evidence/updated";
+    conversationId: string;
+    payload: {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }[];
+}, {
+    type: "evidence/updated";
+    conversationId: string;
+    payload: {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }[];
+}>, z.ZodObject<{
+    type: z.ZodLiteral<"card/cited">;
+    conversationId: z.ZodString;
+    payload: z.ZodObject<{
+        cardId: z.ZodString;
+        citation: z.ZodObject<{
+            cardId: z.ZodString;
+            fieldName: z.ZodEnum<["title", "content", "summary"]>;
+            spans: z.ZodArray<z.ZodObject<{
+                textStart: z.ZodNumber;
+                textEnd: z.ZodNumber;
+                refs: z.ZodArray<z.ZodObject<{
+                    evidenceId: z.ZodString;
+                    docId: z.ZodString;
+                    snippetId: z.ZodString;
+                }, "strip", z.ZodTypeAny, {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }, {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }>, "many">;
+            }, "strip", z.ZodTypeAny, {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }, {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }>, "many">;
+        }, "strip", z.ZodTypeAny, {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        }, {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        }>;
+        groundingRate: z.ZodNumber;
+    }, "strip", z.ZodTypeAny, {
+        cardId: string;
+        citation: {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        };
+        groundingRate: number;
+    }, {
+        cardId: string;
+        citation: {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        };
+        groundingRate: number;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    type: "card/cited";
+    conversationId: string;
+    payload: {
+        cardId: string;
+        citation: {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        };
+        groundingRate: number;
+    };
+}, {
+    type: "card/cited";
+    conversationId: string;
+    payload: {
+        cardId: string;
+        citation: {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        };
+        groundingRate: number;
+    };
+}>, z.ZodObject<{
     type: z.ZodLiteral<"status">;
     conversationId: z.ZodString;
     status: z.ZodEnum<["idle", "running", "paused", "failed", "completed"]>;
@@ -1226,22 +1419,6 @@ export declare const conversationMetadataSchema: z.ZodObject<{
     createdAt: Date;
     updatedAt: Date;
     latestQuestion?: string | undefined;
-}>;
-export declare const knowledgeEvidenceSchema: z.ZodObject<{
-    docId: z.ZodString;
-    snippet: z.ZodString;
-    score: z.ZodNumber;
-    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-}, "strip", z.ZodTypeAny, {
-    docId: string;
-    snippet: string;
-    score: number;
-    metadata?: Record<string, unknown> | undefined;
-}, {
-    docId: string;
-    snippet: string;
-    score: number;
-    metadata?: Record<string, unknown> | undefined;
 }>;
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 export type SeminarPhase = z.infer<typeof seminarPhaseSchema>;

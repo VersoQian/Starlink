@@ -40,3 +40,12 @@ export const knowledgeBaseStatusResponseSchema = z.object({
     knowledgeBase: knowledgeBaseSchema.optional(),
     tasks: z.array(knowledgeTaskSchema).optional()
 });
+export const knowledgeSearchResultSchema = z.object({
+    docId: z.string().min(1),
+    snippet: z.string().min(1),
+    score: z.number(),
+    metadata: z.record(z.unknown()).optional()
+});
+export const knowledgeSearchResponseSchema = z.object({
+    results: z.array(knowledgeSearchResultSchema).optional()
+});

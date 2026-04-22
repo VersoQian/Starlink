@@ -50,10 +50,91 @@ export const typeDefs = gql `
     metadata: JSON
   }
 
+  type EvidenceRef {
+    evidenceId: ID!
+    docId: ID!
+    snippetId: String!
+  }
+
+  type CitationSpan {
+    textStart: Int!
+    textEnd: Int!
+    refs: [EvidenceRef!]!
+  }
+
+  type CardCitation {
+    cardId: ID!
+    fieldName: String!
+    spans: [CitationSpan!]!
+  }
+
   type StartConversationPayload {
     metadata: ConversationMetadata!
     graph: CanvasGraph!
     knowledgeEvidence: [KnowledgeEvidence!]!
+    citations: [CardCitation!]!
+  }
+
+  type ConversationSession {
+    id: ID!
+    workspaceId: ID!
+    userId: ID!
+    title: String!
+    status: String!
+    latestQuestion: String
+    contextSnapshot: JSON!
+    createdAt: String!
+    updatedAt: String!
+    completedAt: String
+  }
+
+  type ConversationMessage {
+    id: ID!
+    conversationId: ID!
+    workspaceId: ID!
+    userId: ID
+    role: String!
+    content: String!
+    metadata: JSON!
+    createdAt: String!
+  }
+
+  type MemoryItem {
+    id: ID!
+    workspaceId: ID!
+    userId: ID
+    scope: String!
+    kind: String!
+    title: String!
+    content: String!
+    sourceType: String!
+    sourceId: String
+    importance: Float!
+    confidence: Float!
+    tags: [String!]!
+    metadata: JSON!
+    createdAt: String!
+    updatedAt: String!
+    lastUsedAt: String
+    archivedAt: String
+  }
+
+  type CanvasContextSummary {
+    nodeCount: Int!
+    edgeCount: Int!
+    highlights: [String!]!
+  }
+
+  type WorkspaceContextSnapshot {
+    workspaceId: ID!
+    conversationId: ID
+    query: String!
+    builtAt: String!
+    canvasSummary: CanvasContextSummary!
+    recentMessages: [ConversationMessage!]!
+    memories: [MemoryItem!]!
+    knowledgeEvidence: [KnowledgeEvidence!]!
+    promptBlock: String!
   }
 
   type KbTaskStatus {
@@ -159,6 +240,28 @@ export const typeDefs = gql `
     label: String
   }
 
+  input AppendConversationMessageInput {
+    conversationId: ID!
+    workspaceId: ID!
+    role: String!
+    content: String!
+    metadata: JSON
+  }
+
+  input CreateMemoryItemInput {
+    workspaceId: ID!
+    scope: String
+    kind: String
+    title: String!
+    content: String!
+    sourceType: String
+    sourceId: String
+    importance: Float
+    confidence: Float
+    tags: [String!]
+    metadata: JSON
+  }
+
   input CommunityPostInput {
     workspaceId: ID!
     title: String!
@@ -217,18 +320,27 @@ export const typeDefs = gql `
   type Query {
     workspaceGraph(workspaceId: ID!): CanvasGraph!
     conversation(id: ID!): StartConversationPayload
+    conversationSessions(workspaceId: ID!, limit: Int): [ConversationSession!]!
+    conversationMessages(workspaceId: ID!, conversationId: ID!, limit: Int): [ConversationMessage!]!
     conversationRuntimeEvents(workspaceId: ID!, conversationId: ID): [ConversationEvent!]!
+    cardsReferencingEvidence(conversationId: ID!, evidenceId: ID!): [ID!]!
+    workspaceMemories(workspaceId: ID!, query: String, scope: String, kind: String, limit: Int): [MemoryItem!]!
+    workspaceContextSnapshot(workspaceId: ID!, conversationId: ID, query: String!, kbId: ID): WorkspaceContextSnapshot!
     kbTaskStatus(workspaceId: ID!, kbId: ID!): [KbTaskStatus!]!
     knowledgeBases(workspaceId: ID!): [KnowledgeBase!]!
     knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!
+    knowledgeBaseSearch(workspaceId: ID!, kbId: ID!, query: String!, topK: Int): [KnowledgeEvidence!]!
     workspaces: [WorkspaceDirectoryItem!]!
     workspaceAssets(workspaceId: ID!): [WorkspaceAsset!]!
     workspaceMetadataHistory(workspaceId: ID!): [WorkspaceMetadataHistoryEntry!]!
   }
 
   type Mutation {
-    startConversation(workspaceId: ID!, question: String!): StartConversationPayload!
+    startConversation(workspaceId: ID!, question: String!, kbId: ID): StartConversationPayload!
     approveDecision(conversationId: ID!, decision: String): Boolean!
+    appendConversationMessage(input: AppendConversationMessageInput!): ConversationMessage!
+    createMemoryItem(input: CreateMemoryItemInput!): MemoryItem!
+    extractConversationMemory(conversationId: ID!): [MemoryItem!]!
     addNode(workspaceId: ID!, input: NodeInput!): CanvasNode!
     connectNodes(workspaceId: ID!, input: EdgeInput!): CanvasEdge!
     createKnowledgeBase(workspaceId: ID!): KnowledgeBase!

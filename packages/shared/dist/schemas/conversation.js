@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { canvasGraphSchema } from './canvas.js';
+import { cardCitationSchema } from './citation.js';
 export const conversationStatusSchema = z.enum(['idle', 'running', 'paused', 'failed', 'completed']);
 export const seminarPhaseSchema = z.enum(['planning', 'execution', 'review', 'decision']);
 export const phaseChangedPayloadSchema = z.object({
@@ -30,6 +31,12 @@ export const seminarDecisionRequestedPayloadSchema = z.object({
     decision: z.string(),
     occurredAt: z.string()
 });
+export const knowledgeEvidenceSchema = z.object({
+    docId: z.string(),
+    snippet: z.string(),
+    score: z.number(),
+    metadata: z.record(z.unknown()).optional()
+});
 export const conversationEventSchema = z.discriminatedUnion('type', [
     z.object({
         type: z.literal('graph/appended'),
@@ -44,6 +51,20 @@ export const conversationEventSchema = z.discriminatedUnion('type', [
             edges: z.array(canvasGraphSchema.shape.edges.element).optional(),
             removedNodeIds: z.array(z.string()).optional(),
             removedEdgeIds: z.array(z.string()).optional()
+        })
+    }),
+    z.object({
+        type: z.literal('evidence/updated'),
+        conversationId: z.string(),
+        payload: z.array(knowledgeEvidenceSchema)
+    }),
+    z.object({
+        type: z.literal('card/cited'),
+        conversationId: z.string(),
+        payload: z.object({
+            cardId: z.string(),
+            citation: cardCitationSchema,
+            groundingRate: z.number()
         })
     }),
     z.object({
@@ -79,10 +100,4 @@ export const conversationMetadataSchema = z.object({
     updatedAt: z.date(),
     status: conversationStatusSchema,
     latestQuestion: z.string().optional()
-});
-export const knowledgeEvidenceSchema = z.object({
-    docId: z.string(),
-    snippet: z.string(),
-    score: z.number(),
-    metadata: z.record(z.unknown()).optional()
 });

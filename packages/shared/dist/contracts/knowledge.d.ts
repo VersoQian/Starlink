@@ -232,7 +232,56 @@ export declare const knowledgeBaseStatusResponseSchema: z.ZodObject<{
         error?: string | null | undefined;
     }[] | undefined;
 }>;
+export declare const knowledgeSearchResultSchema: z.ZodObject<{
+    docId: z.ZodString;
+    snippet: z.ZodString;
+    score: z.ZodNumber;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, "strip", z.ZodTypeAny, {
+    docId: string;
+    score: number;
+    snippet: string;
+    metadata?: Record<string, unknown> | undefined;
+}, {
+    docId: string;
+    score: number;
+    snippet: string;
+    metadata?: Record<string, unknown> | undefined;
+}>;
+export declare const knowledgeSearchResponseSchema: z.ZodObject<{
+    results: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        docId: z.ZodString;
+        snippet: z.ZodString;
+        score: z.ZodNumber;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, "strip", z.ZodTypeAny, {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }, {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }>, "many">>;
+}, "strip", z.ZodTypeAny, {
+    results?: {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }[] | undefined;
+}, {
+    results?: {
+        docId: string;
+        score: number;
+        snippet: string;
+        metadata?: Record<string, unknown> | undefined;
+    }[] | undefined;
+}>;
 export type KbStatus = z.infer<typeof kbStatusSchema>;
 export type KnowledgeBase = z.infer<typeof knowledgeBaseSchema>;
 export type KnowledgeTask = z.infer<typeof knowledgeTaskSchema>;
 export type KbTaskStatusSnapshot = z.infer<typeof kbTaskStatusSnapshotSchema>;
+export type KnowledgeSearchResult = z.infer<typeof knowledgeSearchResultSchema>;

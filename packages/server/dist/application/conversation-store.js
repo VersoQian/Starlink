@@ -5,6 +5,8 @@ import { ConversationSessionStore } from './conversation-session-store.js';
 import { WorkspaceGraphStore } from './workspace-graph-store.js';
 import { WorkspaceAssetStore } from './workspace-asset-store.js';
 import { RuntimeEventStore } from './runtime-event-store.js';
+import { ConversationMemoryStore } from './conversation-memory-store.js';
+import { WorkspaceContextBuilder } from './workspace-context-builder.js';
 import { applyGraphDelta } from './graph-delta.js';
 import { getWorkspaceMetadata as getWorkspaceMetadataPg, listWorkspaceMetadata as listWorkspaceMetadataPg, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryPg, updateWorkspaceMetadata as updateWorkspaceMetadataPg } from './workspace-metadata-pg-store.js';
 import { getWorkspaceMetadata as getWorkspaceMetadataFile, listWorkspaceMetadata as listWorkspaceMetadataFile, listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryFile, updateWorkspaceMetadata as updateWorkspaceMetadataFile } from './workspace-metadata-store.js';
@@ -27,11 +29,22 @@ export class ConversationStore {
         this.graphStore = new WorkspaceGraphStore(runtimeRepository);
         this.assetStore = new WorkspaceAssetStore(runtimeRepository);
         this.eventStore = new RuntimeEventStore(runtimeRepository, eventBus);
+        this.memoryStore = new ConversationMemoryStore();
+        this.contextBuilder = new WorkspaceContextBuilder(this.memoryStore);
     }
-    async startConversation(workspaceId, userId, question) {
+    async startConversation(workspaceId, userId, question, kbId) {
         await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
         const existingGraph = await this.getGraph(workspaceId);
         const id = nanoid();
+        const contextSnapshot = await this.contextBuilder.build({
+            workspaceId,
+            userId,
+            conversationId: id,
+            query: question,
+            kbId,
+            graph: existingGraph
+        });
+        const knowledgeEvidence = contextSnapshot.knowledgeEvidence;
         const startedAt = new Date();
         const metadata = {
             id,
@@ -43,16 +56,39 @@ export class ConversationStore {
         const record = {
             metadata,
             graph: existingGraph,
-            knowledgeEvidence: []
+            knowledgeEvidence,
+            citations: []
         };
         await this.sessionStore.createConversation(id, record);
         await this.graphStore.setWorkspaceGraph(workspaceId, record.graph);
+        await this.memoryStore.createSession({
+            id,
+            workspaceId,
+            userId,
+            title: buildConversationTitle(question),
+            status: 'running',
+            latestQuestion: question,
+            contextSnapshot: contextSnapshot
+        });
+        await this.memoryStore.appendMessage({
+            conversationId: id,
+            workspaceId,
+            userId,
+            role: 'user',
+            content: question,
+            metadata: {
+                kbId: kbId ?? null,
+                evidenceCount: knowledgeEvidence.length
+            }
+        });
         const stream = this.businessLangGraphService.streamConversation({
             workspaceId,
             userId,
             question,
             traceId: id,
-            baseGraph: existingGraph
+            baseGraph: existingGraph,
+            knowledgeEvidence,
+            contextPrompt: contextSnapshot.promptBlock
         });
         let initialized = false;
         try {
@@ -70,6 +106,14 @@ export class ConversationStore {
                     payload: currentGraph
                 };
                 await this.publishEvent(workspaceId, baseEvent);
+                if (knowledgeEvidence.length > 0) {
+                    const evidenceEvent = {
+                        type: 'evidence/updated',
+                        conversationId: id,
+                        payload: knowledgeEvidence
+                    };
+                    await this.publishEvent(workspaceId, evidenceEvent);
+                }
             }
         }
         catch (error) {
@@ -94,6 +138,7 @@ export class ConversationStore {
                 stream,
                 record,
                 workspaceId,
+                userId,
                 conversationId: id,
                 initialized
             });
@@ -120,6 +165,78 @@ export class ConversationStore {
         }
         const events = await this.eventStore.listConversationEvents(workspaceId, conversationId);
         return events.map((event) => conversationEventSchema.parse(event));
+    }
+    async listConversationSessions(workspaceId, userId, limit) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        return await this.memoryStore.listSessions(workspaceId, limit ?? 20);
+    }
+    async listConversationMessages(workspaceId, userId, conversationId, limit) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        await this.assertConversationBelongsToWorkspaceOrSession(workspaceId, conversationId);
+        return await this.memoryStore.listMessages(conversationId, limit ?? 30);
+    }
+    async listWorkspaceMemories(workspaceId, userId, options = {}) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        return await this.memoryStore.listMemories(workspaceId, {
+            query: options.query ?? undefined,
+            scope: parseMemoryScope(options.scope),
+            kind: parseMemoryKind(options.kind),
+            limit: options.limit ?? undefined
+        });
+    }
+    async buildWorkspaceContextSnapshot(workspaceId, userId, query, options = {}) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.read');
+        if (options.conversationId) {
+            await this.assertConversationBelongsToWorkspaceOrSession(workspaceId, options.conversationId);
+        }
+        const graph = await this.getGraph(workspaceId);
+        return await this.contextBuilder.build({
+            workspaceId,
+            userId,
+            query,
+            conversationId: options.conversationId ?? null,
+            kbId: options.kbId ?? null,
+            graph
+        });
+    }
+    async appendConversationMessage(input, userId) {
+        await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write');
+        await this.assertConversationBelongsToWorkspaceOrSession(input.workspaceId, input.conversationId);
+        return await this.memoryStore.appendMessage({
+            ...input,
+            userId: input.role === 'user' ? userId : input.userId ?? userId,
+            role: parseMessageRole(input.role)
+        });
+    }
+    async createMemoryItem(input, userId) {
+        await this.assertWorkspacePermission(input.workspaceId, userId, 'workspace.write');
+        return await this.memoryStore.upsertMemory({
+            ...input,
+            userId: input.userId ?? userId,
+            scope: parseMemoryScope(input.scope) ?? 'workspace',
+            kind: parseMemoryKind(input.kind) ?? 'insight',
+            sourceType: input.sourceType ?? 'manual'
+        });
+    }
+    async extractConversationMemory(conversationId, userId) {
+        const record = await this.sessionStore.getConversation(conversationId);
+        const persistedSession = await this.memoryStore.getSession(conversationId);
+        const workspaceId = record?.graph.workspaceId ?? persistedSession?.workspaceId;
+        if (!workspaceId)
+            return [];
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
+        const graph = record?.graph ?? await this.getGraph(workspaceId);
+        const question = record?.metadata.latestQuestion ?? persistedSession?.latestQuestion ?? null;
+        const decision = findLatestDecision(graph);
+        return await this.memoryStore.captureConversationOutcome({
+            workspaceId,
+            userId,
+            conversationId,
+            question,
+            graph,
+            decision,
+            evidenceCount: record?.knowledgeEvidence.length ?? 0
+        });
     }
     async assertWorkspaceAccess(workspaceId, userId, requiredPermission) {
         await this.assertWorkspacePermission(workspaceId, userId, requiredPermission);
@@ -393,7 +510,7 @@ export class ConversationStore {
         return true;
     }
     async runConversationStream(options) {
-        let { stream, record, workspaceId, conversationId, initialized } = options;
+        let { stream, record, workspaceId, userId, conversationId, initialized } = options;
         let currentGraph = record.graph;
         const emittedTurnNodeIds = new Set();
         let currentPhase = null;
@@ -451,6 +568,14 @@ export class ConversationStore {
                         };
                         await this.publishEvent(workspaceId, appendedEvent);
                     }
+                    if (record.knowledgeEvidence.length > 0) {
+                        const evidenceEvent = {
+                            type: 'evidence/updated',
+                            conversationId,
+                            payload: record.knowledgeEvidence
+                        };
+                        await this.publishEvent(workspaceId, evidenceEvent);
+                    }
                     continue;
                 }
                 if (update.type === 'delta') {
@@ -479,6 +604,20 @@ export class ConversationStore {
                     initialized = true;
                     const deltaNodes = update.delta.nodes ?? [];
                     for (const node of deltaNodes) {
+                        const nodeCitations = extractCitationsFromNode(node);
+                        if (nodeCitations) {
+                            record.citations = upsertCardCitation(record.citations, nodeCitations);
+                            const groundingRate = extractGroundingRate(node);
+                            await publishEvent({
+                                type: 'card/cited',
+                                conversationId,
+                                payload: {
+                                    cardId: nodeCitations.cardId,
+                                    citation: nodeCitations,
+                                    groundingRate
+                                }
+                            });
+                        }
                         const info = extractRuntimeInfo(node);
                         if (!info)
                             continue;
@@ -567,6 +706,14 @@ export class ConversationStore {
                 updatedAt: new Date()
             };
             await this.sessionStore.updateConversation(conversationId, record);
+            await this.persistConversationCompletion({
+                workspaceId,
+                userId,
+                conversationId,
+                record,
+                graph: currentGraph,
+                decision: latestDecision
+            });
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -588,6 +735,64 @@ export class ConversationStore {
                 updatedAt: new Date()
             };
             await this.sessionStore.updateConversation(conversationId, record);
+            await this.persistConversationFailure({
+                workspaceId,
+                userId,
+                conversationId,
+                message
+            });
+        }
+    }
+    async persistConversationCompletion(options) {
+        try {
+            await this.memoryStore.updateSessionStatus(options.conversationId, 'completed', {
+                latestQuestion: options.record.metadata.latestQuestion ?? null,
+                completed: true
+            });
+            await this.memoryStore.appendMessage({
+                conversationId: options.conversationId,
+                workspaceId: options.workspaceId,
+                userId: options.userId,
+                role: 'assistant',
+                content: buildAssistantOutcome(options.decision, options.graph),
+                metadata: {
+                    source: 'langgraph',
+                    nodeCount: options.graph.nodes.length,
+                    edgeCount: options.graph.edges.length,
+                    evidenceCount: options.record.knowledgeEvidence.length
+                }
+            });
+            await this.memoryStore.captureConversationOutcome({
+                workspaceId: options.workspaceId,
+                userId: options.userId,
+                conversationId: options.conversationId,
+                question: options.record.metadata.latestQuestion ?? null,
+                graph: options.graph,
+                decision: options.decision,
+                evidenceCount: options.record.knowledgeEvidence.length
+            });
+        }
+        catch (error) {
+            console.error('[conversation-store] failed to persist conversation completion memory', error);
+        }
+    }
+    async persistConversationFailure(options) {
+        try {
+            await this.memoryStore.updateSessionStatus(options.conversationId, 'failed');
+            await this.memoryStore.appendMessage({
+                conversationId: options.conversationId,
+                workspaceId: options.workspaceId,
+                userId: options.userId,
+                role: 'system',
+                content: options.message,
+                metadata: {
+                    source: 'langgraph',
+                    status: 'failed'
+                }
+            });
+        }
+        catch (error) {
+            console.error('[conversation-store] failed to persist conversation failure memory', error);
         }
     }
     async publishEvent(workspaceId, event) {
@@ -655,6 +860,21 @@ export class ConversationStore {
             throw new Error('INVALID_CONVERSATION_SCOPE');
         }
     }
+    async assertConversationBelongsToWorkspaceOrSession(workspaceId, conversationId) {
+        const record = await this.sessionStore.getConversation(conversationId);
+        if (record) {
+            if (record.graph.workspaceId !== workspaceId) {
+                throw new Error('INVALID_CONVERSATION_SCOPE');
+            }
+            return;
+        }
+        const session = await this.memoryStore.getSession(conversationId);
+        if (!session)
+            return;
+        if (session.workspaceId !== workspaceId) {
+            throw new Error('INVALID_CONVERSATION_SCOPE');
+        }
+    }
 }
 function shouldPersistRuntimeEvent(event) {
     return event.type === 'status'
@@ -662,6 +882,63 @@ function shouldPersistRuntimeEvent(event) {
         || event.type === 'seminar.turn.completed'
         || event.type === 'seminar.decision.made'
         || event.type === 'seminar.decision.requested';
+}
+function buildConversationTitle(question) {
+    const compact = question.replace(/\s+/g, ' ').trim();
+    return compact ? truncate(compact, 48) : '未命名会话';
+}
+function buildAssistantOutcome(decision, graph) {
+    if (decision.trim()) {
+        return `最终决策：\n${decision.trim()}`;
+    }
+    const highlights = graph.nodes
+        .map((node) => {
+        const data = node.data;
+        if (!data?.title || !data.content)
+            return null;
+        return `- ${data.title}: ${truncate(data.content.replace(/\s+/g, ' '), 120)}`;
+    })
+        .filter((item) => item !== null)
+        .slice(0, 8);
+    if (highlights.length === 0) {
+        return `本轮已更新画布：${graph.nodes.length} 个节点，${graph.edges.length} 条连线。`;
+    }
+    return [
+        `本轮已更新画布：${graph.nodes.length} 个节点，${graph.edges.length} 条连线。`,
+        ...highlights
+    ].join('\n');
+}
+function parseMessageRole(role) {
+    if (role === 'user' || role === 'assistant' || role === 'system' || role === 'tool') {
+        return role;
+    }
+    throw new Error(`INVALID_MESSAGE_ROLE:${role}`);
+}
+function parseMemoryScope(scope) {
+    if (!scope)
+        return undefined;
+    if (scope === 'workspace' || scope === 'user' || scope === 'agent')
+        return scope;
+    throw new Error(`INVALID_MEMORY_SCOPE:${scope}`);
+}
+function parseMemoryKind(kind) {
+    if (!kind)
+        return undefined;
+    if (kind === 'preference'
+        || kind === 'decision'
+        || kind === 'insight'
+        || kind === 'constraint'
+        || kind === 'summary'
+        || kind === 'canvas') {
+        return kind;
+    }
+    throw new Error(`INVALID_MEMORY_KIND:${kind}`);
+}
+function truncate(text, max) {
+    const value = text.trim();
+    if (value.length <= max)
+        return value;
+    return `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 const AGENT_NAME_MAP = {
     Market_Agent: 'Market Agent',
@@ -707,4 +984,66 @@ function findLatestDecision(graph) {
         .filter((item) => item !== null)
         .filter((item) => item.stage === 'decision');
     return decisionNodes[decisionNodes.length - 1]?.summary ?? '';
+}
+/**
+ * Pull `citations` (CitationSpan[]) from a node's metadata and wrap it into
+ * a `CardCitation` entry keyed by cardId + fieldName='content'.
+ *
+ * Returns null if the node has no citation metadata (e.g., non-BMC node,
+ * or agent output that didn't contain [[ref:...]] tokens).
+ */
+function extractCitationsFromNode(node) {
+    const data = node.data;
+    const meta = data?.meta;
+    if (!meta || typeof meta !== 'object')
+        return null;
+    const rawCitations = meta.citations;
+    if (!Array.isArray(rawCitations) || rawCitations.length === 0)
+        return null;
+    const spans = [];
+    for (const entry of rawCitations) {
+        if (!entry || typeof entry !== 'object')
+            continue;
+        const span = entry;
+        if (typeof span.textStart === 'number' &&
+            typeof span.textEnd === 'number' &&
+            Array.isArray(span.refs)) {
+            spans.push({
+                textStart: span.textStart,
+                textEnd: span.textEnd,
+                refs: span.refs.map((r) => ({
+                    evidenceId: String(r.evidenceId ?? ''),
+                    docId: String(r.docId ?? ''),
+                    snippetId: String(r.snippetId ?? '')
+                }))
+            });
+        }
+    }
+    if (spans.length === 0)
+        return null;
+    return {
+        cardId: node.id,
+        fieldName: 'content',
+        spans
+    };
+}
+/**
+ * Insert-or-replace: keep a single CardCitation per (cardId, fieldName) key.
+ * A newer emission for the same card replaces the previous one (supports
+ * Stage 4 revision rounds, DEC-3 soft-delete handled at Stage 4).
+ */
+function upsertCardCitation(list, next) {
+    const idx = list.findIndex((c) => c.cardId === next.cardId && c.fieldName === next.fieldName);
+    if (idx === -1)
+        return [...list, next];
+    const copy = [...list];
+    copy[idx] = next;
+    return copy;
+}
+function extractGroundingRate(node) {
+    const meta = node.data?.meta;
+    if (!meta || typeof meta !== 'object')
+        return 0;
+    const value = meta.groundingRate;
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }

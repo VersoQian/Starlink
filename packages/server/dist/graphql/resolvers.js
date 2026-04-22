@@ -1,7 +1,7 @@
 import GraphQLJSON from 'graphql-type-json';
 import { GraphQLError } from 'graphql';
-import { communityPostInputSchema, conversationMetadataSchema, practiceSessionInputSchema, workspaceAssetSchema, workspaceDirectoryItemSchema, workspaceMetadataHistoryEntrySchema, workspaceMetadataUpdateInputSchema } from '@starlink/shared';
-import { addKnowledgeSeed, createKnowledgeBase, getKnowledgeBaseStatus, importKnowledgeUrl, listKnowledgeBases, publishKnowledgeBase } from '../services/kb-task-service.js';
+import { communityPostInputSchema, conversationMessageSchema, conversationMetadataSchema, conversationSessionSchema, deriveSnippetId, memoryItemSchema, practiceSessionInputSchema, workspaceAssetSchema, workspaceContextSnapshotSchema, workspaceDirectoryItemSchema, workspaceMetadataHistoryEntrySchema, workspaceMetadataUpdateInputSchema } from '@starlink/shared';
+import { addKnowledgeSeed, createKnowledgeBase, getKnowledgeBaseStatus, importKnowledgeUrl, listKnowledgeBases, publishKnowledgeBase, searchKnowledgeBase } from '../services/kb-task-service.js';
 import { pubsub, FLOW_EXECUTION_PROGRESS, publishExecutionEvent } from './subscriptions.js';
 export const resolvers = {
     JSON: GraphQLJSON,
@@ -21,8 +21,58 @@ export const resolvers = {
                         updatedAt: record.metadata.updatedAt.toISOString()
                     },
                     graph: record.graph,
-                    knowledgeEvidence: record.knowledgeEvidence ?? []
+                    knowledgeEvidence: record.knowledgeEvidence ?? [],
+                    citations: record.citations ?? []
                 };
+            });
+        },
+        conversationSessions: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const sessions = await ctx.conversationStore.listConversationSessions(args.workspaceId, ctx.userId, args.limit ?? undefined);
+                return sessions.map((session) => conversationSessionSchema.parse(session));
+            });
+        },
+        conversationMessages: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const messages = await ctx.conversationStore.listConversationMessages(args.workspaceId, ctx.userId, args.conversationId, args.limit ?? undefined);
+                return messages.map((message) => conversationMessageSchema.parse(message));
+            });
+        },
+        cardsReferencingEvidence: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const record = await ctx.conversationStore.getConversation(args.conversationId, ctx.userId);
+                if (!record)
+                    return [];
+                const cardIds = new Set();
+                for (const citation of record.citations ?? []) {
+                    for (const span of citation.spans) {
+                        if (span.refs.some((r) => r.evidenceId === args.evidenceId)) {
+                            cardIds.add(citation.cardId);
+                            break;
+                        }
+                    }
+                }
+                return Array.from(cardIds);
+            });
+        },
+        workspaceMemories: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const memories = await ctx.conversationStore.listWorkspaceMemories(args.workspaceId, ctx.userId, {
+                    query: args.query,
+                    scope: args.scope,
+                    kind: args.kind,
+                    limit: args.limit
+                });
+                return memories.map((memory) => memoryItemSchema.parse(memory));
+            });
+        },
+        workspaceContextSnapshot: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const snapshot = await ctx.conversationStore.buildWorkspaceContextSnapshot(args.workspaceId, ctx.userId, args.query, {
+                    conversationId: args.conversationId ?? null,
+                    kbId: args.kbId ?? null
+                });
+                return workspaceContextSnapshotSchema.parse(snapshot);
             });
         },
         conversationRuntimeEvents: async (_, args, ctx) => {
@@ -48,6 +98,21 @@ export const resolvers = {
             return await resolveOrThrow(async () => {
                 await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read');
                 return await getKnowledgeBaseStatus(args.workspaceId, args.kbId);
+            });
+        },
+        knowledgeBaseSearch: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read');
+                const results = await searchKnowledgeBase(args.workspaceId, args.kbId, args.query, args.topK ?? 5);
+                return results.map((result) => ({
+                    docId: result.docId,
+                    snippet: result.snippet,
+                    score: result.score,
+                    metadata: {
+                        ...(result.metadata ?? {}),
+                        snippetId: deriveSnippetId(result.docId, result.metadata, result.snippet)
+                    }
+                }));
             });
         },
         workspaces: async (_, __, ctx) => {
@@ -139,7 +204,7 @@ export const resolvers = {
     Mutation: {
         startConversation: async (_, args, ctx) => {
             return await resolveOrThrow(async () => {
-                const record = await ctx.conversationStore.startConversation(args.workspaceId, ctx.userId, args.question);
+                const record = await ctx.conversationStore.startConversation(args.workspaceId, ctx.userId, args.question, args.kbId ?? undefined);
                 const metadata = conversationMetadataSchema.parse(record.metadata);
                 return {
                     metadata: {
@@ -148,12 +213,49 @@ export const resolvers = {
                         updatedAt: metadata.updatedAt.toISOString()
                     },
                     graph: record.graph,
-                    knowledgeEvidence: record.knowledgeEvidence ?? []
+                    knowledgeEvidence: record.knowledgeEvidence ?? [],
+                    citations: record.citations ?? []
                 };
             });
         },
         approveDecision: async (_, args, ctx) => {
             return await resolveOrThrow(async () => (await ctx.conversationStore.approveDecision(args.conversationId, ctx.userId, args.decision ?? undefined)));
+        },
+        appendConversationMessage: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const message = await ctx.conversationStore.appendConversationMessage({
+                    conversationId: args.input.conversationId,
+                    workspaceId: args.input.workspaceId,
+                    role: args.input.role,
+                    content: args.input.content,
+                    metadata: args.input.metadata ?? undefined
+                }, ctx.userId);
+                return conversationMessageSchema.parse(message);
+            });
+        },
+        createMemoryItem: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const memory = await ctx.conversationStore.createMemoryItem({
+                    workspaceId: args.input.workspaceId,
+                    scope: args.input.scope,
+                    kind: args.input.kind,
+                    title: args.input.title,
+                    content: args.input.content,
+                    sourceType: args.input.sourceType ?? undefined,
+                    sourceId: args.input.sourceId ?? undefined,
+                    importance: args.input.importance ?? undefined,
+                    confidence: args.input.confidence ?? undefined,
+                    tags: args.input.tags ?? undefined,
+                    metadata: args.input.metadata ?? undefined
+                }, ctx.userId);
+                return memoryItemSchema.parse(memory);
+            });
+        },
+        extractConversationMemory: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                const memories = await ctx.conversationStore.extractConversationMemory(args.conversationId, ctx.userId);
+                return memories.map((memory) => memoryItemSchema.parse(memory));
+            });
         },
         addNode: async (_, args, ctx) => {
             return await resolveOrThrow(async () => (await ctx.conversationStore.addNode(args.workspaceId, ctx.userId, args.input)));

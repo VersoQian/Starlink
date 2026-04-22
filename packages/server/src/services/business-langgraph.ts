@@ -32,25 +32,25 @@ const CC_BMC_DOMAINS = {
   COST_STRUCTURE: '成本结构'
 } as const
 
-type CCBMCDomain = (typeof CC_BMC_DOMAINS)[keyof typeof CC_BMC_DOMAINS]
-const MARKET_DOMAINS = [
+export type CCBMCDomain = (typeof CC_BMC_DOMAINS)[keyof typeof CC_BMC_DOMAINS]
+export const MARKET_DOMAINS = [
   CC_BMC_DOMAINS.CUSTOMER_SEGMENTS,
   CC_BMC_DOMAINS.CHANNELS,
   CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS
 ] as const
-const PRODUCT_DOMAINS = [
+export const PRODUCT_DOMAINS = [
   CC_BMC_DOMAINS.VALUE_PROPOSITIONS,
   CC_BMC_DOMAINS.KEY_RESOURCES,
   CC_BMC_DOMAINS.KEY_ACTIVITIES,
   CC_BMC_DOMAINS.KEY_PARTNERSHIPS
 ] as const
-const FINANCE_DOMAINS = [
+export const FINANCE_DOMAINS = [
   CC_BMC_DOMAINS.REVENUE_STREAMS,
   CC_BMC_DOMAINS.COST_STRUCTURE
 ] as const
 
 // ============== Agent 类型 ==============
-const AGENT_TYPES = {
+export const AGENT_TYPES = {
   MARKET: 'Market_Agent',
   PRODUCT: 'Product_Agent',
   FINANCE: 'Finance_Agent',
@@ -59,9 +59,9 @@ const AGENT_TYPES = {
   CRITIC: 'Adversarial_Critic'
 } as const
 
-type AgentType = (typeof AGENT_TYPES)[keyof typeof AGENT_TYPES]
+export type AgentType = (typeof AGENT_TYPES)[keyof typeof AGENT_TYPES]
 
-type BusinessModel = {
+export type BusinessModel = {
   invoke: (messages: Array<SystemMessage | HumanMessage>) => Promise<unknown>
   withStructuredOutput: <T>(
     schema: z.ZodType<T>,
@@ -79,7 +79,7 @@ const AGENT_TO_NODE: Record<string, string> = {
 }
 
 // ============== MacraNodeData Schema（用于验证 LLM 输出） ==============
-const MacraNodeDataSchema = z.object({
+export const MacraNodeDataSchema = z.object({
   id: z.string(),
   type: z.enum(['cc-bmc-card', 'agent-avatar', 'insight-note', 'conflict-alert', 'data-source']),
   label: z.string().max(50),
@@ -98,7 +98,7 @@ const MacraNodeDataSchema = z.object({
   conflictType: z.enum(['resource-goal', 'compliance-business', 'channel-product', 'other']).optional()
 })
 
-type MacraNodeData = z.infer<typeof MacraNodeDataSchema>
+export type MacraNodeData = z.infer<typeof MacraNodeDataSchema>
 
 // ============== Intent 分类 ==============
 const IntentSchema = z.object({
@@ -154,7 +154,7 @@ type CriticConflict = MacraNodeData & {
 }
 
 // ============== LangGraph State ==============
-const BusinessState = Annotation.Root({
+export const BusinessState = Annotation.Root({
   traceId: Annotation<string>(),
   workspaceId: Annotation<string>(),
   userId: Annotation<string>(),
@@ -174,7 +174,7 @@ const BusinessState = Annotation.Root({
   edges: Annotation<CanvasEdge[]>()
 })
 
-type BusinessStateType = typeof BusinessState.State
+export type BusinessStateType = typeof BusinessState.State
 
 // ============== Stream Update 类型 ==============
 export type GraphDelta = {
@@ -1708,7 +1708,7 @@ function readNumber(source: Record<string, unknown>, keys: string[]) {
   return undefined
 }
 
-function extractAndParseJSON(content: string, agentName: string): MacraNodeData[] {
+export function extractAndParseJSON(content: string, agentName: string): MacraNodeData[] {
   try {
     // 1. 移除 Markdown 代码块标记
     let cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '')
@@ -1753,7 +1753,7 @@ function extractAndParseJSON(content: string, agentName: string): MacraNodeData[
   }
 }
 
-function normalizeDomainNodes(
+export function normalizeDomainNodes(
   nodes: MacraNodeData[],
   options: {
     allowedDomains: readonly CCBMCDomain[]
@@ -1822,7 +1822,7 @@ export function validateNineBmcDimensions(nodes: MacraNodeData[]): CCBMCDomain[]
   return allDomains.filter((d) => !produced.has(d))
 }
 
-function buildDeterministicNodeId(agentType: AgentType, domain: CCBMCDomain) {
+export function buildDeterministicNodeId(agentType: AgentType, domain: CCBMCDomain) {
   const agentPrefix: Record<AgentType, string> = {
     [AGENT_TYPES.MARKET]: 'market',
     [AGENT_TYPES.PRODUCT]: 'product',
@@ -1975,7 +1975,7 @@ function createGeneralResponseNode(traceId: string, content: string, stage: Semi
   }
 }
 
-function readModelText(response: unknown) {
+export function readModelText(response: unknown) {
   if (typeof response === 'string') return response
   const payload = response as { content?: unknown }
   if (typeof payload?.content === 'string') return payload.content
@@ -2007,7 +2007,7 @@ function cloneCanvasNode(node: CanvasNode): CanvasNode {
   }
 }
 
-function createLLMModel(): BusinessModel | null {
+export function createLLMModel(): BusinessModel | null {
   const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || ''
   if (!apiKey) {
     auditLogger.warn({

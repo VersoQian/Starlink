@@ -130,11 +130,134 @@ export declare const resolvers: {
             };
             knowledgeEvidence: {
                 docId: string;
-                snippet: string;
                 score: number;
+                snippet: string;
                 metadata?: Record<string, unknown> | undefined;
             }[];
+            citations: {
+                cardId: string;
+                fieldName: "title" | "content" | "summary";
+                spans: {
+                    textStart: number;
+                    textEnd: number;
+                    refs: {
+                        docId: string;
+                        snippetId: string;
+                        evidenceId: string;
+                    }[];
+                }[];
+            }[];
         } | null>;
+        conversationSessions: (_: unknown, args: {
+            workspaceId: string;
+            limit?: number | null;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "running" | "failed" | "completed" | "archived";
+            title: string;
+            id: string;
+            workspaceId: string;
+            createdAt: string;
+            updatedAt: string;
+            latestQuestion: string | null;
+            userId: string;
+            contextSnapshot: Record<string, unknown>;
+            completedAt: string | null;
+        }[]>;
+        conversationMessages: (_: unknown, args: {
+            workspaceId: string;
+            conversationId: string;
+            limit?: number | null;
+        }, ctx: GraphQLContext) => Promise<{
+            content: string;
+            id: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            conversationId: string;
+            createdAt: string;
+            userId: string | null;
+            role: "user" | "assistant" | "system" | "tool";
+        }[]>;
+        cardsReferencingEvidence: (_: unknown, args: {
+            conversationId: string;
+            evidenceId: string;
+        }, ctx: GraphQLContext) => Promise<string[]>;
+        workspaceMemories: (_: unknown, args: {
+            workspaceId: string;
+            query?: string | null;
+            scope?: string | null;
+            kind?: string | null;
+            limit?: number | null;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace" | "agent";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            confidence: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+        }[]>;
+        workspaceContextSnapshot: (_: unknown, args: {
+            workspaceId: string;
+            conversationId?: string | null;
+            query: string;
+            kbId?: string | null;
+        }, ctx: GraphQLContext) => Promise<{
+            workspaceId: string;
+            conversationId: string | null;
+            query: string;
+            builtAt: string;
+            canvasSummary: {
+                nodeCount: number;
+                edgeCount: number;
+                highlights: string[];
+            };
+            recentMessages: {
+                content: string;
+                id: string;
+                workspaceId: string;
+                metadata: Record<string, unknown>;
+                conversationId: string;
+                createdAt: string;
+                userId: string | null;
+                role: "user" | "assistant" | "system" | "tool";
+            }[];
+            memories: {
+                title: string;
+                content: string;
+                id: string;
+                workspaceId: string;
+                metadata: Record<string, unknown>;
+                createdAt: string;
+                updatedAt: string;
+                userId: string | null;
+                scope: "user" | "workspace" | "agent";
+                kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+                sourceType: string;
+                sourceId: string | null;
+                importance: number;
+                confidence: number;
+                tags: string[];
+                lastUsedAt: string | null;
+                archivedAt: string | null;
+            }[];
+            knowledgeEvidence: {
+                docId: string;
+                score: number;
+                snippet: string;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
+            promptBlock: string;
+        }>;
         conversationRuntimeEvents: (_: unknown, args: {
             workspaceId: string;
             conversationId?: string | null;
@@ -258,6 +381,35 @@ export declare const resolvers: {
                 removedEdgeIds?: string[] | undefined;
             };
         } | {
+            type: "evidence/updated";
+            conversationId: string;
+            payload: {
+                docId: string;
+                score: number;
+                snippet: string;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
+        } | {
+            type: "card/cited";
+            conversationId: string;
+            payload: {
+                cardId: string;
+                citation: {
+                    cardId: string;
+                    fieldName: "title" | "content" | "summary";
+                    spans: {
+                        textStart: number;
+                        textEnd: number;
+                        refs: {
+                            docId: string;
+                            snippetId: string;
+                            evidenceId: string;
+                        }[];
+                    }[];
+                };
+                groundingRate: number;
+            };
+        } | {
             type: "status";
             status: "idle" | "running" | "paused" | "failed" | "completed";
             conversationId: string;
@@ -326,9 +478,22 @@ export declare const resolvers: {
             knowledgeBase: import("../services/kb-task-service.js").GatewayKnowledgeBase;
             tasks: import("../services/kb-task-service.js").GatewayKbTask[];
         }>;
+        knowledgeBaseSearch: (_: unknown, args: {
+            workspaceId: string;
+            kbId: string;
+            query: string;
+            topK?: number | null;
+        }, ctx: GraphQLContext) => Promise<{
+            docId: string;
+            snippet: string;
+            score: number;
+            metadata: {
+                snippetId: string;
+            };
+        }[]>;
         workspaces: (_: unknown, __: unknown, ctx: GraphQLContext) => Promise<{
             type: string;
-            status: "error" | "draft" | "active" | "archived" | "provisioning";
+            status: "archived" | "error" | "draft" | "active" | "provisioning";
             workspaceId: string;
             updatedAt: string;
             name: string;
@@ -347,12 +512,12 @@ export declare const resolvers: {
         workspaceAssets: (_: unknown, args: {
             workspaceId: string;
         }, ctx: GraphQLContext) => Promise<{
-            status: "error" | "processing" | "draft" | "ready" | "archived" | "published";
+            status: "archived" | "error" | "processing" | "draft" | "ready" | "published";
             title: string;
             workspaceId: string;
+            metadata: Record<string, unknown>;
             createdAt: string;
             updatedAt: string;
-            metadata: Record<string, unknown>;
             version: number;
             assetId: string;
             assetType: string;
@@ -467,6 +632,7 @@ export declare const resolvers: {
         startConversation: (_: unknown, args: {
             workspaceId: string;
             question: string;
+            kbId?: string | null;
         }, ctx: GraphQLContext) => Promise<{
             metadata: {
                 createdAt: string;
@@ -533,15 +699,100 @@ export declare const resolvers: {
             };
             knowledgeEvidence: {
                 docId: string;
-                snippet: string;
                 score: number;
+                snippet: string;
                 metadata?: Record<string, unknown> | undefined;
+            }[];
+            citations: {
+                cardId: string;
+                fieldName: "title" | "content" | "summary";
+                spans: {
+                    textStart: number;
+                    textEnd: number;
+                    refs: {
+                        docId: string;
+                        snippetId: string;
+                        evidenceId: string;
+                    }[];
+                }[];
             }[];
         }>;
         approveDecision: (_: unknown, args: {
             conversationId: string;
             decision?: string | null;
         }, ctx: GraphQLContext) => Promise<boolean>;
+        appendConversationMessage: (_: unknown, args: {
+            input: {
+                conversationId: string;
+                workspaceId: string;
+                role: string;
+                content: string;
+                metadata?: Record<string, unknown> | null;
+            };
+        }, ctx: GraphQLContext) => Promise<{
+            content: string;
+            id: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            conversationId: string;
+            createdAt: string;
+            userId: string | null;
+            role: "user" | "assistant" | "system" | "tool";
+        }>;
+        createMemoryItem: (_: unknown, args: {
+            input: {
+                workspaceId: string;
+                scope?: string | null;
+                kind?: string | null;
+                title: string;
+                content: string;
+                sourceType?: string | null;
+                sourceId?: string | null;
+                importance?: number | null;
+                confidence?: number | null;
+                tags?: string[] | null;
+                metadata?: Record<string, unknown> | null;
+            };
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace" | "agent";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            confidence: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+        }>;
+        extractConversationMemory: (_: unknown, args: {
+            conversationId: string;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace" | "agent";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            confidence: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+        }[]>;
         addNode: (_: unknown, args: {
             workspaceId: string;
             input: {
@@ -641,12 +892,12 @@ export declare const resolvers: {
                 authorRole?: string | null;
             };
         }, ctx: GraphQLContext) => Promise<{
-            status: "error" | "processing" | "draft" | "ready" | "archived" | "published";
+            status: "archived" | "error" | "processing" | "draft" | "ready" | "published";
             title: string;
             workspaceId: string;
+            metadata: Record<string, unknown>;
             createdAt: string;
             updatedAt: string;
-            metadata: Record<string, unknown>;
             version: number;
             assetId: string;
             assetType: string;
@@ -679,12 +930,12 @@ export declare const resolvers: {
                 lastUpdated?: string | null;
             };
         }, ctx: GraphQLContext) => Promise<{
-            status: "error" | "processing" | "draft" | "ready" | "archived" | "published";
+            status: "archived" | "error" | "processing" | "draft" | "ready" | "published";
             title: string;
             workspaceId: string;
+            metadata: Record<string, unknown>;
             createdAt: string;
             updatedAt: string;
-            metadata: Record<string, unknown>;
             version: number;
             assetId: string;
             assetType: string;
@@ -774,7 +1025,7 @@ export declare const resolvers: {
             };
         }, ctx: GraphQLContext) => Promise<{
             type: string;
-            status: "error" | "draft" | "active" | "archived" | "provisioning";
+            status: "archived" | "error" | "draft" | "active" | "provisioning";
             workspaceId: string;
             updatedAt: string;
             name: string;
