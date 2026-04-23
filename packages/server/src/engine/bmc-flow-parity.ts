@@ -5,7 +5,10 @@ export type BmcGraphParityReport = {
   targetDomains: string[]
   missingDomains: string[]
   extraDomains: string[]
+  sourceAvatarCount: number
+  targetAvatarCount: number
   nodeCountMismatch: boolean
+  avatarCountMismatch: boolean
   edgeCountMismatch: boolean
   warnings: string[]
 }
@@ -19,7 +22,10 @@ export function compareBmcGraphs(source: CanvasGraph, target: CanvasGraph): BmcG
   const extraDomains = [...targetDomainSet].filter((domain) => !sourceDomainSet.has(domain))
   const sourceBmcNodeCount = sourceDomains.length
   const targetBmcNodeCount = targetDomains.length
+  const sourceAvatarCount = countMacraNodes(source, 'agent-avatar')
+  const targetAvatarCount = countMacraNodes(target, 'agent-avatar')
   const nodeCountMismatch = sourceBmcNodeCount !== targetBmcNodeCount
+  const avatarCountMismatch = sourceAvatarCount !== targetAvatarCount
   const edgeCountMismatch = source.edges.length !== target.edges.length
   const warnings: string[] = []
 
@@ -32,6 +38,9 @@ export function compareBmcGraphs(source: CanvasGraph, target: CanvasGraph): BmcG
   if (nodeCountMismatch) {
     warnings.push(`BMC node count mismatch: source=${sourceBmcNodeCount}, target=${targetBmcNodeCount}`)
   }
+  if (avatarCountMismatch) {
+    warnings.push(`Agent avatar count mismatch: source=${sourceAvatarCount}, target=${targetAvatarCount}`)
+  }
   if (edgeCountMismatch) {
     warnings.push(`Edge count mismatch: source=${source.edges.length}, target=${target.edges.length}`)
   }
@@ -41,7 +50,10 @@ export function compareBmcGraphs(source: CanvasGraph, target: CanvasGraph): BmcG
     targetDomains,
     missingDomains,
     extraDomains,
+    sourceAvatarCount,
+    targetAvatarCount,
     nodeCountMismatch,
+    avatarCountMismatch,
     edgeCountMismatch,
     warnings
   }
@@ -63,3 +75,10 @@ function readBmcDomains(graph: CanvasGraph) {
     .sort()
 }
 
+function countMacraNodes(graph: CanvasGraph, macraType: string) {
+  return graph.nodes.filter((node) => {
+    if (node.data.type !== 'note') return false
+    const meta = node.data.meta as { macraType?: string } | undefined
+    return meta?.macraType === macraType
+  }).length
+}

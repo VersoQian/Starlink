@@ -53,6 +53,8 @@ test('compareBmcGraphs reports missing BMC domains', () => {
   assert.deepEqual(report.missingDomains, ['重要合作'])
   assert.deepEqual(report.extraDomains, [])
   assert.equal(report.nodeCountMismatch, true)
+  assert.equal(report.avatarCountMismatch, false)
+  assert.equal(report.edgeCountMismatch, false)
   assert.match(report.warnings.join('\n'), /重要合作/)
 })
 
@@ -70,11 +72,12 @@ test('BmcFlowAdapter keeps nine-domain parity with current BusinessLangGraphServ
   assert.deepEqual(report.missingDomains, [])
   assert.deepEqual(report.extraDomains, [])
   assert.equal(report.nodeCountMismatch, false)
+  assert.equal(report.avatarCountMismatch, false)
+  assert.equal(report.edgeCountMismatch, false)
+  assert.equal(report.sourceAvatarCount, 3)
+  assert.equal(report.targetAvatarCount, 3)
   assert.deepEqual(report.sourceDomains, report.targetDomains)
-
-  // The template renderer intentionally starts with node parity only; graph edge parity is the next gate.
-  assert.equal(report.edgeCountMismatch, true)
-  assert.match(report.warnings.join('\n'), /Edge count mismatch/)
+  assert.deepEqual(report.warnings, [])
 })
 
 async function executeProductionBmc() {

@@ -32,6 +32,8 @@ test('BMC_TEMPLATE executes through GraphExecutor and renders nine canvas cards'
   assert.equal(domains.length, 9)
   assert.equal(new Set(domains).size, 9)
   assert.ok(domains.includes('重要合作'))
+  assert.equal(result.graph.nodes.length, 12)
+  assert.equal(result.graph.edges.length, 9)
 })
 
 test('BmcFlowAdapter reports node errors with node id context', async () => {
