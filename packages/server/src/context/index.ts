@@ -23,14 +23,15 @@ export type GraphQLContext = {
 
 const conversationEventBus = createConversationEventBus()
 const conversationRuntimeRepository = createConversationRuntimeRepository()
+const toolRegistry = new ToolRegistry()
 const conversationStore = new ConversationStore({
   eventBus: conversationEventBus,
-  runtimeRepository: conversationRuntimeRepository
+  runtimeRepository: conversationRuntimeRepository,
+  toolRegistry
 })
 const taskEventStore = new TaskEventStore()
 
 // Flow infrastructure (initialized lazily)
-const toolRegistry = new ToolRegistry()
 const flowStore = new FlowStore()
 const executionStore = new ExecutionStore()
 const graphCompiler = new GraphCompiler()

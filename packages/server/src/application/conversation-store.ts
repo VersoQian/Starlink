@@ -41,6 +41,9 @@ import { RuntimeEventStore } from './runtime-event-store.js'
 import { ConversationMemoryStore, type AppendMessageInput, type UpsertMemoryInput } from './conversation-memory-store.js'
 import { WorkspaceContextBuilder } from './workspace-context-builder.js'
 import { applyGraphDelta } from './graph-delta.js'
+import { BmcFlowAdapter } from '../engine/bmc-flow-adapter.js'
+import type { ToolRegistry } from '../tool-registry/registry.js'
+import { streamBmcFlowConversation } from './bmc-flow-conversation-stream.js'
 import {
   getWorkspaceMetadata as getWorkspaceMetadataPg,
   listWorkspaceMetadata as listWorkspaceMetadataPg,
@@ -68,6 +71,9 @@ export type ConversationStoreDeps = {
   eventBus: ConversationEventBus
   runtimeRepository: ConversationRuntimeRepository
   businessLangGraphService?: BusinessLangGraphService
+  bmcFlowAdapter?: BmcFlowAdapter
+  toolRegistry?: ToolRegistry
+  bmcFlowRuntime?: 'legacy' | 'template'
 }
 
 export class ConversationStore {
@@ -80,6 +86,9 @@ export class ConversationStore {
   private readonly memoryStore: ConversationMemoryStore
   private readonly contextBuilder: WorkspaceContextBuilder
   private readonly businessLangGraphService: BusinessLangGraphService
+  private readonly bmcFlowAdapter: BmcFlowAdapter | null
+  private readonly toolRegistry: ToolRegistry | null
+  private readonly bmcFlowRuntime: 'legacy' | 'template'
   private readonly pendingDecisionTimeouts = new Map<string, NodeJS.Timeout>()
   private readonly pendingDecisionResolvers = new Map<string, (decision: string) => void>()
   private readonly hitlEnabled = process.env.HITL_ENABLED === 'true'
@@ -88,11 +97,17 @@ export class ConversationStore {
   constructor({
     eventBus,
     runtimeRepository,
-    businessLangGraphService = new BusinessLangGraphService()
+    businessLangGraphService = new BusinessLangGraphService(),
+    bmcFlowAdapter,
+    toolRegistry,
+    bmcFlowRuntime = readBmcFlowRuntime()
   }: ConversationStoreDeps) {
     this.eventBus = eventBus
     this.runtimeRepository = runtimeRepository
     this.businessLangGraphService = businessLangGraphService
+    this.toolRegistry = toolRegistry ?? null
+    this.bmcFlowAdapter = bmcFlowAdapter ?? (toolRegistry ? new BmcFlowAdapter(toolRegistry) : null)
+    this.bmcFlowRuntime = bmcFlowRuntime
     this.sessionStore = new ConversationSessionStore(runtimeRepository)
     this.graphStore = new WorkspaceGraphStore(runtimeRepository)
     this.assetStore = new WorkspaceAssetStore(runtimeRepository)
@@ -158,7 +173,7 @@ export class ConversationStore {
       }
     })
 
-    const stream = this.businessLangGraphService.streamConversation({
+    const stream = this.createBusinessStream({
       workspaceId,
       userId,
       question,
@@ -943,6 +958,38 @@ export class ConversationStore {
     }
   }
 
+  private createBusinessStream(context: {
+    workspaceId: string
+    userId: string
+    question: string
+    traceId: string
+    baseGraph: CanvasGraph
+    knowledgeEvidence: KnowledgeEvidence[]
+    contextPrompt: string
+  }): AsyncGenerator<BusinessStreamUpdate> {
+    if (this.shouldUseBmcTemplateFlow(context.question) && this.bmcFlowAdapter && this.hasBmcTemplateTools()) {
+      return streamBmcFlowConversation(this.bmcFlowAdapter, context)
+    }
+
+    return this.businessLangGraphService.streamConversation(context)
+  }
+
+  private shouldUseBmcTemplateFlow(question: string) {
+    return this.bmcFlowRuntime === 'template' && isLikelyBmcGenerationRequest(question)
+  }
+
+  private hasBmcTemplateTools() {
+    if (!this.toolRegistry) return true
+    return [
+      'market_agent',
+      'product_agent',
+      'finance_agent',
+      'aggregator',
+      'critic_agent',
+      'bmc_renderer'
+    ].every((toolName) => this.toolRegistry?.has(toolName))
+  }
+
   private async persistConversationCompletion(options: {
     workspaceId: string
     userId: string
@@ -1180,6 +1227,14 @@ function truncate(text: string, max: number) {
   const value = text.trim()
   if (value.length <= max) return value
   return `${value.slice(0, Math.max(0, max - 1))}…`
+}
+
+function readBmcFlowRuntime(): 'legacy' | 'template' {
+  return process.env.BMC_FLOW_RUNTIME === 'template' ? 'template' : 'legacy'
+}
+
+function isLikelyBmcGenerationRequest(question: string) {
+  return /BMC|CC-BMC|商业模式|商业模型|商业画布|模式画布|business model canvas/i.test(question)
 }
 
 type ExtractRuntimeInfo = {
