@@ -2,19 +2,61 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   BaseTool,
-  type CanvasGraph,
   type ToolContext,
   type ToolDefinition,
   type ToolMessage
 } from '@starlink/shared'
 import { ToolRegistry } from '../tool-registry/registry.js'
-import { BMC_TEMPLATE } from '../seeds/flow-templates.js'
 import AggregatorTool from '../tools/control-flow/aggregator.tool.js'
 import BmcRendererTool from '../tools/output/bmc-renderer.tool.js'
-import { GraphCompiler } from './graph-compiler.js'
-import { GraphExecutor } from './graph-executor.js'
+import { BmcFlowAdapter, BmcFlowExecutionError } from './bmc-flow-adapter.js'
 
 test('BMC_TEMPLATE executes through GraphExecutor and renders nine canvas cards', async () => {
+  const result = await new BmcFlowAdapter(createCompleteRegistry()).execute({
+    workspaceId: 'workspace-bmc-flow',
+    userId: 'tester',
+    executionId: 'exec-bmc-flow',
+    question: '生成一个 AI 学习助手的商业模式'
+  })
+
+  assert.ok(result.events.some((event) => event.type === 'node_complete' && event.nodeId === 'input-1'))
+  assert.equal(readAggregatedCards(result.finalState['agg-1']).length, 9)
+
+  const domains = result.graph.nodes
+    .map((node) => node.data)
+    .filter((data): data is Extract<typeof data, { type: 'note' }> => data.type === 'note')
+    .map((data) => data.meta)
+    .map((meta) => (meta as { domain?: string } | undefined)?.domain)
+    .filter((domain): domain is string => Boolean(domain))
+
+  assert.equal(domains.length, 9)
+  assert.equal(new Set(domains).size, 9)
+  assert.ok(domains.includes('重要合作'))
+})
+
+test('BmcFlowAdapter reports node errors with node id context', async () => {
+  const brokenRegistry = new ToolRegistry()
+  brokenRegistry.register(new StaticBmcAgentTool('market_agent', [card('客户细分')]))
+  brokenRegistry.register(new AggregatorTool())
+  brokenRegistry.register(new BmcRendererTool())
+
+  await assert.rejects(
+    () => new BmcFlowAdapter(brokenRegistry).execute({
+      workspaceId: 'workspace-bmc-flow',
+      userId: 'tester',
+      executionId: 'exec-bmc-flow',
+      question: '生成一个 AI 学习助手的商业模式'
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof BmcFlowExecutionError)
+      assert.ok(error.message.includes('product-1'))
+      assert.ok(error.message.includes('finance-1'))
+      return true
+    }
+  )
+})
+
+function createCompleteRegistry() {
   const registry = new ToolRegistry()
   registry.register(new StaticBmcAgentTool('market_agent', [
     card('客户细分'),
@@ -34,44 +76,8 @@ test('BMC_TEMPLATE executes through GraphExecutor and renders nine canvas cards'
   registry.register(new StaticCriticTool())
   registry.register(new AggregatorTool())
   registry.register(new BmcRendererTool())
-
-  const plan = new GraphCompiler().compile(BMC_TEMPLATE)
-  const events = new GraphExecutor(registry).execute(
-    plan,
-    { question: '生成一个 AI 学习助手的商业模式' },
-    {
-      workspaceId: 'workspace-bmc-flow',
-      userId: 'tester',
-      executionId: 'exec-bmc-flow',
-      abortController: new AbortController()
-    }
-  )
-
-  const completed: Record<string, unknown> = {}
-  const errors: string[] = []
-  let finalState: Record<string, unknown> | null = null
-  for await (const event of events) {
-    if (event.type === 'node_complete') completed[event.nodeId] = event.output
-    if (event.type === 'node_error') errors.push(`${event.nodeId}: ${event.error}`)
-    if (event.type === 'flow_complete') finalState = event.finalState
-  }
-
-  assert.deepEqual(errors, [])
-  assert.ok(completed['input-1'])
-  assert.equal(readAggregatedCards(completed['agg-1']).length, 9)
-
-  const graph = readRenderedGraph(finalState)
-  const domains = graph.nodes
-    .map((node) => node.data)
-    .filter((data): data is Extract<typeof data, { type: 'note' }> => data.type === 'note')
-    .map((data) => data.meta)
-    .map((meta) => (meta as { domain?: string } | undefined)?.domain)
-    .filter((domain): domain is string => Boolean(domain))
-
-  assert.equal(domains.length, 9)
-  assert.equal(new Set(domains).size, 9)
-  assert.ok(domains.includes('重要合作'))
-})
+  return registry
+}
 
 class StaticBmcAgentTool extends BaseTool {
   readonly definition: ToolDefinition
@@ -183,11 +189,3 @@ function readAggregatedCards(output: unknown) {
   assert.ok(Array.isArray(payload.result))
   return payload.result
 }
-
-function readRenderedGraph(finalState: Record<string, unknown> | null): CanvasGraph {
-  assert.ok(finalState)
-  const rendererOutput = finalState['bmc-1'] as { canvas?: unknown } | undefined
-  assert.ok(rendererOutput?.canvas)
-  return rendererOutput.canvas as CanvasGraph
-}
-
