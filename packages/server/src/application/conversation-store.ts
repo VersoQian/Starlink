@@ -45,6 +45,11 @@ import { BmcFlowAdapter } from '../engine/bmc-flow-adapter.js'
 import type { ToolRegistry } from '../tool-registry/registry.js'
 import { streamBmcFlowConversation } from './bmc-flow-conversation-stream.js'
 import {
+  readBmcFlowRuntime,
+  shouldUseBmcTemplateRuntime,
+  type BmcFlowRuntime
+} from './bmc-runtime-selection.js'
+import {
   getWorkspaceMetadata as getWorkspaceMetadataPg,
   listWorkspaceMetadata as listWorkspaceMetadataPg,
   listWorkspaceMetadataHistory as listWorkspaceMetadataHistoryPg,
@@ -73,7 +78,7 @@ export type ConversationStoreDeps = {
   businessLangGraphService?: BusinessLangGraphService
   bmcFlowAdapter?: BmcFlowAdapter
   toolRegistry?: ToolRegistry
-  bmcFlowRuntime?: 'legacy' | 'template'
+  bmcFlowRuntime?: BmcFlowRuntime
 }
 
 export class ConversationStore {
@@ -88,7 +93,7 @@ export class ConversationStore {
   private readonly businessLangGraphService: BusinessLangGraphService
   private readonly bmcFlowAdapter: BmcFlowAdapter | null
   private readonly toolRegistry: ToolRegistry | null
-  private readonly bmcFlowRuntime: 'legacy' | 'template'
+  private readonly bmcFlowRuntime: BmcFlowRuntime
   private readonly pendingDecisionTimeouts = new Map<string, NodeJS.Timeout>()
   private readonly pendingDecisionResolvers = new Map<string, (decision: string) => void>()
   private readonly hitlEnabled = process.env.HITL_ENABLED === 'true'
@@ -967,27 +972,18 @@ export class ConversationStore {
     knowledgeEvidence: KnowledgeEvidence[]
     contextPrompt: string
   }): AsyncGenerator<BusinessStreamUpdate> {
-    if (this.shouldUseBmcTemplateFlow(context.question) && this.bmcFlowAdapter && this.hasBmcTemplateTools()) {
+    if (
+      this.bmcFlowAdapter
+      && shouldUseBmcTemplateRuntime({
+        runtime: this.bmcFlowRuntime,
+        question: context.question,
+        toolRegistry: this.toolRegistry
+      })
+    ) {
       return streamBmcFlowConversation(this.bmcFlowAdapter, context)
     }
 
     return this.businessLangGraphService.streamConversation(context)
-  }
-
-  private shouldUseBmcTemplateFlow(question: string) {
-    return this.bmcFlowRuntime === 'template' && isLikelyBmcGenerationRequest(question)
-  }
-
-  private hasBmcTemplateTools() {
-    if (!this.toolRegistry) return true
-    return [
-      'market_agent',
-      'product_agent',
-      'finance_agent',
-      'aggregator',
-      'critic_agent',
-      'bmc_renderer'
-    ].every((toolName) => this.toolRegistry?.has(toolName))
   }
 
   private async persistConversationCompletion(options: {
@@ -1227,14 +1223,6 @@ function truncate(text: string, max: number) {
   const value = text.trim()
   if (value.length <= max) return value
   return `${value.slice(0, Math.max(0, max - 1))}…`
-}
-
-function readBmcFlowRuntime(): 'legacy' | 'template' {
-  return process.env.BMC_FLOW_RUNTIME === 'template' ? 'template' : 'legacy'
-}
-
-function isLikelyBmcGenerationRequest(question: string) {
-  return /BMC|CC-BMC|商业模式|商业模型|商业画布|模式画布|business model canvas/i.test(question)
 }
 
 type ExtractRuntimeInfo = {
