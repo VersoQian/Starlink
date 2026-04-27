@@ -19,13 +19,19 @@ import { ycAirbnbCase } from './yc-airbnb.js'
 import { ycReplitCase } from './yc-replit.js'
 import { ycPebbleCase } from './yc-pebble.js'
 import { ycCourseraCase } from './yc-coursera.js'
+import { ycNotionCase } from './yc-notion.js'
+import { ycCoinbaseCase } from './yc-coinbase.js'
+import { ycDoorDashCase } from './yc-doordash.js'
 
 const SEED_CASES: YcCompanyCase[] = [
   ycStripeCase,
   ycAirbnbCase,
   ycReplitCase,
   ycPebbleCase,
-  ycCourseraCase
+  ycCourseraCase,
+  ycNotionCase,
+  ycCoinbaseCase,
+  ycDoorDashCase
 ]
 
 /**

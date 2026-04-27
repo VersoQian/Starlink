@@ -6,12 +6,12 @@ verifiable startup info + hand-authored ground-truth BMCs.
 
 ## Status
 
-- **Tier A**: 5 hand-curated seed cases ✅ (this scaffold)
+- **Tier A**: 8 hand-curated seed cases ✅
 - **Tier A target**: 30-50 cases stratified by sector + outcome
 - **Tier B**: Recruit 3-5 MBA annotators via Prolific → ~50 cases × 3 annotators × 45 min × $20/hr ≈ $2,250. Compute Krippendorff's α inter-annotator agreement.
 - **Tier C**: Domain-expert annotated (Wharton/INSEAD/IESE entrepreneurship faculty), IRB-blessed, ~200 cases. Released as CC-BMC-Bench v1.0 on HuggingFace.
 
-## Current cases (5)
+## Current cases (8)
 
 | case_id | sector | outcome | notes |
 |---|---|---|---|
@@ -20,6 +20,9 @@ verifiable startup info + hand-authored ground-truth BMCs.
 | `yc-replit-2024` | devtools | active | Multi-segment freemium + AI-cost-heavy |
 | `yc-pebble-2016` | hardware | shut-down | Negative example — tests outcome-conditioned BMCs |
 | `extended-coursera-2024` | edtech | public | NOT YC (extended sector representative) |
+| `yc-notion-2024` | consumer-saas | active | Bottom-up cross-segment SaaS, blocks model |
+| `yc-coinbase-2021` | fintech | public | Regulated marketplace, compliance-heavy cost |
+| `yc-doordash-2020` | logistics | public | Three-sided gig marketplace, courier-pay dominates cost |
 
 ## Schema
 
@@ -98,18 +101,42 @@ LANGGRAPH_CHECKPOINTER_ENABLED=false \
 ... yc-vs-runners.js --case=yc-stripe-2024 --runners=gpt-solo
 ```
 
-## J.5++ baseline results (2026-04-27)
+## J.5++ baseline results (2026-04-27, latest N=8)
 
-First real "Starlink vs single-LLM" measurement on Tier-A YC cases.
-Full report: `benchmark/reports/yc-vs-runners-20260427-091117.md`.
+Real "Starlink vs single-LLM" measurement on Tier-A YC cases.
+Full report: `benchmark/reports/yc-vs-runners-20260427-131446.md`.
+
+### N=8 (current)
 
 | runner | mean total | mean avg | mean output | mean duration |
 |---|---|---|---|---|
-| **starlink** | 20.4/27 | 2.27 | 4951 chars | 35.3s |
-| gpt-solo | 19.8/27 | 2.20 | 808 chars | 11.0s |
+| **starlink** | **20.3 / 27** | **2.25** | 5143 chars | 37.0s |
+| gpt-solo | 18.4 / 27 | 2.04 | 920 chars | 12.5s |
 
-Per-case winner:
-- gpt-solo: Stripe, Airbnb (well-known, LLM-memorized)
-- **starlink**: Replit, Pebble, Coursera (less-public, multi-agent generalises)
+Starlink wins **7 of 8 cases** (sole gpt-solo win: DoorDash, by 1 point).
 
-Notable systematic finding: **gpt-solo scored 0 on Key Partnerships in 4/5 cases** — single-LLM dropped dimensions in its JSON output. Starlink's multi-agent enforces 9-dim coverage because each generator has assigned dimensions (this is a paper-worthy architectural insight).
+### Systematic finding — single-LLM dimensional drop
+
+**gpt-solo scored 0 on Key Partnerships in 8 of 8 cases.** The single
+LLM JSON output structurally omits 重要合作 (Key Partnerships) from
+its 9-cell BMC, regardless of company / sector / outcome.
+
+Starlink's multi-agent forces 9-dim coverage because each generator
+has assigned dimensions (market-agent owns CS / CR / CH / KP, etc.) —
+KP cannot be silently dropped. This is the cleanest paper-friendly
+architectural advantage that fell out of N=8 evaluation:
+
+| runner | KP score frequency at N=8 |
+|---|---|
+| starlink | 2 / 2 / 3 / 2 / 3 / 2 / 2 / 2 (mean 2.25) |
+| gpt-solo | 0 / 0 / 0 / 0 / 0 / 0 / 0 / 0 (mean 0.00) |
+
+### Trend across N
+
+| N | Starlink mean | gpt-solo mean | gap | Starlink win-rate |
+|---|---|---|---|---|
+| 5 (initial) | 20.4 | 19.8 | 0.6 | 3/5 = 60% |
+| 8 (latest) | 20.3 | 18.4 | 1.9 | 7/8 = 88% |
+
+The gap **widened** as N grew, which is consistent with a real
+architectural effect rather than judge-LLM noise.
