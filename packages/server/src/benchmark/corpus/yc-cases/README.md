@@ -33,13 +33,19 @@ verifiable startup info + hand-authored ground-truth BMCs.
 
 ## How to add a case (manual, Tier A)
 
-1. Pick a YC company (or extended sector representative)
-2. Fetch the public profile page
-3. Copy `one_liner` + `description` verbatim
-4. Author the `ground_truth_bmc` 9-cell object — 1-2 sentences per cell + 2-5 `must_cover` concept tokens + (optional) 1-3 `must_not_cover`
-5. Save as `yc-<company-slug>.ts` in this directory
-6. Add to `index.ts` SEED_CASES array
-7. Run `pnpm --filter @starlink/server lint` to confirm shape passes Zod
+**Use `_TEMPLATE.ts`**:
+
+1. Copy `_TEMPLATE.ts` to `yc-<company-slug>.ts` (e.g. `yc-doordash-2024.ts`)
+2. Replace every `__FILL__` placeholder with real content
+3. Pick `case_id`, `company_name`, `yc_batch`, `source_url`
+4. Copy `one_liner` + `description` verbatim from the YC profile page
+5. Author the `ground_truth_bmc` 9-cell object — 1-2 sentences per cell + 2-5 `must_cover` concept tokens + (optional) 1-3 `must_not_cover`
+6. Set `annotator_id` and `annotation_quality: 'draft'`
+7. Add the new export to `index.ts` SEED_CASES array
+8. Run `pnpm --filter @starlink/server lint` to confirm Zod passes
+9. (Optional) Smoke-test: `node packages/server/dist/benchmark/eval/yc-judge-smoke.js --case=yc-<company-slug>-2024`
+
+The template's bottom comment includes a **stratification target** for the next 25 cases — pick a company that fills an underrepresented sector + outcome cell.
 
 ## How to add a case (semi-automated, Tier B+ — TODO)
 
