@@ -3,9 +3,13 @@ import {
   WizardStepRequestSchema,
   WizardStepResponseSchema,
   type WizardStepRequest,
-  type WizardStepResponse
-} from '@/features/ideation/types/wizard-rpc-types'
-import type { IdeationNodeKind } from '@/features/ideation/types/ideation-types'
+  type WizardStepResponse,
+  WIZARD_STEP_TO_KIND,
+  nextWizardStep,
+  WIZARD_SYSTEM_PROMPT,
+  buildWizardUserMessage,
+  parseWizardReply
+} from '@starlink/shared'
 
 /**
  * POST /api/ideation/wizard-step
@@ -35,38 +39,8 @@ const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? 
 const DEEPSEEK_MODEL = process.env.LLM_MODEL ?? 'deepseek-chat'
 const TIMEOUT_MS = 12_000
 
-// =============================================================================
-// Step → kind mapping. The wizard step decides what KIND of node we extract.
-// =============================================================================
-
-const STEP_TO_KIND: Record<string, IdeationNodeKind> = {
-  'core-idea': 'core-idea',
-  'customer-pain': 'customer-pain',
-  'value-angle': 'value-angle',
-  hypothesis: 'hypothesis',
-  validation: 'validation-channel',
-  revenue: 'revenue',
-  risk: 'risk',
-  meta: 'reflection'
-}
-
-const STEP_ORDER = [
-  'core-idea',
-  'customer-pain',
-  'value-angle',
-  'hypothesis',
-  'validation',
-  'revenue',
-  'risk',
-  'meta',
-  'done'
-] as const
-
-function nextStepOf(step: WizardStepRequest['step']): WizardStepRequest['step'] {
-  const idx = STEP_ORDER.indexOf(step)
-  if (idx < 0 || idx >= STEP_ORDER.length - 1) return 'done'
-  return STEP_ORDER[idx + 1]
-}
+// Step → kind mapping + step ordering live in @starlink/shared (Wave F.7-pre).
+// Imported above as WIZARD_STEP_TO_KIND + nextWizardStep.
 
 // =============================================================================
 // Scripted fallbacks (used when LLM fails / unavailable)
@@ -95,85 +69,21 @@ function fallbackResponse(
   input: WizardStepRequest,
   latencyMs: number
 ): WizardStepResponse {
-  const kind = STEP_TO_KIND[input.step] ?? 'core-idea'
+  const kind = WIZARD_STEP_TO_KIND[input.step] ?? 'core-idea'
   const trimmed = input.userAnswer.trim().split('\n')[0]
   const label = trimmed.length > 24 ? `${trimmed.slice(0, 22)}…` : trimmed
   return {
     extracted: { kind, label: label || '未命名', content: input.userAnswer },
     nextQuestion:
       FALLBACK_NEXT_Q[input.step] ?? '继续描述你的下一个想法。',
-    nextStep: nextStepOf(input.step),
+    nextStep: nextWizardStep(input.step),
     source: 'error',
     latencyMs
   }
 }
 
-// =============================================================================
-// LLM prompt construction
-// =============================================================================
-
-const SYSTEM_PROMPT = `You are a Meflex-style entrepreneurship coach guiding a founder through 7-step ideation. The current step ID is provided; you must:
-
-1. EXTRACT a structured node from the user's free-text answer
-   - kind: must match the step's expected kind exactly
-   - label: a concise <=24 字 (Chinese) title summarizing the answer
-   - content: cleaned-up version of the user's answer, removing filler. DO NOT add new content the user didn't say.
-
-2. GENERATE the next AI question, informed by:
-   - the current canvas (nodes already on it)
-   - the user's just-given answer
-   - the next step in the deterministic order
-   - Tone: focused, one question, push for specificity. NEVER write content for them, only ask.
-   - Length: 1-3 short paragraphs in 中文 (zh-CN). Markdown *emphasis* allowed.
-
-OUTPUT exactly this JSON shape (nothing else):
-{
-  "extracted": {
-    "kind": "<step's expected kind>",
-    "label": "<<=24 chars Chinese>",
-    "content": "<cleaned user content>"
-  },
-  "nextQuestion": "<your next question in Chinese, max 600 chars>"
-}
-
-Constraints:
-- Do NOT include markdown fences in the JSON
-- Do NOT generate content for the user that they didn't say
-- The 'kind' MUST match what the step expects; never pick a different kind
-- If user's answer is empty/garbage, still extract what you can with a placeholder label like "待补充"`
-
-function buildUserMessage(input: WizardStepRequest, expectedKind: IdeationNodeKind): string {
-  const canvasSummary = input.canvas.nodes.length
-    ? input.canvas.nodes
-        .slice(-12)
-        .map(
-          (n, i) =>
-            `  [${i + 1}] ${n.kind} · "${n.label}"${n.content ? ` — ${n.content.slice(0, 120).replace(/\n+/g, ' ')}` : ''}`
-        )
-        .join('\n')
-    : '  (empty)'
-  const chatLines = input.recentChat.length
-    ? input.recentChat
-        .slice(-6)
-        .map((m) => `  ${m.role.toUpperCase()}: ${m.content.slice(0, 200).replace(/\n+/g, ' ')}`)
-        .join('\n')
-    : '  (no prior exchange)'
-  const nextStep = nextStepOf(input.step)
-  return `CURRENT STEP: ${input.step}
-EXPECTED KIND for extraction: ${expectedKind}
-NEXT STEP: ${nextStep}
-
-CANVAS (so far):
-${canvasSummary}
-
-RECENT EXCHANGE (newest last):
-${chatLines}
-
-USER JUST ANSWERED:
-${input.userAnswer}
-
-Respond with the JSON object only.`
-}
+// Prompts + buildUserMessage now live in @starlink/shared/ideation-coach
+// (Wave F.7-pre). See WIZARD_SYSTEM_PROMPT + buildWizardUserMessage imports.
 
 // =============================================================================
 // DeepSeek call
@@ -220,37 +130,8 @@ async function callDeepSeek(
   const content = json.choices?.[0]?.message?.content?.trim()
   if (!content) throw new Error('DeepSeek returned empty content')
 
-  const stripped = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(stripped)
-  } catch {
-    throw new Error(`DeepSeek output is not valid JSON: ${content.slice(0, 120)}`)
-  }
-  if (!parsed || typeof parsed !== 'object') throw new Error('DeepSeek output is not an object')
-  const obj = parsed as {
-    extracted?: { kind?: unknown; label?: unknown; content?: unknown }
-    nextQuestion?: unknown
-  }
-  const e = obj.extracted
-  if (
-    !e ||
-    typeof e.kind !== 'string' ||
-    typeof e.label !== 'string' ||
-    typeof e.content !== 'string' ||
-    typeof obj.nextQuestion !== 'string' ||
-    obj.nextQuestion.length < 4
-  ) {
-    throw new Error('DeepSeek output failed shape check')
-  }
-  return {
-    extracted: {
-      kind: e.kind,
-      label: e.label.slice(0, 60),
-      content: e.content.slice(0, 800)
-    },
-    nextQuestion: obj.nextQuestion.slice(0, 700)
-  }
+  // Shared parser handles ```json fences + Zod-shape validation.
+  return parseWizardReply(content)
 }
 
 // =============================================================================
@@ -280,14 +161,14 @@ export async function POST(request: Request) {
     })
   }
 
-  const expectedKind = STEP_TO_KIND[parsedBody.step] ?? 'core-idea'
+  const expectedKind = WIZARD_STEP_TO_KIND[parsedBody.step] ?? 'core-idea'
 
   const ac = new AbortController()
   const timeoutId = setTimeout(() => ac.abort(), TIMEOUT_MS)
 
   try {
-    const userPrompt = buildUserMessage(parsedBody, expectedKind)
-    const llm = await callDeepSeek(SYSTEM_PROMPT, userPrompt, ac.signal)
+    const userPrompt = buildWizardUserMessage(parsedBody, expectedKind)
+    const llm = await callDeepSeek(WIZARD_SYSTEM_PROMPT, userPrompt, ac.signal)
     clearTimeout(timeoutId)
 
     // Force the kind to match the step (don't trust the LLM if it
@@ -301,7 +182,7 @@ export async function POST(request: Request) {
         content: llm.extracted.content || parsedBody.userAnswer
       },
       nextQuestion: llm.nextQuestion,
-      nextStep: nextStepOf(parsedBody.step),
+      nextStep: nextWizardStep(parsedBody.step),
       source: 'llm',
       latencyMs: Date.now() - startedAt
     }

@@ -18,3 +18,6 @@
 export * from './schemas.js'
 export * from './prompts.js'
 export * from './parser.js'
+export * from './wizard-schemas.js'
+export * from './wizard-prompts.js'
+export * from './wizard-parser.js'
