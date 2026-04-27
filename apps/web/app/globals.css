@@ -349,3 +349,46 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--canvas-scroll-thumb-hover));
 }
+
+/* ─── Starlink Ideation: brand-glyph twinkle + ring drift ───
+ *
+ * Used by features/ideation/components/starlink-glyph.tsx
+ * and the empty-state centerpiece. Subtle by design — no
+ * scale/rotate, only opacity oscillation.
+ */
+@keyframes starlinkTwinkleA {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes starlinkTwinkleB {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.35; }
+}
+@keyframes starlinkRingDrift {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.starlink-twinkle-a { animation: starlinkTwinkleA 3.6s ease-in-out infinite; }
+.starlink-twinkle-b { animation: starlinkTwinkleB 5.2s ease-in-out infinite; }
+
+/* Coach status indicators
+ *
+ * starlinkPulseFade  — used by .starlink-pulse on the LED dot in the header
+ *                      and the LLM kicker in the thinking bubble. Gentle
+ *                      breathing fade (0.5 → 1.0). NOT applied to body text
+ *                      (which would distract); reserved for status pips.
+ * starlinkSweep      — radar-style hairline that travels the bottom of the
+ *                      thinking bubble while a reflection is in-flight.
+ *                      Replaces the generic "3 bouncing dots" so the
+ *                      indicator is visually distinct from a chatbot
+ *                      ellipsis.
+ */
+@keyframes starlinkPulseFade {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+@keyframes starlinkSweep {
+  0%   { left: -33%; }
+  100% { left: 100%; }
+}
+.starlink-pulse { animation: starlinkPulseFade 1.6s ease-in-out infinite; }
