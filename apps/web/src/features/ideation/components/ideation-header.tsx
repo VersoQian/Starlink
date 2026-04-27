@@ -27,6 +27,9 @@ export function IdeationHeader() {
   const mode = useIdeationStore((s) => s.mode)
   const viewMode = useIdeationStore((s) => s.viewMode)
   const setViewMode = useIdeationStore((s) => s.setViewMode)
+  const coachThinking = useIdeationStore((s) => s.coachThinking)
+  const requestManualReflection = useIdeationStore((s) => s.requestManualReflection)
+  const reflectDisabled = nodeCount === 0 || mode === 'wizard' || coachThinking
 
   return (
     <header
@@ -110,7 +113,26 @@ export function IdeationHeader() {
           撤销
         </button>
 
-        <button type="button" className={TOKENS.button.primary} aria-label="AI 反思">
+        <button
+          type="button"
+          onClick={requestManualReflection}
+          disabled={reflectDisabled}
+          className={`${TOKENS.button.primary} disabled:cursor-not-allowed disabled:opacity-40`}
+          aria-label={
+            nodeCount === 0
+              ? '请先在画布上添加节点'
+              : mode === 'wizard'
+                ? '引导模式中无法手动反思'
+                : '让 AI 现在反思一下当前画布'
+          }
+          title={
+            nodeCount === 0
+              ? '需要先在画布上添加至少一个节点'
+              : mode === 'wizard'
+                ? '退出引导模式后可手动反思'
+                : '让 AI 立即对当前画布给出一条反思（绕过去重）'
+          }
+        >
           <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
           AI 反思
         </button>

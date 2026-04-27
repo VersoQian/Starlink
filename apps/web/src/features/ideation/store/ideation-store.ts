@@ -2,6 +2,7 @@
 
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import {
   applyEdgeChanges,
   applyNodeChanges,
@@ -159,6 +160,14 @@ interface IdeationStore {
   // View ------------------
   setViewMode: (mode: IdeationViewMode) => void
 
+  // Coach manual control --
+  /**
+   * User explicitly requested a fresh reflection — bypasses the dedup
+   * (firedMetaIds) so previously-shown meta prompts can fire again.
+   * Routes through the same orchestrator → LLM path as automatic events.
+   */
+  requestManualReflection: () => void
+
   // Internal coach hooks (named with leading underscore by convention) -------
   _maybeReflectOnEvent: (event: CoachEvent) => void
   _maybeMetaCheck: () => void
@@ -280,7 +289,9 @@ function applyMutations(
 // Store implementation
 // =============================================================================
 
-export const useIdeationStore = create<IdeationStore>((set, get) => ({
+export const useIdeationStore = create<IdeationStore>()(
+  persist(
+    (set, get) => ({
   nodes: [],
   edges: [],
   inspectorNodeId: null,
@@ -490,6 +501,34 @@ export const useIdeationStore = create<IdeationStore>((set, get) => ({
 
   setViewMode: (mode) => set({ viewMode: mode }),
 
+  requestManualReflection: () => {
+    const { mode, nodes, edges, perKindReflectionCount } = get()
+    if (mode !== 'coach') return
+    if (nodes.length === 0) return // nothing to reflect on
+    const snap = buildSnapshot(nodes, edges)
+    // CLEAR firedMetaIds for this manual round so meta triggers can re-fire.
+    // (Stays cleared — the user is explicitly opting back into seeing the
+    // full set of observations.)
+    set({ firedMetaIds: new Set() })
+    const freshFiredIds = new Set<string>()
+    const scriptedFallback = reflectOn(
+      { type: 'manual-reflect', canvasSnapshot: snap },
+      freshFiredIds,
+      perKindReflectionCount
+    )
+    scheduleReflection(
+      { type: 'manual-reflect', canvasSnapshot: snap },
+      () => buildOrchestratorContext(get()),
+      scriptedFallback,
+      {
+        onStart: () => set({ coachThinking: true }),
+        onComplete: (result) => appendCoachReflection(set, result)
+      },
+      // Manual is user-initiated — no debounce; fire immediately
+      { debounceMs: 0 }
+    )
+  },
+
   exitWizard: () => {
     set((state) => ({
       mode: 'coach',
@@ -602,7 +641,40 @@ export const useIdeationStore = create<IdeationStore>((set, get) => ({
       }
     )
   }
-}))
+}),
+    {
+      name: 'starlink-ideation-v1',
+      storage: createJSONStorage(() => (typeof window !== 'undefined' ? localStorage : undefined as unknown as Storage)),
+      // Custom serialization: Sets aren't JSON-serializable, so we round-trip
+      // firedMetaIds as an array. Other state is JSON-friendly already.
+      partialize: (state) => ({
+        nodes: state.nodes,
+        edges: state.edges,
+        chatMessages: state.chatMessages,
+        chatDraft: state.chatDraft,
+        mode: state.mode,
+        wizardStep: state.wizardStep,
+        traceToNodeId: state.traceToNodeId,
+        viewMode: state.viewMode,
+        perKindReflectionCount: state.perKindReflectionCount,
+        // Set → array
+        firedMetaIds: Array.from(state.firedMetaIds) as unknown as Set<string>
+      }),
+      onRehydrateStorage: () => (rehydrated) => {
+        // After hydration, coerce firedMetaIds back to a Set
+        if (rehydrated && Array.isArray(rehydrated.firedMetaIds as unknown)) {
+          rehydrated.firedMetaIds = new Set(rehydrated.firedMetaIds as unknown as string[])
+        }
+        // coachThinking + inspectorNodeId should always start fresh on reload
+        // — they're transient UI state. Nothing to do (they're not in
+        // partialize, so they default to the initial value).
+      },
+      // Bump this if we ever change the store shape in a backward-incompatible
+      // way; old persisted state with mismatched version is discarded.
+      version: 1
+    }
+  )
+)
 
 // =============================================================================
 // Helpers used by the coach hooks

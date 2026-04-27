@@ -176,6 +176,12 @@ function serializeEventForRpc(event: CoachEvent): ReflectionRequest['event'] {
       return { type: 'node-linked', fromKind: event.fromKind, toKind: event.toKind }
     case 'meta-check':
       return { type: 'meta-check' }
+    case 'manual-reflect':
+      // Manual reflect is sent over the wire as a meta-check too — the LLM
+      // sees the canvas + chat history and produces a fresh observation.
+      // The "explicit user intent" is conveyed via firedMetaIds being
+      // intentionally cleared by the caller (so all triggers can re-fire).
+      return { type: 'meta-check' }
     case 'node-edited':
       // No dedicated RPC variant for edits in Stage B; promote to node-added
       // so the LLM still gets *something* useful.

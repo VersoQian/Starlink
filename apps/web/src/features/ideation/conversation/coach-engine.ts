@@ -28,6 +28,8 @@ export type CoachEvent =
   | { type: 'node-edited'; kind: IdeationNodeKind; label: string; content: string }
   | { type: 'node-linked'; fromKind: IdeationNodeKind; toKind: IdeationNodeKind }
   | { type: 'meta-check'; canvasSnapshot: CanvasSnapshot }
+  /** User explicitly clicked "Reflect Now" — bypass dedup, always emit. */
+  | { type: 'manual-reflect'; canvasSnapshot: CanvasSnapshot }
 
 export interface CanvasSnapshot {
   nodeCountByKind: Partial<Record<IdeationNodeKind, number>>
@@ -208,6 +210,23 @@ export function reflectOn(
   /** how many reflections this kind has already emitted (used for prompt rotation) */
   perKindReflectionCount: Partial<Record<IdeationNodeKind, number>>
 ): Reflection | null {
+  // User explicitly asked for a reflection — always emit, never dedup.
+  // Try meta triggers first (they're the most context-aware); if none fire,
+  // return a generic "look at the whole canvas" prompt.
+  if (event.type === 'manual-reflect') {
+    for (const trigger of META_TRIGGERS) {
+      if (trigger.shouldFire(event.canvasSnapshot, firedMetaIds)) {
+        firedMetaIds.add(trigger.id)
+        return trigger.prompt
+      }
+    }
+    return {
+      content:
+        '退一步看你的画布 —\n\n· **当前最弱的环节**是哪个节点？为什么？\n· 哪一条假设你**最不确定**？怎么 cheap 验证它？\n· 如果只能保留 3 个节点，你会保留哪 3 个？\n\n挑一个回答试试。',
+      scaffold: 'meta'
+    }
+  }
+
   if (event.type === 'meta-check') {
     for (const trigger of META_TRIGGERS) {
       if (trigger.shouldFire(event.canvasSnapshot, firedMetaIds)) {
