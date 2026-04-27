@@ -47,12 +47,14 @@ export const AgentNode = memo(function AgentNode({ id }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="w-3 h-3 bg-blue-500 border-2 border-zinc-900"
+        className="h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-cyan-400"
       />
-      <Card className={`w-80 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node ${isExecuting ? 'executing' : ''}`}>
+      <Card
+        className={`w-80 rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16] canvas-panel-node ${isExecuting ? 'executing' : ''}`}
+      >
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2 text-zinc-100">
-            <Bot className="w-4 h-4 text-purple-400" />
+          <CardTitle className="flex items-center gap-2 text-[13px] font-semibold text-white">
+            <Bot className="h-4 w-4 text-cyan-300" strokeWidth={1.75} />
             Agent Node
             {getStatusBadge()}
           </CardTitle>
@@ -100,7 +102,7 @@ export const AgentNode = memo(function AgentNode({ id }: NodeProps) {
         <Handle
           type="source"
           position={Position.Right}
-          className="w-3 h-3 bg-green-500 border-2 border-zinc-900"
+          className="h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-emerald-400"
         />
       </Card>
     </>

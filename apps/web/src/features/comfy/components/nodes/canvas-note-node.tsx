@@ -84,14 +84,14 @@ export const CanvasNoteNode = memo(function CanvasNoteNode({ data }: NodeProps<C
 
   return (
     <>
-      <Handle type="target" position={Position.Left} className="w-3 h-3 bg-blue-500 border-2 border-zinc-900" />
-      <Card className="w-96 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node">
+      <Handle type="target" position={Position.Left} className="h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-slate-400" />
+      <Card className="w-96 rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16] canvas-panel-node">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm text-zinc-100">{title}</CardTitle>
+          <CardTitle className="text-[13px] font-semibold text-white">{title}</CardTitle>
         </CardHeader>
         <CardContent>{renderContent(data)}</CardContent>
       </Card>
-      <Handle type="source" position={Position.Right} className="w-3 h-3 bg-blue-500 border-2 border-zinc-900" />
+      <Handle type="source" position={Position.Right} className="h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-slate-400" />
     </>
   )
 })

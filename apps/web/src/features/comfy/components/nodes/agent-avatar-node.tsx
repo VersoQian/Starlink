@@ -156,7 +156,6 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [inputMessage, setInputMessage] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
-  const [isHovered, setIsHovered] = useState(false)
 
   const agentType = nodeData?.agentType || AGENT_TYPES.MARKET
   const config = AGENT_CONFIG[agentType]
@@ -190,69 +189,50 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
         type="target"
         position={Position.Left}
         style={{
-          background: `linear-gradient(135deg, ${config.accentColor}, ${config.accentColor}dd)`,
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: `0 4px 12px ${config.accentColor}40`
+          background: config.accentColor,
+          border: '2px solid rgb(2 6 23)'
         }}
       />
 
       <div
-        className={`w-96 rounded-3xl overflow-hidden transition-all duration-500 relative group ${isChatOpen ? 'shadow-2xl' : ''}`}
-        style={{
-          background: 'rgba(255, 255, 255, 0.03)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          boxShadow: isHovered || isChatOpen
-            ? `0 20px 60px -15px ${config.accentColor}60, 0 0 0 1px ${config.accentColor}20, inset 0 1px 0 rgba(255,255,255,0.1)`
-            : `0 10px 30px -10px ${config.accentColor}30, inset 0 1px 0 rgba(255,255,255,0.05)`,
-          transform: isChatOpen ? 'scale(1.02)' : 'scale(1)'
-        }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        className="group relative w-[360px] overflow-hidden rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16]"
+        style={{ boxShadow: `inset 3px 0 0 0 ${config.accentColor}` }}
       >
-        {/* 装饰性光晕效果 */}
-        <div
-          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl blur-2xl pointer-events-none"
-          style={{
-            background: `radial-gradient(circle at 50% 0%, ${config.accentColor}20, transparent 70%)`
-          }}
-        />
-
         {/* 头部 */}
         <div
-          className="relative px-6 py-5 border-b border-white/10"
-          style={{
-            background: `linear-gradient(135deg, ${config.accentColor}15, transparent)`
-          }}
+          className="relative border-b border-white/[0.06] px-4 py-3"
+          style={{ background: `${config.accentColor}08` }}
         >
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <div
-              className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${config.gradient} flex items-center justify-center text-3xl shadow-lg transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-300 border-2 border-white/20`}
-              style={{ boxShadow: `0 12px 32px ${config.accentColor}50` }}
+              className="flex h-10 w-10 items-center justify-center rounded-md text-xl"
+              style={{ background: `${config.accentColor}15`, color: config.accentColor }}
             >
               {config.avatar}
             </div>
 
-            <div className="flex-1">
-              <h3 className="text-base font-black text-white mb-1" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                {config.name}
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">{config.description}</p>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[13px] font-semibold text-white">{config.name}</h3>
+              <p className="text-[11px] text-slate-400">{config.description}</p>
             </div>
 
             {isInteractive && (
               <button
                 onClick={() => setIsChatOpen(!isChatOpen)}
-                className={`p-3 rounded-2xl transition-all shadow-lg border backdrop-blur-sm ${
+                className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                   isChatOpen
-                    ? `bg-gradient-to-br ${config.gradient} text-white border-white/30 scale-110 shadow-xl`
-                    : 'glass-effect text-slate-400 hover:text-white border-white/20 hover:border-white/40'
+                    ? 'bg-white/[0.08] text-white'
+                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'
                 }`}
-                style={isChatOpen ? { boxShadow: `0 8px 24px ${config.accentColor}60` } : {}}
+                aria-label={isChatOpen ? '关闭对话' : '打开对话'}
               >
-                {isChatOpen ? <X className="w-5 h-5" /> : <MessageCircle className="w-5 h-5" />}
+                {isChatOpen ? (
+                  <X className="h-3.5 w-3.5" strokeWidth={1.75} />
+                ) : (
+                  <MessageCircle className="h-3.5 w-3.5" strokeWidth={1.75} />
+                )}
               </button>
             )}
           </div>
@@ -262,53 +242,48 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
         {isChatOpen && (
           <div className="relative">
             {/* 消息区域 */}
-            <div
-              className="h-64 overflow-y-auto p-5 space-y-3 backdrop-blur-sm"
-              style={{ background: 'rgba(0, 0, 0, 0.2)' }}
-            >
+            <div className="h-56 space-y-2.5 overflow-y-auto bg-slate-950/30 p-4">
               {chatMessages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="flex h-full flex-col items-center justify-center text-center">
                   <div
-                    className={`w-20 h-20 rounded-full bg-gradient-to-br ${config.gradient} flex items-center justify-center mb-4 shadow-lg`}
-                    style={{ boxShadow: `0 12px 32px ${config.accentColor}50` }}
+                    className="mb-3 flex h-12 w-12 items-center justify-center rounded-md"
+                    style={{ background: `${config.accentColor}15`, color: config.accentColor }}
                   >
-                    <Sparkles className="w-10 h-10 text-white animate-pulse" />
+                    <Sparkles className="h-5 w-5" strokeWidth={1.75} />
                   </div>
-                  <p className="text-slate-400 text-sm">向我提问关于</p>
-                  <p className="text-white text-sm font-bold mt-1">{config.description}</p>
-                  <p className="text-slate-500 text-xs mt-2">的任何问题</p>
+                  <p className="text-[12px] text-slate-400">向我提问关于</p>
+                  <p className="mt-0.5 text-[12px] font-medium text-white">
+                    {config.description}
+                  </p>
                 </div>
               ) : (
                 chatMessages.map((msg, idx) => (
                   <div
                     key={idx}
-                    className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                    className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                   >
                     <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg ${
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+                      style={
                         msg.role === 'agent'
-                          ? `bg-gradient-to-br ${config.gradient} border-2 border-white/20`
-                          : 'glass-effect border border-white/20'
-                      }`}
-                      style={msg.role === 'agent' ? { boxShadow: `0 4px 12px ${config.accentColor}50` } : {}}
+                          ? { background: `${config.accentColor}15`, color: config.accentColor }
+                          : { background: 'rgba(255,255,255,0.05)', color: 'rgb(148 163 184)' }
+                      }
                     >
                       {msg.role === 'agent' ? (
-                        <span className="text-lg">{config.avatar}</span>
+                        <span className="text-[14px]">{config.avatar}</span>
                       ) : (
-                        <span className="text-amber-400 text-xs font-bold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>U</span>
+                        <span className="text-[10px] font-medium">U</span>
                       )}
                     </div>
-                    <div className={`flex flex-col gap-1.5 max-w-[75%] ${msg.role === 'user' ? 'items-end' : ''}`}>
-                      <div
-                        className={`p-4 rounded-2xl text-sm leading-relaxed shadow-lg backdrop-blur-sm border ${
-                          msg.role === 'agent'
-                            ? 'glass-effect border-white/10 text-slate-200 rounded-tl-none'
-                            : `bg-gradient-to-br ${config.gradient} text-white rounded-tr-none border-white/20`
-                        }`}
-                        style={msg.role === 'user' ? { boxShadow: `0 8px 20px ${config.accentColor}40` } : {}}
-                      >
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-                      </div>
+                    <div
+                      className={`max-w-[78%] rounded-lg border px-3 py-2 text-[12px] leading-relaxed ${
+                        msg.role === 'agent'
+                          ? 'border-white/[0.06] bg-white/[0.03] text-slate-200'
+                          : 'border-white/[0.08] bg-white/[0.06] text-slate-100'
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
                     </div>
                   </div>
                 ))
@@ -316,65 +291,50 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
             </div>
 
             {/* 输入区域 */}
-            <div
-              className="p-5 border-t border-white/10"
-              style={{
-                background: `linear-gradient(to top, ${config.accentColor}10, transparent)`
-              }}
-            >
-              <div className="flex items-end gap-3">
+            <div className="border-t border-white/[0.06] bg-slate-950/40 p-3">
+              <div className="flex items-end gap-2">
                 <textarea
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyPress={(e) => {
+                  onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
                       handleSendMessage()
                     }
                   }}
-                  placeholder="输入你的问题..."
-                  className="flex-1 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:border-transparent shadow-inner placeholder-slate-500 text-slate-200 backdrop-blur-sm"
-                  style={{
-                    boxShadow: `inset 0 1px 2px rgba(0, 0, 0, 0.2), 0 0 0 1px ${config.accentColor}33`
-                  }}
+                  placeholder="输入你的问题…"
+                  className="flex-1 resize-none rounded-md border border-white/[0.08] bg-slate-950/50 px-3 py-2 text-[12px] text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-cyan-300/40 focus:ring-1 focus:ring-cyan-300/20"
                   rows={2}
                   disabled={isProcessing}
                 />
                 <button
+                  type="button"
                   onClick={handleSendMessage}
                   disabled={!inputMessage.trim() || isProcessing}
-                  className={`p-3.5 rounded-xl bg-gradient-to-br ${config.gradient} text-white disabled:opacity-50 shadow-lg transition-all hover:scale-110 border-2 border-white/20 disabled:scale-100`}
-                  style={{ boxShadow: `0 8px 24px ${config.accentColor}50` }}
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-slate-950 transition-colors disabled:opacity-40"
+                  style={{ background: config.accentColor }}
+                  aria-label="发送"
                 >
                   {isProcessing ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
                   ) : (
-                    <Send className="w-5 h-5" />
+                    <Send className="h-4 w-4" strokeWidth={2} />
                   )}
                 </button>
               </div>
             </div>
           </div>
         )}
-
-        {/* 底部装饰线 */}
-        <div
-          className="h-1"
-          style={{
-            background: `linear-gradient(90deg, transparent, ${config.accentColor}80, ${config.accentColor}60, transparent)`
-          }}
-        />
       </div>
 
       <Handle
         type="source"
         position={Position.Right}
         style={{
-          background: `linear-gradient(135deg, ${config.accentColor}, ${config.accentColor}dd)`,
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: `0 4px 12px ${config.accentColor}40`
+          background: config.accentColor,
+          border: '2px solid rgb(2 6 23)'
         }}
       />
     </>

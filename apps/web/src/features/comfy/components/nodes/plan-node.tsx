@@ -52,76 +52,71 @@ export const PlanNode = memo(function PlanNode({ id, data }: NodeProps) {
         type="target"
         position={Position.Left}
         style={{
-          background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: '0 4px 12px rgba(139, 92, 246, 0.4)'
+          background: '#a78bfa',
+          border: '2px solid rgb(2 6 23)'
         }}
       />
 
       <div
-        className="w-[360px] rounded-3xl overflow-hidden transition-all duration-500 relative group"
-        style={{
-          background: 'rgba(255, 255, 255, 0.04)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(139, 92, 246, 0.25)',
-          boxShadow: '0 16px 40px -12px rgba(99, 102, 241, 0.35)'
-        }}
+        className="group relative w-[340px] overflow-hidden rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16]"
+        style={{ boxShadow: 'inset 3px 0 0 0 #a78bfa' }}
       >
-        <div
-          className="relative px-5 py-4 border-b border-white/10"
-          style={{
-            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.05))'
-          }}
-        >
+        <div className="relative border-b border-white/[0.06] bg-violet-400/[0.06] px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-400 to-indigo-500 flex items-center justify-center shadow-lg border border-white/20">
-                <ClipboardCheck className="w-6 h-6 text-white" />
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-violet-400/15 text-violet-300">
+                <ClipboardCheck className="h-4 w-4" strokeWidth={1.75} />
               </div>
-              <div>
-                <h3 className="text-base font-black text-white title-font">{label}</h3>
-                <p className="text-xs text-slate-400 mt-1">语义确认 · 计划节点</p>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-[13px] font-semibold text-white">{label}</h3>
+                <p className="mt-0.5 text-[11px] text-slate-400">语义确认 · 计划节点</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className={`px-3 py-1 rounded-full text-[11px] font-bold border ${statusStyle.badge}`}>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] ${statusStyle.badge}`}
+              >
                 {statusStyle.label}
               </span>
               {canExpand && (
                 <button
                   onClick={() => setIsExpanded((prev) => !prev)}
-                  className="p-2 rounded-xl border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
                   title={isExpanded ? '收起' : '展开'}
                 >
-                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  {isExpanded ? (
+                    <ChevronUp className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  )}
                 </button>
               )}
             </div>
           </div>
         </div>
 
-        <div className="p-5 space-y-4">
-          <div className="prose prose-sm prose-invert max-w-none text-slate-200 bg-white/5 rounded-xl p-4 border border-white/10 shadow-inner">
+        <div className="space-y-3 p-4">
+          <div className="prose prose-sm prose-invert max-w-none rounded-md border border-white/[0.06] bg-slate-950/40 p-3 text-slate-200">
             <ReactMarkdown>
               {isExpanded ? fullContent : summary || '*暂无语义确认内容*'}
             </ReactMarkdown>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => updateStatus('confirmed')}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-400/30 hover:bg-emerald-500/25 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
             >
-              <CheckCircle2 className="w-4 h-4" />
+              <CheckCircle2 className="h-3 w-3" strokeWidth={1.75} />
               确认语义
             </button>
             <button
               onClick={() => updateStatus('needs-clarification')}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-rose-500/15 text-rose-300 border border-rose-400/30 hover:bg-rose-500/25 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] font-medium text-rose-300 transition-colors hover:bg-rose-500/20"
             >
-              <HelpCircle className="w-4 h-4" />
+              <HelpCircle className="h-3 w-3" strokeWidth={1.75} />
               需要补充
             </button>
           </div>
@@ -132,11 +127,10 @@ export const PlanNode = memo(function PlanNode({ id, data }: NodeProps) {
         type="source"
         position={Position.Right}
         style={{
-          background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: '0 4px 12px rgba(139, 92, 246, 0.4)'
+          background: '#a78bfa',
+          border: '2px solid rgb(2 6 23)'
         }}
       />
     </>

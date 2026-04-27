@@ -60,7 +60,6 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
   const [editedLabel, setEditedLabel] = useState(nodeData?.label || '')
   const [showMetadata, setShowMetadata] = useState(false)
   const [showDomainSelector, setShowDomainSelector] = useState(false)
-  const [isHovered, setIsHovered] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false) // 展开/折叠状态
 
   const domain = nodeData?.domain || CC_BMC_DOMAINS.VALUE_PROPOSITIONS
@@ -110,47 +109,31 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
         type="target"
         position={Position.Top}
         style={{
-          background: `linear-gradient(135deg, ${colors.main}, ${colors.accent})`,
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: `0 4px 12px ${colors.main}40`
+          background: colors.main,
+          border: '2px solid rgb(2 6 23)'
         }}
       />
 
       <div
-        className={`w-[360px] rounded-3xl overflow-hidden transition-all duration-500 hover:scale-105 relative group ${highlightClass}`}
+        className={`group relative w-[340px] overflow-hidden rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16] ${highlightClass}`}
         style={{
-          background: 'rgba(255, 255, 255, 0.03)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          boxShadow: isHovered
-            ? `0 20px 60px -15px ${colors.main}60, 0 0 0 1px ${colors.main}20, inset 0 1px 0 rgba(255,255,255,0.1)`
-            : `0 10px 30px -10px ${colors.main}30, inset 0 1px 0 rgba(255,255,255,0.05)`
+          // 1px left border in domain accent — semantic at-a-glance dimension cue
+          // without the 9-color gradient/glow extravagance.
+          boxShadow: `inset 3px 0 0 0 ${colors.main}`
         }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
       >
-        {/* 装饰性光晕效果 */}
-        <div
-          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl blur-2xl"
-          style={{
-            background: `radial-gradient(circle at 50% 0%, ${colors.main}20, transparent 70%)`
-          }}
-        />
-
         {/* 顶部栏 */}
         <div
-          className="relative px-5 py-4 border-b border-white/10"
-          style={{
-            background: `linear-gradient(135deg, ${colors.main}15, ${colors.accent}05)`
-          }}
+          className="relative border-b border-white/[0.06] px-4 py-3"
+          style={{ background: `${colors.main}08` }}
         >
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3 flex-1">
               <div
-                className={`flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br ${colors.gradient} shadow-lg text-2xl transform group-hover:rotate-12 transition-transform duration-300`}
-                style={{ boxShadow: `0 8px 24px ${colors.main}40` }}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-lg"
+                style={{ background: `${colors.main}15`, color: colors.main }}
               >
                 {colors.icon}
               </div>
@@ -165,7 +148,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                   autoFocus
                 />
               ) : (
-                <h3 className="text-base font-black text-white flex-1" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                <h3 className="flex-1 text-[13px] font-semibold text-white">
                   {nodeData?.label || '未命名'}
                 </h3>
               )}
@@ -176,30 +159,34 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                 <>
                   <button
                     onClick={() => setShowMetadata(!showMetadata)}
-                    className="p-2 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-amber-400 backdrop-blur-sm border border-transparent hover:border-white/20"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+                    aria-label="切换元信息"
                   >
-                    <Info className="w-4 h-4" />
+                    <Info className="h-3.5 w-3.5" strokeWidth={1.75} />
                   </button>
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="p-2 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-emerald-400 backdrop-blur-sm border border-transparent hover:border-white/20"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+                    aria-label="编辑卡片"
                   >
-                    <Edit3 className="w-4 h-4" />
+                    <Edit3 className="h-3.5 w-3.5" strokeWidth={1.75} />
                   </button>
                 </>
               ) : (
                 <>
                   <button
                     onClick={handleSave}
-                    className="p-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition-all text-emerald-400 border border-emerald-400/30 shadow-lg"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-300 transition-colors hover:bg-emerald-400/10"
+                    aria-label="保存"
                   >
-                    <Check className="w-4 h-4" />
+                    <Check className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
                   <button
                     onClick={handleCancel}
-                    className="p-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 transition-all text-pink-400 border border-pink-400/30 shadow-lg"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-rose-300 transition-colors hover:bg-rose-400/10"
+                    aria-label="取消"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
                 </>
               )}
@@ -210,16 +197,15 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
           <div className="relative">
             <button
               onClick={() => setShowDomainSelector(!showDomainSelector)}
-              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all backdrop-blur-sm border`}
+              className="flex w-full items-center justify-between rounded-md border px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition-colors hover:bg-white/[0.04]"
               style={{
-                background: `linear-gradient(135deg, ${colors.main}20, ${colors.accent}10)`,
                 color: colors.main,
-                borderColor: `${colors.main}30`,
-                fontFamily: 'Outfit, sans-serif'
+                borderColor: `${colors.main}33`,
+                background: `${colors.main}10`
               }}
             >
-              <span className="uppercase">{domain}</span>
-              <ChevronDown className="w-4 h-4" />
+              <span>{domain}</span>
+              <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.75} />
             </button>
 
             {showDomainSelector && (
@@ -259,7 +245,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
         </div>
 
         {/* 内容区 */}
-        <div className="p-5 relative">
+        <div className="relative p-4">
           {isEditing ? (
             <textarea
               value={editedContent}
@@ -320,23 +306,17 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
               {hasExtendedContent && (
                 <button
                   onClick={() => setIsExpanded(!isExpanded)}
-                  className={`mt-3 flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all backdrop-blur-sm border hover:scale-105`}
-                  style={{
-                    background: `linear-gradient(135deg, ${colors.main}15, ${colors.accent}10)`,
-                    color: colors.main,
-                    borderColor: `${colors.main}30`,
-                    fontFamily: 'Outfit, sans-serif'
-                  }}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:border-white/[0.16] hover:text-white"
                 >
                   {isExpanded ? (
                     <>
-                      <Minimize2 className="w-4 h-4" />
-                      <span>收起详情</span>
+                      <Minimize2 className="h-3 w-3" strokeWidth={1.75} />
+                      收起详情
                     </>
                   ) : (
                     <>
-                      <Maximize2 className="w-4 h-4" />
-                      <span>展开详情</span>
+                      <Maximize2 className="h-3 w-3" strokeWidth={1.75} />
+                      展开详情
                     </>
                   )}
                 </button>
@@ -399,77 +379,45 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
         </div>
 
         {/* 底部署名栏 */}
-        <div
-          className="px-5 py-3 border-t border-white/10 flex items-center justify-between"
-          style={{
-            background: `linear-gradient(135deg, ${colors.main}08, ${colors.accent}05)`
-          }}
-        >
+        <div className="flex items-center justify-between border-t border-white/[0.06] bg-slate-950/30 px-4 py-2.5">
           {/* Agent 署名 */}
-          <div className="flex items-center gap-2">
-            <div
-              className="w-6 h-6 rounded-lg flex items-center justify-center text-xs"
-              style={{
-                background: `linear-gradient(135deg, ${colors.main}30, ${colors.accent}20)`,
-                boxShadow: `0 2px 8px ${colors.main}40`
-              }}
-            >
-              🤖
-            </div>
-            <span className="text-xs text-slate-400" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-              by{' '}
-              <span className="font-bold" style={{ color: colors.main }}>
-                {nodeData?.metadata?.agent_signature || 'AI Agent'}
-              </span>
+          <div className="flex min-w-0 items-center gap-2 text-[11px] text-slate-400">
+            <span className="text-slate-500">by</span>
+            <span className="font-medium" style={{ color: colors.main }}>
+              {nodeData?.metadata?.agent_signature || 'AI Agent'}
             </span>
             {nodeData?.metadata?.confidence && (
-              <div
-                className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider"
+              <span
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em]"
                 style={{
-                  background: `${colors.main}20`,
-                  color: colors.main,
-                  border: `1px solid ${colors.main}30`
+                  background: `${colors.main}15`,
+                  color: colors.main
                 }}
               >
                 {nodeData.metadata.confidence}
-              </div>
+              </span>
             )}
           </div>
 
           {/* 查看详情按钮 */}
           <button
             onClick={() => openDetailPanel(id)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105 backdrop-blur-sm border"
-            style={{
-              background: `linear-gradient(135deg, ${colors.main}15, ${colors.accent}10)`,
-              color: colors.main,
-              borderColor: `${colors.main}30`,
-              fontFamily: 'Outfit, sans-serif'
-            }}
+            className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] px-2 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:border-white/[0.16] hover:text-white"
           >
-            <Maximize2 className="w-3.5 h-3.5" />
-            <span>详情</span>
+            <Maximize2 className="h-3 w-3" strokeWidth={1.75} />
+            详情
           </button>
         </div>
-
-        {/* 底部装饰线 */}
-        <div
-          className="h-1"
-          style={{
-            background: `linear-gradient(90deg, transparent, ${colors.main}60, ${colors.accent}60, transparent)`
-          }}
-        />
       </div>
 
       <Handle
         type="source"
         position={Position.Bottom}
         style={{
-          background: `linear-gradient(135deg, ${colors.main}, ${colors.accent})`,
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: `0 4px 12px ${colors.main}40`
+          background: colors.main,
+          border: '2px solid rgb(2 6 23)'
         }}
       />
     </>

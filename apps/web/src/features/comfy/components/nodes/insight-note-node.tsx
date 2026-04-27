@@ -15,7 +15,6 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(nodeData?.content || '')
   const [editedLabel, setEditedLabel] = useState(nodeData?.label || '')
-  const [isHovered, setIsHovered] = useState(false)
 
   const handleSave = useCallback(() => {
     updateMacraNode(id, {
@@ -37,49 +36,23 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
         type="target"
         position={Position.Left}
         style={{
-          background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.4)'
+          background: '#60a5fa',
+          border: '2px solid rgb(2 6 23)'
         }}
       />
 
       <div
-        className="w-[400px] rounded-3xl overflow-hidden transition-all duration-500 hover:scale-105 relative group"
-        style={{
-          background: 'rgba(255, 255, 255, 0.03)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          boxShadow: isHovered
-            ? '0 20px 60px -15px rgba(59, 130, 246, 0.6), 0 0 0 1px rgba(59, 130, 246, 0.2), inset 0 1px 0 rgba(255,255,255,0.1)'
-            : '0 10px 30px -10px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255,255,255,0.05)'
-        }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        className="group relative w-[360px] overflow-hidden rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16]"
+        style={{ boxShadow: 'inset 3px 0 0 0 #60a5fa' }}
       >
-        {/* 装饰性光晕效果 */}
-        <div
-          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl blur-2xl"
-          style={{
-            background: 'radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.2), transparent 70%)'
-          }}
-        />
-
         {/* 顶部栏 */}
-        <div
-          className="relative px-6 py-5 border-b border-white/10"
-          style={{
-            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.05))'
-          }}
-        >
+        <div className="relative border-b border-white/[0.06] bg-blue-400/[0.06] px-4 py-3">
           <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3 flex-1">
-              <div
-                className="flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-400 to-blue-500 shadow-lg text-2xl transform group-hover:rotate-12 transition-transform duration-300 border-2 border-white/20"
-                style={{ boxShadow: '0 8px 24px rgba(59, 130, 246, 0.4)' }}
-              >
-                <Lightbulb className="w-7 h-7 text-white" />
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-400/15 text-blue-300">
+                <Lightbulb className="h-4 w-4" strokeWidth={1.75} />
               </div>
 
               {isEditing ? (
@@ -87,21 +60,20 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
                   type="text"
                   value={editedLabel}
                   onChange={(e) => setEditedLabel(e.target.value)}
-                  className="flex-1 text-sm font-bold bg-white/10 rounded-xl px-3 py-2 border border-white/20 focus:outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/30 shadow-inner text-white placeholder-slate-400"
-                  style={{ fontFamily: 'Outfit, sans-serif' }}
+                  className="flex-1 rounded-md border border-white/[0.08] bg-slate-950/50 px-2 py-1.5 text-[13px] font-medium text-white outline-none transition-colors placeholder:text-slate-500 focus:border-cyan-300/40 focus:ring-1 focus:ring-cyan-300/20"
                   placeholder="洞察标题"
                   autoFocus
                 />
               ) : (
-                <div className="flex-1">
-                  <h3 className="text-base font-black text-white flex items-center gap-2" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                <div className="min-w-0 flex-1">
+                  <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-white">
                     {nodeData?.label || '洞察便签'}
                     {nodeData?.metadata?.agent_signature && (
-                      <Sparkles className="w-4 h-4 text-blue-400 animate-pulse" />
+                      <Sparkles className="h-3 w-3 text-blue-300" strokeWidth={1.75} />
                     )}
                   </h3>
                   {nodeData?.metadata?.agent_signature && (
-                    <p className="text-xs text-blue-300 mt-1 font-medium" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                    <p className="mt-0.5 text-[11px] text-blue-300/80">
                       来自 {nodeData.metadata.agent_signature}
                     </p>
                   )}
@@ -109,30 +81,30 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
               )}
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-1">
               {!isEditing ? (
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="p-2 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-blue-400 backdrop-blur-sm border border-transparent hover:border-white/20"
-                  title="编辑"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+                  aria-label="编辑"
                 >
-                  <Edit3 className="w-4 h-4" />
+                  <Edit3 className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </button>
               ) : (
                 <>
                   <button
                     onClick={handleSave}
-                    className="p-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 transition-all text-emerald-400 border border-emerald-400/30 shadow-lg"
-                    title="保存"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-300 transition-colors hover:bg-emerald-400/10"
+                    aria-label="保存"
                   >
-                    <Check className="w-4 h-4" />
+                    <Check className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
                   <button
                     onClick={handleCancel}
-                    className="p-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 transition-all text-pink-400 border border-pink-400/30 shadow-lg"
-                    title="取消"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-rose-300 transition-colors hover:bg-rose-400/10"
+                    aria-label="取消"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
                 </>
               )}
@@ -141,16 +113,16 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
         </div>
 
         {/* 内容区 */}
-        <div className="p-6 relative space-y-4">
+        <div className="relative space-y-3 p-4">
           {isEditing ? (
             <textarea
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
               placeholder="输入洞察内容（支持 Markdown）..."
-              className="w-full h-48 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50 shadow-inner placeholder-slate-500 text-slate-200 backdrop-blur-sm"
+              className="block h-40 w-full resize-none rounded-md border border-white/[0.08] bg-slate-950/50 px-3 py-2 text-[12px] text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-cyan-300/40 focus:ring-1 focus:ring-cyan-300/20"
             />
           ) : (
-            <div className="prose prose-sm prose-invert max-w-none text-slate-300 min-h-[120px] max-h-72 overflow-y-auto leading-relaxed bg-white/5 rounded-xl p-4 border border-white/10 shadow-inner">
+            <div className="prose prose-sm prose-invert max-h-64 min-h-[100px] max-w-none overflow-y-auto rounded-md border border-white/[0.06] bg-slate-950/40 p-3 text-slate-200">
               <ReactMarkdown>
                 {nodeData?.content || '*这里将展示AI生成的洞察和建议*'}
               </ReactMarkdown>
@@ -159,30 +131,22 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
 
           {/* 置信度指示器 */}
           {nodeData?.metadata?.confidence && (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-slate-400 font-semibold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                置信度:
-              </span>
-              <div className="flex-1 h-2.5 bg-white/5 rounded-full overflow-hidden shadow-inner border border-white/10">
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-slate-400">置信度</span>
+              <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/[0.04]">
                 <div
-                  className="h-full transition-all rounded-full"
+                  className="h-full bg-blue-400 transition-all"
                   style={{
-                    width: nodeData.metadata.confidence === 'high' ? '100%' :
-                           nodeData.metadata.confidence === 'medium' ? '66%' : '33%',
-                    background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
-                    boxShadow: '0 0 12px rgba(59, 130, 246, 0.6)'
+                    width:
+                      nodeData.metadata.confidence === 'high'
+                        ? '100%'
+                        : nodeData.metadata.confidence === 'medium'
+                          ? '66%'
+                          : '33%'
                   }}
                 />
               </div>
-              <span
-                className="px-3 py-1 rounded-lg text-xs font-bold border shadow-sm"
-                style={{
-                  background: 'rgba(59, 130, 246, 0.2)',
-                  color: '#3b82f6',
-                  borderColor: 'rgba(59, 130, 246, 0.3)',
-                  fontFamily: 'JetBrains Mono, monospace'
-                }}
-              >
+              <span className="rounded bg-blue-400/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-blue-300">
                 {nodeData.metadata.confidence}
               </span>
             </div>
@@ -190,33 +154,19 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
 
           {/* 数据来源 */}
           {nodeData?.metadata?.source && (
-            <div
-              className="rounded-xl px-4 py-3 border"
-              style={{
-                background: 'rgba(59, 130, 246, 0.1)',
-                borderColor: 'rgba(59, 130, 246, 0.2)'
-              }}
-            >
-              <p className="text-xs text-slate-300" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                <span className="font-semibold text-blue-400">来源: </span>
-                {nodeData.metadata.source}
-              </p>
+            <div className="rounded-md border border-white/[0.06] bg-blue-400/[0.06] px-3 py-2 text-[11px] text-slate-300">
+              <span className="font-medium text-blue-300">来源 </span>
+              {nodeData.metadata.source}
             </div>
           )}
 
           {/* 标签 */}
           {nodeData?.metadata?.tags && nodeData.metadata.tags.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {nodeData.metadata.tags.map((tag, idx) => (
                 <span
                   key={idx}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border backdrop-blur-sm"
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    borderColor: 'rgba(59, 130, 246, 0.3)',
-                    color: '#93c5fd',
-                    fontFamily: 'JetBrains Mono, monospace'
-                  }}
+                  className="rounded border border-blue-400/25 bg-blue-400/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-blue-200"
                 >
                   {tag}
                 </span>
@@ -224,25 +174,16 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
             </div>
           )}
         </div>
-
-        {/* 底部装饰线 */}
-        <div
-          className="h-1"
-          style={{
-            background: 'linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.8), rgba(37, 99, 235, 0.6), transparent)'
-          }}
-        />
       </div>
 
       <Handle
         type="source"
         position={Position.Right}
         style={{
-          background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.4)'
+          background: '#60a5fa',
+          border: '2px solid rgb(2 6 23)'
         }}
       />
     </>

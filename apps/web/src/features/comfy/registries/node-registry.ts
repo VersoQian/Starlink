@@ -166,6 +166,9 @@ export function getNodePaletteItems() {
       label: descriptor.label,
       icon: descriptor.icon ?? '•',
       gradient: descriptor.palette?.gradient ?? 'from-slate-400 to-slate-500',
-      description: descriptor.palette?.description ?? ''
+      description: descriptor.palette?.description ?? '',
+      // Expose category so the panel can pick a hue token from
+      // canvas-design-tokens.NODE_HUE without re-deriving it from gradient.
+      category: descriptor.palette?.category ?? 'misc'
     }))
 }

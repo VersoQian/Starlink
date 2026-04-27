@@ -1,5 +1,6 @@
-import { FileText, PanelsTopLeft, LayoutGrid, Sparkles, Zap } from 'lucide-react'
-import { WORKFLOW_STAGE_LABELS, WORKFLOW_STAGE_ORDER, type WorkflowStage } from '../store/workflow-stage'
+import { Download, LayoutGrid, PanelsTopLeft, Sparkles, Zap } from 'lucide-react'
+import { WORKFLOW_STAGE_LABELS, type WorkflowStage } from '../store/workflow-stage'
+import { TOKENS } from './canvas-design-tokens'
 
 type CanvasHeaderProps = {
   isAnimating: boolean
@@ -9,6 +10,20 @@ type CanvasHeaderProps = {
   workflowStage: WorkflowStage
 }
 
+/**
+ * Canvas header (refresh-2026-04).
+ *
+ * Refreshed surfaces vs. previous version:
+ *  - dropped amber accent + cyan accent dual-gradient → single cyan-300 accent
+ *  - 12 px logo (was 48 px), monochrome icon (was gradient block)
+ *  - workflow stage rail visible at md+ (was hidden until xl)
+ *  - 1 px ring instead of glow shadow on active state
+ *  - export button is now ghost-style; only "快速入门" remains as the CTA
+ *
+ * Cross-cutting tokens come from `canvas-design-tokens.ts` so the rest of the
+ * canvas can be migrated component-by-component without breaking visual
+ * consistency mid-rollout.
+ */
 export function CanvasHeader({
   isAnimating,
   onOpenTutorial,
@@ -18,73 +33,73 @@ export function CanvasHeader({
 }: CanvasHeaderProps) {
   return (
     <header
-      className={`flex items-center justify-between px-8 py-4 glass-effect border-b border-white/10 z-20 ${
+      className={`relative z-20 flex items-center justify-between px-6 py-3 ${TOKENS.surface.bar} ${
         isAnimating ? 'opacity-0' : 'animate-fade-in-up'
       }`}
       style={{ animationDelay: '0.1s' }}
     >
-      <div className="flex items-center gap-5">
-        <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 shadow-lg shadow-amber-500/30">
-          <Sparkles className="w-6 h-6 text-white" />
+      {/* Brand cluster */}
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03]">
+          <Sparkles className="h-4 w-4 text-cyan-300" strokeWidth={1.75} />
         </div>
-        <div>
-          <h1 className="text-xl font-black text-white title-font tracking-tight">智绘·无限画布</h1>
-          <p className="text-xs text-slate-400 mono-font mt-0.5">MACRA Business Intelligence</p>
+        <div className="flex flex-col leading-tight">
+          <h1 className={TOKENS.text.h1}>智绘 · 无限画布</h1>
+          <p className={TOKENS.text.kicker}>MACRA Business Intelligence</p>
         </div>
       </div>
 
-      <div className="flex gap-4 items-center">
-        <div className="hidden items-center gap-2 rounded-2xl border border-white/15 bg-slate-950/40 px-3 py-2 shadow-xl shadow-slate-950/30 xl:flex">
-          {WORKFLOW_STAGE_ORDER.map((stage) => (
-            <span
-              key={stage}
-              className={`rounded-xl px-2.5 py-1 text-[11px] font-bold transition ${
-                workflowStage === stage
-                  ? 'bg-gradient-to-r from-cyan-400 to-sky-500 text-white shadow-lg shadow-cyan-500/20'
-                  : 'text-slate-500'
-              }`}
-            >
-              {WORKFLOW_STAGE_LABELS[stage]}
-            </span>
-          ))}
+      {/* Right cluster */}
+      <div className="flex items-center gap-2">
+        {/* Compact stage badge — single source of truth for the workflow stage.
+            Replaced the 5-pill rail to reduce visual noise; the user already
+            sees per-stage progress in the bottom command tray. */}
+        <div className="flex items-center gap-2 whitespace-nowrap rounded-lg border border-white/[0.06] bg-slate-950/50 px-2.5 py-1.5">
+          <span className={TOKENS.text.kickerAccent}>STAGE</span>
+          <span className="text-[11px] font-medium text-white">
+            {WORKFLOW_STAGE_LABELS[workflowStage]}
+          </span>
         </div>
-        <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-center">
-          <div className="text-[10px] uppercase tracking-[0.24em] text-cyan-200">Workflow</div>
-          <div className="mt-1 text-xs font-bold text-white">{WORKFLOW_STAGE_LABELS[workflowStage]}</div>
-        </div>
-        <div className="flex items-center gap-1 rounded-2xl border border-white/15 bg-slate-950/40 p-1 shadow-xl shadow-slate-950/30">
+
+        {/* View-mode segmented control */}
+        <div
+          className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-slate-950/50 p-1"
+          role="group"
+          aria-label="Canvas view"
+        >
           <button
+            type="button"
             onClick={() => onViewModeChange?.('freeform')}
-            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${
-              viewMode === 'freeform'
-                ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-white shadow-lg shadow-amber-500/30'
-                : 'text-slate-400 hover:bg-white/10 hover:text-white'
-            }`}
+            className={
+              viewMode === 'freeform' ? TOKENS.button.segmentActive : TOKENS.button.segmentIdle
+            }
+            aria-pressed={viewMode === 'freeform'}
           >
-            <PanelsTopLeft className="w-4 h-4" />
+            <PanelsTopLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
             自由画布
           </button>
           <button
+            type="button"
             onClick={() => onViewModeChange?.('bmc')}
-            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${
-              viewMode === 'bmc'
-                ? 'bg-gradient-to-r from-cyan-400 to-sky-500 text-white shadow-lg shadow-cyan-500/30'
-                : 'text-slate-400 hover:bg-white/10 hover:text-white'
-            }`}
+            className={
+              viewMode === 'bmc' ? TOKENS.button.segmentActive : TOKENS.button.segmentIdle
+            }
+            aria-pressed={viewMode === 'bmc'}
           >
-            <LayoutGrid className="w-4 h-4" />
+            <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.75} />
             BMC 九宫格
           </button>
         </div>
-        <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl glass-effect border border-white/20 hover:border-amber-400/50 hover:bg-white/10 transition-all text-sm font-semibold text-slate-200 hover:text-white">
-          <FileText className="w-4 h-4" />
+
+        {/* Export — secondary action (ghost) */}
+        <button type="button" className={TOKENS.button.ghost}>
+          <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
           导出
         </button>
-        <button
-          onClick={onOpenTutorial}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-white text-sm font-bold transition-all shadow-lg shadow-amber-500/30 hover:shadow-xl hover:shadow-amber-500/40 hover:scale-105"
-        >
-          <Zap className="w-4 h-4" />
+
+        {/* Primary CTA */}
+        <button type="button" onClick={onOpenTutorial} className={TOKENS.button.primary}>
+          <Zap className="h-3.5 w-3.5" strokeWidth={2} />
           快速入门
         </button>
       </div>

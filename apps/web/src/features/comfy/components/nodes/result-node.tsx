@@ -18,12 +18,12 @@ export const ResultNode = memo(function ResultNode({ id }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="w-3 h-3 bg-blue-500 border-2 border-zinc-900"
+        className="h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-emerald-400"
       />
-      <Card className="w-96 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node">
+      <Card className="w-96 rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16] canvas-panel-node">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2 text-zinc-100">
-            <FileText className="w-4 h-4 text-green-400" />
+          <CardTitle className="flex items-center gap-2 text-[13px] font-semibold text-white">
+            <FileText className="h-4 w-4 text-emerald-300" strokeWidth={1.75} />
             Result Node
           </CardTitle>
         </CardHeader>

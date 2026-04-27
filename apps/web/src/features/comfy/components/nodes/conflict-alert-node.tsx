@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useState } from 'react'
+import { memo } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
@@ -41,7 +41,6 @@ const CONFLICT_TYPE_LABELS: Record<NonNullable<MacraNodeData['conflictType']>, s
 export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: NodeProps) {
   const macraNode = useComfyStore((state) => state.macraNodes.get(id))
   const nodeData = macraNode || (data as MacraNodeData)
-  const [isHovered, setIsHovered] = useState(false)
 
   const severity = nodeData?.severity || 'medium'
   const config = SEVERITY_CONFIG[severity]
@@ -55,110 +54,74 @@ export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: N
         type="target"
         position={Position.Top}
         style={{
-          background: `linear-gradient(135deg, ${config.accent}, ${config.accent}cc)`,
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: `0 4px 12px ${config.glow}`
+          background: config.accent,
+          border: '2px solid rgb(2 6 23)'
         }}
       />
 
       <div
-        className="w-[340px] rounded-3xl overflow-hidden transition-all duration-500 relative group"
-        style={{
-          background: 'rgba(255, 255, 255, 0.04)',
-          backdropFilter: 'blur(16px)',
-          border: `1px solid ${config.accent}35`,
-          boxShadow: isHovered
-            ? `0 20px 60px -15px ${config.glow}, 0 0 0 1px ${config.accent}30, inset 0 1px 0 rgba(255,255,255,0.1)`
-            : `0 10px 30px -10px ${config.glow}, inset 0 1px 0 rgba(255,255,255,0.05)`
-        }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        className="group relative w-[320px] overflow-hidden rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16]"
+        style={{ boxShadow: `inset 3px 0 0 0 ${config.accent}` }}
       >
         <div
-          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl blur-2xl"
-          style={{
-            background: `radial-gradient(circle at 50% 0%, ${config.accent}25, transparent 70%)`
-          }}
-        />
-
-        <div
-          className="relative px-5 py-4 border-b border-white/10"
-          style={{
-            background: `linear-gradient(135deg, ${config.accent}20, transparent)`
-          }}
+          className="relative border-b border-white/[0.06] px-4 py-3"
+          style={{ background: `${config.accent}10` }}
         >
           <div className="flex items-start gap-3">
             <div
-              className={`flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br ${config.gradient} shadow-lg border-2 border-white/20`}
-              style={{ boxShadow: `0 10px 30px ${config.glow}` }}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md"
+              style={{ background: `${config.accent}18`, color: config.accent }}
             >
-              <Icon className="w-6 h-6 text-white" />
+              <Icon className="h-4 w-4" strokeWidth={1.75} />
             </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-black text-white title-font">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-[13px] font-semibold text-white">
                   {nodeData?.label || '冲突警示'}
                 </h3>
                 <span
-                  className="px-3 py-1 rounded-full text-[11px] font-bold border"
-                  style={{
-                    background: `${config.accent}20`,
-                    color: config.accent,
-                    borderColor: `${config.accent}40`
-                  }}
+                  className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em]"
+                  style={{ background: `${config.accent}18`, color: config.accent }}
                 >
                   {config.label}
                 </span>
               </div>
               {conflictLabel && (
-                <p className="text-xs text-slate-400 mt-1 mono-font">{conflictLabel}</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">{conflictLabel}</p>
               )}
             </div>
           </div>
         </div>
 
-        <div className="p-5 space-y-4">
-          <div className="prose prose-sm prose-invert max-w-none text-slate-200 bg-white/5 rounded-xl p-4 border border-white/10 shadow-inner max-h-56 overflow-y-auto">
+        <div className="space-y-3 p-4">
+          <div className="prose prose-sm prose-invert max-h-52 max-w-none overflow-y-auto rounded-md border border-white/[0.06] bg-slate-950/40 p-3 text-slate-200">
             <ReactMarkdown>{nodeData?.content || '*暂无冲突详情*'}</ReactMarkdown>
           </div>
 
           {nodeData?.metadata?.agent_signature && (
-            <div className="flex items-center gap-2 text-xs text-slate-300">
-              <span className="mono-font text-slate-400">检测者</span>
+            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <span>检测者</span>
               <span
-                className="px-3 py-1 rounded-lg text-[11px] font-bold border"
-                style={{
-                  background: `${config.accent}20`,
-                  color: config.accent,
-                  borderColor: `${config.accent}30`,
-                  fontFamily: 'JetBrains Mono, monospace'
-                }}
+                className="rounded px-1.5 py-0.5 text-[11px] font-medium"
+                style={{ background: `${config.accent}15`, color: config.accent }}
               >
                 {nodeData.metadata.agent_signature}
               </span>
             </div>
           )}
         </div>
-
-        <div
-          className="h-1"
-          style={{
-            background: `linear-gradient(90deg, transparent, ${config.accent}80, ${config.accent}60, transparent)`
-          }}
-        />
       </div>
 
       <Handle
         type="source"
         position={Position.Bottom}
         style={{
-          background: `linear-gradient(135deg, ${config.accent}, ${config.accent}cc)`,
           width: 10,
           height: 10,
-          border: '2px solid rgba(255,255,255,0.3)',
-          boxShadow: `0 4px 12px ${config.glow}`
+          background: config.accent,
+          border: '2px solid rgb(2 6 23)'
         }}
       />
     </>

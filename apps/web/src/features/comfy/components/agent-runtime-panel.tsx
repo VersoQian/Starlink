@@ -9,6 +9,20 @@ import {
   useConversationRuntime
 } from '@/features/workspace/hooks'
 import { useComfyStore } from '../store'
+import { TOKENS } from './canvas-design-tokens'
+
+/**
+ * Agent runtime panel (refresh-2026-04).
+ *
+ * Refresh notes:
+ *  - Cyan-blue gradient header chip → flat cyan-tinted square chip.
+ *  - 4-up stat grid uses uniform neutral surfaces with kicker-style labels.
+ *  - Session-scope segmented control now matches the canvas-header pattern.
+ *  - Timeline rail thinner (1 px white/10), step number is a 20-px tinted
+ *    circle (was 24 px solid pill).
+ *  - Per-agent card densified — grid moved to compact 2-up info chips.
+ *  - Data flow / memo logic untouched: this is a pure visual swap.
+ */
 
 type AgentRuntimePanelProps = {
   workspaceId: string
@@ -206,64 +220,67 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
       : '等待运行事件'
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-xl backdrop-blur">
+    <section className={`${TOKENS.surface.panel} p-3`}>
       <button
         type="button"
         onClick={() => setCollapsed((current) => !current)}
         className="flex w-full items-center justify-between gap-3 text-left"
       >
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-500 shadow-lg shadow-cyan-500/30">
-            <Bot className="h-5 w-5 text-white" />
-          </div>
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-cyan-400/10 text-cyan-300">
+            <Bot className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </span>
           <div>
-            <h4 className="text-sm font-bold text-white title-font">Agent Runtime</h4>
-            <p className="mt-0.5 text-[11px] text-slate-400">{runtimePhaseText}</p>
+            <p className={TOKENS.text.kicker}>Runtime</p>
+            <h4 className={TOKENS.text.h2}>Agent Runtime</h4>
+            <p className={`mt-0.5 ${TOKENS.text.meta}`}>{runtimePhaseText}</p>
           </div>
         </div>
         {collapsed ? (
-          <ChevronDown className="h-4 w-4 text-slate-400" />
+          <ChevronDown className="h-3.5 w-3.5 text-slate-400" strokeWidth={1.75} />
         ) : (
-          <ChevronUp className="h-4 w-4 text-slate-400" />
+          <ChevronUp className="h-3.5 w-3.5 text-slate-400" strokeWidth={1.75} />
         )}
       </button>
 
       {!collapsed && (
         <>
-          <div className="mt-4 grid grid-cols-4 gap-2 text-xs">
-            <div className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500">Agents</p>
-              <p className="mt-1 font-semibold text-white">{snapshot.agents.length}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500">Links</p>
-              <p className="mt-1 font-semibold text-white">{filteredLinkCount}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500">Turns</p>
-              <p className="mt-1 font-semibold text-white">{filteredTurns.length}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500">Round</p>
-              <p className="mt-1 font-semibold text-white">{roundNumber}/{maxRounds}</p>
-            </div>
+          {/* 4-up stats */}
+          <div className="mt-3 grid grid-cols-4 gap-1.5">
+            {[
+              { label: 'Agents', value: snapshot.agents.length },
+              { label: 'Links', value: filteredLinkCount },
+              { label: 'Turns', value: filteredTurns.length },
+              { label: 'Round', value: `${roundNumber}/${maxRounds}` }
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className={`${TOKENS.surface.card} px-2 py-1.5`}
+              >
+                <p className={TOKENS.text.kicker}>{stat.label}</p>
+                <p className="mt-0.5 text-[13px] font-semibold tabular-nums text-white">
+                  {stat.value}
+                </p>
+              </div>
+            ))}
           </div>
 
-          <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-slate-950/20 p-3">
+          {/* Session scope */}
+          <div className={`mt-3 ${TOKENS.surface.card} space-y-2 p-2.5`}>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Session Scope</p>
-              <div className="inline-flex rounded-full border border-white/10 bg-white/5 p-1 text-[11px]">
+              <p className={TOKENS.text.kicker}>Session Scope</p>
+              <div className="inline-flex items-center gap-0.5 rounded-md border border-white/[0.06] bg-slate-950/50 p-0.5">
                 <button
                   type="button"
                   onClick={() => setMode('current')}
-                  className={`rounded-full px-2.5 py-1 transition ${mode === 'current' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-white'}`}
+                  className={mode === 'current' ? TOKENS.button.segmentActive : TOKENS.button.segmentIdle}
                 >
                   当前会话
                 </button>
                 <button
                   type="button"
                   onClick={() => setMode('all')}
-                  className={`rounded-full px-2.5 py-1 transition ${mode === 'all' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-white'}`}
+                  className={mode === 'all' ? TOKENS.button.segmentActive : TOKENS.button.segmentIdle}
                 >
                   全部历史
                 </button>
@@ -271,7 +288,7 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
             </div>
 
             {mode === 'current' && conversations.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1">
                 {conversations.slice(0, 4).map((conversation) => {
                   const isActive = activeConversationId === conversation.id
                   return (
@@ -279,20 +296,22 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
                       key={conversation.id}
                       type="button"
                       onClick={() => setSelectedConversationId(conversation.id)}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
                         isActive
-                          ? 'border-cyan-400/50 bg-cyan-400/15 text-white'
-                          : 'border-white/10 bg-white/5 text-slate-400 hover:text-white'
+                          ? 'bg-cyan-400/10 text-cyan-300 ring-1 ring-cyan-300/30'
+                          : 'border border-white/[0.06] text-slate-400 hover:border-white/[0.14] hover:text-slate-200'
                       }`}
                     >
-                      {conversation.id.slice(0, 8)} · {conversation.latestPhase ?? 'pending'}
+                      <span className="tabular-nums">{conversation.id.slice(0, 8)}</span>
+                      <span className="text-slate-500">·</span>
+                      <span>{conversation.latestPhase ?? 'pending'}</span>
                     </button>
                   )
                 })}
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
+            <div className={`flex items-center justify-between gap-3 ${TOKENS.text.meta}`}>
               <span>
                 {mode === 'all'
                   ? `覆盖 ${conversations.length} 次会话`
@@ -301,91 +320,110 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
                     : '尚无会话记录'}
               </span>
               {filteredDecision && (
-                <span className="max-w-[14rem] truncate text-slate-300">决策: {filteredDecision}</span>
+                <span className="max-w-[14rem] truncate text-slate-300">
+                  决策: {filteredDecision}
+                </span>
               )}
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/20 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Timeline</p>
-              <span className="text-[11px] text-slate-500">{timelineItems.length} steps</span>
+          {/* Timeline */}
+          <div className={`mt-3 ${TOKENS.surface.card} p-2.5`}>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className={TOKENS.text.kicker}>Timeline</p>
+              <span className="text-[10px] text-slate-500 tabular-nums">
+                {timelineItems.length} steps
+              </span>
             </div>
 
-            <div className="mt-3 space-y-2">
+            <div className="space-y-1.5">
               {timelineItems.length > 0 ? (
-                timelineItems.slice(-6).map((item, index) => (
-                  <div key={item.key} className="flex gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                    <div className="flex flex-col items-center">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400/15 text-[11px] font-semibold text-cyan-200">
-                        {index + 1}
-                      </span>
-                      {index < timelineItems.slice(-6).length - 1 && (
-                        <span className="mt-1 h-5 w-px bg-white/10" />
-                      )}
+                timelineItems.slice(-6).map((item, index) => {
+                  const slice = timelineItems.slice(-6)
+                  return (
+                    <div
+                      key={item.key}
+                      className="flex gap-2.5 rounded-md border border-white/[0.06] bg-slate-950/40 px-2.5 py-1.5"
+                    >
+                      <div className="flex flex-col items-center">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-400/10 text-[10px] font-semibold text-cyan-300 tabular-nums">
+                          {index + 1}
+                        </span>
+                        {index < slice.length - 1 && (
+                          <span className="mt-0.5 h-3 w-px bg-white/10" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[12px] text-slate-200">{item.label}</p>
+                        <p className={`mt-0.5 truncate ${TOKENS.text.meta}`}>{item.detail}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-white">{item.label}</p>
-                      <p className="mt-1 truncate text-[11px] text-slate-400">{item.detail}</p>
-                    </div>
-                  </div>
-                ))
+                  )
+                })
               ) : (
-                <div className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-[11px] text-slate-500">
+                <div className="rounded-md border border-dashed border-white/[0.08] px-2.5 py-3 text-[11px] text-slate-500">
                   当前范围内还没有可回放的运行步骤。
                 </div>
               )}
             </div>
           </div>
 
-          <div className="mt-4 space-y-3">
+          {/* Per-agent cards */}
+          <div className="mt-3 space-y-2">
             {sessionAgentViews.map((agent) => {
               const liveTurns = agent.sessionContributionCount
               return (
-                <div key={agent.id} className="rounded-2xl border border-white/10 bg-slate-950/20 p-3">
+                <div key={agent.id} className={`${TOKENS.surface.card} p-2.5`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-white">{agent.name}</p>
-                      <p className="mt-1 text-[11px] text-slate-400">{agent.role}</p>
+                    <div className="min-w-0">
+                      <p className={TOKENS.text.h2}>{agent.name}</p>
+                      <p className={`mt-0.5 ${TOKENS.text.meta}`}>{agent.role}</p>
                     </div>
                     <span
-                      className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
+                      className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold tabular-nums text-white"
                       style={{ backgroundColor: agent.accent }}
                     >
                       {agent.sessionContributionCount} 条
                     </span>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-300">
-                    <span className="rounded-full border border-white/10 px-2 py-1">
-                      主域 {agent.primaryDomain ?? '未标注'}
-                    </span>
-                    <span className="rounded-full border border-white/10 px-2 py-1">
-                      实时回合 {liveTurns}
-                    </span>
-                    <span className="rounded-full border border-white/10 px-2 py-1">
-                      协作 {agent.sessionRelatedAgents.length}
-                    </span>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {[
+                      { label: '主域', value: agent.primaryDomain ?? '未标注' },
+                      { label: '实时回合', value: liveTurns },
+                      { label: '协作', value: agent.sessionRelatedAgents.length }
+                    ].map((chip) => (
+                      <span
+                        key={chip.label}
+                        className="inline-flex items-center gap-1 rounded-md border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-slate-400"
+                      >
+                        <span className="text-slate-500">{chip.label}</span>
+                        <span className="font-medium tabular-nums text-slate-200">{chip.value}</span>
+                      </span>
+                    ))}
                   </div>
 
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-                    <div className="rounded-xl border border-white/10 px-3 py-2">
-                      <div className="flex items-center gap-1.5">
-                        <Radar className="h-3.5 w-3.5 text-cyan-300" />
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    <div className="rounded-md border border-white/[0.06] px-2 py-1.5">
+                      <div className="flex items-center gap-1 text-[10px] text-slate-500">
+                        <Radar className="h-3 w-3 text-cyan-300" strokeWidth={1.75} />
                         <span>阶段分布</span>
                       </div>
-                      <p className="mt-1 text-slate-300">
+                      <p className="mt-0.5 text-[11px] text-slate-300 tabular-nums">
                         规 {agent.sessionStageCounts.planning} · 执 {agent.sessionStageCounts.execution} · 质 {agent.sessionStageCounts.review} · 决 {agent.sessionStageCounts.decision}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-white/10 px-3 py-2">
-                      <div className="flex items-center gap-1.5">
-                        <Network className="h-3.5 w-3.5 text-emerald-300" />
+                    <div className="rounded-md border border-white/[0.06] px-2 py-1.5">
+                      <div className="flex items-center gap-1 text-[10px] text-slate-500">
+                        <Network className="h-3 w-3 text-emerald-300" strokeWidth={1.75} />
                         <span>协作对象</span>
                       </div>
-                      <p className="mt-1 text-slate-300">
+                      <p className="mt-0.5 truncate text-[11px] text-slate-300">
                         {agent.sessionRelatedAgents.length > 0
-                          ? agent.sessionRelatedAgents.slice(0, 2).map((item) => item.agentName).join(' · ')
+                          ? agent.sessionRelatedAgents
+                              .slice(0, 2)
+                              .map((item) => item.agentName)
+                              .join(' · ')
                           : '暂无'}
                       </p>
                     </div>
@@ -394,14 +432,21 @@ export function AgentRuntimePanel({ workspaceId }: AgentRuntimePanelProps) {
                   {agent.sessionLatestContribution && (
                     <button
                       type="button"
-                      onClick={() => openDetailPanel(agent.sessionLatestContribution!.nodeId)}
-                      className="mt-3 flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left transition hover:bg-white/10"
+                      onClick={() =>
+                        openDetailPanel(agent.sessionLatestContribution!.nodeId)
+                      }
+                      className={`mt-2 flex w-full items-center justify-between gap-2.5 ${TOKENS.surface.card} px-2.5 py-1.5 text-left`}
                     >
-                      <div>
-                        <p className="text-[11px] text-slate-500">最新产出</p>
-                        <p className="mt-1 text-sm text-white">{agent.sessionLatestContribution.title}</p>
+                      <div className="min-w-0">
+                        <p className={TOKENS.text.kicker}>最新产出</p>
+                        <p className={`mt-0.5 ${TOKENS.text.h2} truncate`}>
+                          {agent.sessionLatestContribution.title}
+                        </p>
                       </div>
-                      <Sparkles className="h-4 w-4 text-amber-300" />
+                      <Sparkles
+                        className="h-3.5 w-3.5 shrink-0 text-cyan-300"
+                        strokeWidth={1.75}
+                      />
                     </button>
                   )}
                 </div>

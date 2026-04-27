@@ -13,7 +13,7 @@ export const CanvasImageNode = memo(function CanvasImageNode({ data }: NodeProps
 
   return (
     <>
-      <Handle type="target" position={Position.Left} className="w-3 h-3 bg-purple-500 border-2 border-zinc-900" />
+      <Handle type="target" position={Position.Left} className="h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-violet-400" />
       <Card className="w-80 bg-graph-node border-graph-nodeBorder shadow-lg canvas-panel-node">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm text-zinc-100">{data.title}</CardTitle>
@@ -39,7 +39,7 @@ export const CanvasImageNode = memo(function CanvasImageNode({ data }: NodeProps
           </a>
         </CardContent>
       </Card>
-      <Handle type="source" position={Position.Right} className="w-3 h-3 bg-purple-500 border-2 border-zinc-900" />
+      <Handle type="source" position={Position.Right} className="h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-violet-400" />
     </>
   )
 })

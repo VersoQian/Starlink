@@ -1,79 +1,92 @@
 'use client'
 
-import { Button } from '@/shared/components/ui/button'
 import { Loader2, Play, Wand2 } from 'lucide-react'
 import { useComfyStore } from '../../store'
 import { useComfyShellContext } from '../workspace-shell-context'
+import { TOKENS } from '../canvas-design-tokens'
 
+/**
+ * Seed input panel (refresh-2026-04).
+ *
+ * Refresh notes:
+ *  - Replaced amber-gradient action button + glow shadow with a flat cyan-300
+ *    primary that matches the rest of the canvas.
+ *  - Status icon switched from gradient pill to a 24-px hue-tinted square that
+ *    only changes color on state transitions (idle/processing/complete) — far
+ *    quieter visually.
+ *  - Textarea uses focus-within ring on the input wrapper (token), so the
+ *    focused state is consistent with chat-input panel.
+ */
 export function SeedInputPanel() {
-  const {
-    seedInput,
-    onSeedInputChange,
-    onSeedGeneration
-  } = useComfyShellContext()
-  const isOrchestratorProcessing = useComfyStore((state) => state.isOrchestratorProcessing)
-  const workflowStage = useComfyStore((state) => state.workflowStage)
+  const { seedInput, onSeedInputChange, onSeedGeneration } = useComfyShellContext()
+  const isProcessing = useComfyStore((state) => state.isOrchestratorProcessing)
+  const stage = useComfyStore((state) => state.workflowStage)
+  const isComplete = stage === 'output'
 
-  const isComplete = workflowStage === 'output'
+  const statusTone = isProcessing
+    ? 'bg-cyan-400/10 text-cyan-300'
+    : isComplete
+      ? 'bg-emerald-400/10 text-emerald-300'
+      : 'bg-white/[0.04] text-slate-400'
+  const StatusIcon = isProcessing ? Loader2 : isComplete ? Play : Wand2
 
   return (
-    <section className="rounded-[28px] border border-white/10 bg-white/[0.06] p-4 shadow-xl shadow-black/10 backdrop-blur">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section className={`${TOKENS.surface.panel} p-3`}>
+      <header className="mb-3 flex items-center justify-between">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-amber-300">Input</p>
-          <h3 className="mt-1 text-sm font-black text-white title-font">业务画布起点</h3>
+          <p className={TOKENS.text.kicker}>Input</p>
+          <h3 className={TOKENS.text.h2}>业务画布起点</h3>
         </div>
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-2xl border ${
-            isOrchestratorProcessing
-              ? 'border-cyan-300/30 bg-cyan-400/15 text-cyan-200'
-              : isComplete
-                ? 'border-emerald-300/30 bg-emerald-400/15 text-emerald-200'
-                : 'border-amber-300/30 bg-amber-400/15 text-amber-200'
-          }`}
+        <span
+          className={`flex h-7 w-7 items-center justify-center rounded-md ${statusTone}`}
+          aria-label={isProcessing ? 'Generating' : isComplete ? 'Ready' : 'Idle'}
         >
-          {isOrchestratorProcessing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : isComplete ? (
-            <Play className="h-4 w-4" />
-          ) : (
-            <Wand2 className="h-4 w-4" />
-          )}
-        </div>
+          <StatusIcon
+            className={`h-3.5 w-3.5 ${isProcessing ? 'animate-spin' : ''}`}
+            strokeWidth={1.75}
+          />
+        </span>
+      </header>
+
+      <div className={`${TOKENS.surface.input} p-1`}>
+        <textarea
+          value={seedInput}
+          onChange={(event) => onSeedInputChange(event.target.value)}
+          placeholder="用自然语言描述你的商业想法…"
+          className="block h-24 w-full resize-none bg-transparent px-3 py-2 text-[13px] leading-relaxed text-slate-100 outline-none placeholder:text-slate-500"
+          disabled={isProcessing}
+        />
       </div>
 
-      <textarea
-        value={seedInput}
-        onChange={(event) => onSeedInputChange(event.target.value)}
-        placeholder="用自然语言描述你的商业想法..."
-        className="h-28 w-full resize-none rounded-2xl border border-white/15 bg-slate-950/35 px-4 py-3 text-sm text-slate-200 shadow-inner outline-none backdrop-blur-sm transition placeholder:text-slate-500 focus:border-amber-400/50 focus:ring-2 focus:ring-amber-400/30"
-        disabled={isOrchestratorProcessing}
-      />
-
-      <Button
+      <button
+        type="button"
         onClick={onSeedGeneration}
-        disabled={!seedInput.trim() || isOrchestratorProcessing}
-        className={`mt-3 w-full rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 py-6 font-bold text-white shadow-lg shadow-amber-500/25 hover:from-amber-500 hover:to-amber-600 ${
-          isOrchestratorProcessing ? 'animate-pulse-glow' : ''
+        disabled={!seedInput.trim() || isProcessing}
+        className={`mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold transition-colors ${
+          isProcessing
+            ? 'bg-cyan-400/15 text-cyan-200 cursor-wait'
+            : !seedInput.trim()
+              ? 'bg-white/[0.04] text-slate-500 cursor-not-allowed'
+              : 'bg-cyan-400 text-slate-950 hover:bg-cyan-300'
         }`}
       >
-        {isOrchestratorProcessing ? (
+        {isProcessing ? (
           <>
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            执行中...
+            <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+            执行中…
           </>
         ) : isComplete ? (
           <>
-            <Play className="mr-2 h-5 w-5" />
+            <Play className="h-3.5 w-3.5" strokeWidth={2} />
             继续生成下一轮
           </>
         ) : (
           <>
-            <Wand2 className="mr-2 h-5 w-5" />
+            <Wand2 className="h-3.5 w-3.5" strokeWidth={2} />
             生成画布
           </>
         )}
-      </Button>
+      </button>
     </section>
   )
 }
