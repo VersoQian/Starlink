@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { IDEATION_HUE, TOKENS } from '@/features/comfy/components/canvas-design-tokens'
 import { useIdeationStore, useInspectedNode } from '../store/ideation-store'
 import type { IdeationNodeData } from '../types/ideation-types'
+import { TypedFields } from './ideation-inspector-fields'
 
 /**
  * Inspector — overlay variant.
@@ -83,6 +84,11 @@ export function IdeationInspectorOverlay() {
             />
           </div>
 
+          {/* Per-kind structured metadata — surfaces the fields each kind
+              cares about (hypothesis status, risk severity, validation cost,
+              etc) below the freeform body. */}
+          <TypedFields node={node} />
+
           <div className="flex items-center gap-2 pt-2">
             <button
               type="button"
@@ -103,11 +109,6 @@ export function IdeationInspectorOverlay() {
               删除节点
             </button>
           </div>
-
-          <p className="border-t border-white/[0.06] pt-3 text-[11px] leading-relaxed text-slate-500">
-            类型专属字段（假设状态、风险等级、验证方法 …）将在 Stage C 加入。
-            当前可在画布上拖拽、连线、编辑标题与正文。
-          </p>
         </div>
       </div>
     </div>
