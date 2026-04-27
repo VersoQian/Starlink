@@ -39,6 +39,7 @@ import { WorkspaceGraphStore } from './workspace-graph-store.js'
 import { WorkspaceAssetStore } from './workspace-asset-store.js'
 import { RuntimeEventStore } from './runtime-event-store.js'
 import { ConversationMemoryStore, type AppendMessageInput, type UpsertMemoryInput } from './conversation-memory-store.js'
+import { HitlApprovalStore } from './hitl-approval-store.js'
 import { WorkspaceContextBuilder } from './workspace-context-builder.js'
 import { applyGraphDelta } from './graph-delta.js'
 import { BmcFlowAdapter } from '../engine/bmc-flow-adapter.js'
@@ -79,6 +80,11 @@ export type ConversationStoreDeps = {
   bmcFlowAdapter?: BmcFlowAdapter
   toolRegistry?: ToolRegistry
   bmcFlowRuntime?: BmcFlowRuntime
+  /** Task B · optional PG-backed HITL store. When provided, decisions are
+   *  also written to PG so a different gateway instance / a post-restart
+   *  process can resume HITL via `decide()`. The in-memory resolver map
+   *  remains for same-process fast-path. */
+  hitlApprovalStore?: HitlApprovalStore | null
 }
 
 export class ConversationStore {
@@ -94,10 +100,22 @@ export class ConversationStore {
   private readonly bmcFlowAdapter: BmcFlowAdapter | null
   private readonly toolRegistry: ToolRegistry | null
   private readonly bmcFlowRuntime: BmcFlowRuntime
+  // Wave 3 A: the in-memory resolver Map serves the same-instance fast-path
+  // (one tick to resume). The PG-backed `hitlApprovalStore` provides cross-
+  // restart durability via dual-write AND cross-instance resume via
+  // LISTEN/NOTIFY — see `hitlDecisionUnsubscribe` below. The two sources are
+  // idempotent: whichever wakes the resolver first wins; the loser's call is
+  // a no-op because `pendingDecisionResolvers.delete()` runs synchronously
+  // inside `finalize()` before the second wakeup arrives.
   private readonly pendingDecisionTimeouts = new Map<string, NodeJS.Timeout>()
   private readonly pendingDecisionResolvers = new Map<string, (decision: string) => void>()
+  private readonly hitlApprovalStore: HitlApprovalStore | null
   private readonly hitlEnabled = process.env.HITL_ENABLED === 'true'
   private readonly hitlApprovalTimeoutMs = Number(process.env.HITL_APPROVAL_TIMEOUT_MS ?? '600000')
+  // Wave 3 A: a single process-wide LISTEN subscription routes every decision
+  // notification to the resolver Map. Lazily created on first
+  // `waitForDecisionApproval` call; torn down when `close()` runs.
+  private hitlDecisionUnsubscribe: (() => void) | null = null
 
   constructor({
     eventBus,
@@ -105,7 +123,8 @@ export class ConversationStore {
     businessLangGraphService = new BusinessLangGraphService(),
     bmcFlowAdapter,
     toolRegistry,
-    bmcFlowRuntime = readBmcFlowRuntime()
+    bmcFlowRuntime = readBmcFlowRuntime(),
+    hitlApprovalStore
   }: ConversationStoreDeps) {
     this.eventBus = eventBus
     this.runtimeRepository = runtimeRepository
@@ -119,6 +138,9 @@ export class ConversationStore {
     this.eventStore = new RuntimeEventStore(runtimeRepository, eventBus)
     this.memoryStore = new ConversationMemoryStore()
     this.contextBuilder = new WorkspaceContextBuilder(this.memoryStore)
+    this.hitlApprovalStore = hitlApprovalStore === undefined
+      ? (this.hitlEnabled ? new HitlApprovalStore() : null)
+      : hitlApprovalStore
   }
 
   async startConversation(
@@ -681,6 +703,14 @@ export class ConversationStore {
     }
     this.pendingDecisionTimeouts.clear()
     this.pendingDecisionResolvers.clear()
+    if (this.hitlDecisionUnsubscribe) {
+      try {
+        this.hitlDecisionUnsubscribe()
+      } catch (error) {
+        console.error('[conversation-store] hitl LISTEN unsubscribe failed', error)
+      }
+      this.hitlDecisionUnsubscribe = null
+    }
     await this.runtimeRepository.close()
     await this.eventBus.close()
   }
@@ -697,6 +727,15 @@ export class ConversationStore {
     const resolver = this.pendingDecisionResolvers.get(conversationId)
     if (resolver) {
       resolver(nextDecision)
+    }
+    // Dual-write to PG store so a different gateway instance / a post-restart
+    // worker can observe the decision. No-op when the store is not configured.
+    if (this.hitlApprovalStore) {
+      try {
+        await this.hitlApprovalStore.decide(conversationId, nextDecision)
+      } catch (error) {
+        console.error('[conversation-store] hitl PG decide failed, in-memory resolver still ran', error)
+      }
     }
     return true
   }
@@ -1090,6 +1129,29 @@ export class ConversationStore {
       timeoutMs: this.hitlApprovalTimeoutMs
     }
     await this.sessionStore.setPendingApproval(conversationId, approvalData)
+    // Mirror to PG store so HITL state survives restart / is visible across
+    // gateway instances. The in-memory resolver below remains the same-process
+    // fast-path; PG is the durable backstop.
+    if (this.hitlApprovalStore) {
+      // Wave 3 A: the Map serves same-instance fast-path; LISTEN/NOTIFY serves
+      // cross-instance. Subscribe lazily once per process — every decision
+      // notification dispatches to the local resolver Map, so a `decide()`
+      // call on Instance-B wakes the awaiter parked on Instance-A in roughly
+      // one PG round-trip. If a same-instance resolver already ran (the Map
+      // entry was deleted inside `finalize()`), the LISTEN-driven wakeup is
+      // a no-op — the lookup just returns undefined.
+      this.ensureHitlDecisionSubscription()
+      try {
+        const ttlSec = Math.max(1, Math.ceil(this.hitlApprovalTimeoutMs / 1000))
+        await this.hitlApprovalStore.enqueue(
+          conversationId,
+          { workspaceId, decision, createdAt: approvalData.createdAt },
+          ttlSec
+        )
+      } catch (error) {
+        console.error('[conversation-store] hitl PG enqueue failed, falling back to in-memory only', error)
+      }
+    }
 
     return await new Promise<string>((resolve) => {
       const finalize = (nextDecision: string) => {
@@ -1110,6 +1172,25 @@ export class ConversationStore {
       this.pendingDecisionTimeouts.set(conversationId, timeout)
       this.pendingDecisionResolvers.set(conversationId, finalize)
     })
+  }
+
+  /**
+   * Wave 3 A: lazily attach a single LISTEN subscriber for the lifetime of
+   * this ConversationStore. The callback looks the conversationId up in the
+   * local resolver Map; if no resolver is registered (e.g. the awaiter lives
+   * on a different instance, or this instance already woke via the local
+   * `approveDecision` fast-path) the callback is a harmless no-op.
+   */
+  private ensureHitlDecisionSubscription() {
+    if (this.hitlDecisionUnsubscribe || !this.hitlApprovalStore) return
+    this.hitlDecisionUnsubscribe = this.hitlApprovalStore.subscribeToDecisions(
+      (conversationId, decision) => {
+        const resolver = this.pendingDecisionResolvers.get(conversationId)
+        if (resolver) {
+          resolver(decision)
+        }
+      }
+    )
   }
 
   private assertPermissionFromMetadata(

@@ -12,6 +12,10 @@ on:
 jobs:
   knowledge-e2e:
     runs-on: ubuntu-latest
+    env:
+      # 强制关闭 tracing，即使将来 E2E 启动 server 也不消耗 LangSmith 配额
+      # 详见 starlink-langsmith-day1-roundtable.md §3.6
+      LANGSMITH_TRACING: "false"
     strategy:
       fail-fast: false
       matrix:

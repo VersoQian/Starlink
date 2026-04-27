@@ -323,7 +323,15 @@ export const typeDefs = gql`
     conversation(id: ID!): StartConversationPayload
     conversationSessions(workspaceId: ID!, limit: Int): [ConversationSession!]!
     conversationMessages(workspaceId: ID!, conversationId: ID!, limit: Int): [ConversationMessage!]!
-    conversationRuntimeEvents(workspaceId: ID!, conversationId: ID): [ConversationEvent!]!
+    """
+    List runtime events for a workspace (optionally filtered by conversation).
+
+    sinceCursor is a 1-based event-index returned by a previous backfill (the index of
+    the last event the client has already seen). Pass it on reconnect to get only events
+    emitted after that index — combined with the live conversationProgress subscription
+    this gives gap-free delivery across WS disconnects. Omit (or pass 0) for full backfill.
+    """
+    conversationRuntimeEvents(workspaceId: ID!, conversationId: ID, sinceCursor: Int): [ConversationEvent!]!
     cardsReferencingEvidence(conversationId: ID!, evidenceId: ID!): [ID!]!
     workspaceMemories(workspaceId: ID!, query: String, scope: String, kind: String, limit: Int): [MemoryItem!]!
     workspaceContextSnapshot(workspaceId: ID!, conversationId: ID, query: String!, kbId: ID): WorkspaceContextSnapshot!
@@ -336,9 +344,18 @@ export const typeDefs = gql`
     workspaceMetadataHistory(workspaceId: ID!): [WorkspaceMetadataHistoryEntry!]!
   }
 
+  # Phase 2.5 F5 · HITL resume payload.
+  type ResumeConversationPayload {
+    ok: Boolean!
+    decisionKind: String!
+    message: String
+  }
+
   type Mutation {
     startConversation(workspaceId: ID!, question: String!, kbId: ID): StartConversationPayload!
     approveDecision(conversationId: ID!, decision: String): Boolean!
+    # Phase 2.5 F5 · HITL resume; decision must begin with [ACCEPTED] or [EDIT_PLAN]:...
+    resumeConversation(conversationId: ID!, decision: String!): ResumeConversationPayload!
     appendConversationMessage(input: AppendConversationMessageInput!): ConversationMessage!
     createMemoryItem(input: CreateMemoryItemInput!): MemoryItem!
     extractConversationMemory(conversationId: ID!): [MemoryItem!]!

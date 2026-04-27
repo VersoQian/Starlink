@@ -133,18 +133,40 @@ export const resolvers = {
         return workspaceContextSnapshotSchema.parse(snapshot)
       })
     },
+    /**
+     * Runtime event backfill for WS subscription gap-fill.
+     *
+     * Client-side flow for gap-free delivery across reconnects:
+     *   1. Open WS, subscribe to `conversationProgress(workspaceId, conversationId)`.
+     *   2. Track the highest 1-based index seen so far (`lastSeenCursor`). The Nth event
+     *      received corresponds to cursor N. Persist this in client state.
+     *   3. On WS disconnect → reconnect:
+     *        a. Re-open subscription (buffer arriving live events client-side).
+     *        b. Issue `query conversationRuntimeEvents(workspaceId, conversationId,
+     *           sinceCursor: lastSeenCursor)` — returns only events with index > sinceCursor.
+     *        c. Merge backfilled events ahead of buffered live ones, dedupe by content
+     *           (event-bus is best-effort; duplicates are possible during the handoff window).
+     *        d. Resume normal live processing; bump `lastSeenCursor` for each new event.
+     *
+     * Note: cursor is positional within the workspace event ring buffer (capped by
+     *       CONVERSATION_RUNTIME_EVENT_LIMIT, default 400). If a client is offline long
+     *       enough for events to roll out of the buffer, sinceCursor=0 is implicitly the
+     *       safe-but-lossy fallback. A future extension may switch to monotonic IDs.
+     */
     conversationRuntimeEvents: async (
       _: unknown,
-      args: { workspaceId: string; conversationId?: string | null },
+      args: { workspaceId: string; conversationId?: string | null; sinceCursor?: number | null },
       ctx: GraphQLContext
     ) => {
-      return await resolveOrThrow(async () => (
-        await ctx.conversationStore.listConversationRuntimeEvents(
+      return await resolveOrThrow(async () => {
+        const all = await ctx.conversationStore.listConversationRuntimeEvents(
           args.workspaceId,
           ctx.userId,
           args.conversationId ?? undefined
         )
-      ))
+        const cursor = Math.max(0, args.sinceCursor ?? 0)
+        return cursor > 0 ? all.slice(cursor) : all
+      })
     },
     kbTaskStatus: async (_: unknown, args: { workspaceId: string; kbId: string }, ctx: GraphQLContext) => {
       return await resolveOrThrow(async () => {
@@ -307,6 +329,44 @@ export const resolvers = {
           args.decision ?? undefined
         )
       ))
+    },
+    /**
+     * Phase 2.5 F5 · HITL resume scaffold.
+     * decision must begin with [ACCEPTED] or [EDIT_PLAN]:...
+     * Full resume (graph.invoke(Command(resume))) is Phase 2.6.
+     */
+    resumeConversation: async (
+      _: unknown,
+      args: { conversationId: string; decision: string },
+      _ctx: GraphQLContext
+    ): Promise<{ ok: boolean; decisionKind: string; message?: string }> => {
+      const raw = args.decision
+      if (typeof raw !== 'string' || raw.length === 0) {
+        return { ok: false, decisionKind: 'invalid', message: 'decision must be non-empty string' }
+      }
+      if (raw.startsWith('[ACCEPTED]')) {
+        return {
+          ok: true,
+          decisionKind: 'accepted',
+          message: `Phase 2.5 scaffold: conversation ${args.conversationId} accepted (full resume in Phase 2.6)`
+        }
+      }
+      if (raw.startsWith('[EDIT_PLAN]')) {
+        const plan = raw.slice('[EDIT_PLAN]'.length).replace(/^:\s*/, '').trim()
+        if (plan.length === 0) {
+          return { ok: false, decisionKind: 'invalid', message: '[EDIT_PLAN] body is empty' }
+        }
+        return {
+          ok: true,
+          decisionKind: 'edit_plan',
+          message: `Phase 2.5 scaffold: edit plan captured (${plan.length} chars) — full supervisor re-entry in Phase 2.6`
+        }
+      }
+      return {
+        ok: true,
+        decisionKind: 'rejected',
+        message: `Phase 2.5 scaffold: decision not recognised; critic revision loop halted`
+      }
     },
     appendConversationMessage: async (
       _: unknown,

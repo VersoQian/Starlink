@@ -17,6 +17,10 @@
     "smoke:task-events": "pnpm run build && node dist/scripts/smoke-task-event-store.js",
     "smoke:conversation-runtime": "pnpm run build && node dist/scripts/smoke-conversation-runtime-store.js",
     "smoke:citation-pipeline": "pnpm run build && node dist/scripts/smoke-citation-pipeline.js",
+    "smoke:langsmith": "pnpm run build && node --env-file=.env dist/scripts/smoke-langsmith-config.js",
+    "smoke:hitl-cross-instance": "pnpm run build && node --env-file=.env dist/scripts/smoke-hitl-cross-instance.js",
+    "validate:agents": "pnpm run build && node dist/scripts/validate-agents.js",
+    "benchmark:run": "pnpm run build && node --env-file=.env dist/benchmark/cli.js",
     "smoke:all": "pnpm run build && node dist/scripts/smoke-task-event-store.js && node dist/scripts/smoke-conversation-runtime-store.js && node dist/scripts/smoke-access-subscriptions.js && node dist/scripts/smoke-citation-pipeline.js"
   },
   "dependencies": {
@@ -24,7 +28,15 @@
     "@graphql-tools/schema": "^10.0.13",
     "@langchain/core": "^1.1.12",
     "@langchain/langgraph": "^1.0.13",
+    "@langchain/langgraph-checkpoint-postgres": "^0.1.0",
     "@langchain/openai": "^1.2.1",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.51.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+    "@opentelemetry/resources": "^1.28.0",
+    "@opentelemetry/sdk-node": "^0.55.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0",
+    "langsmith": "^0.5.19",
     "@starlink/shared": "workspace:*",
     "@supabase/supabase-js": "^2.78.0",
     "cors": "^2.8.5",
@@ -40,6 +52,7 @@
     "nanoid": "^5.0.7",
     "pg": "^8.14.0",
     "ws": "^8.18.3",
+    "yaml": "^2.5.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

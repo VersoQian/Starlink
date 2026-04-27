@@ -52,7 +52,14 @@ class FakeBusinessModel {
     throw new Error(`Unexpected invoke prompt: ${prompt.slice(0, 80)}`)
   }
 
-  withStructuredOutput<T>(_schema: unknown, options: { name: string; strict: boolean }) {
+  withStructuredOutput<T>(
+    _schema: unknown,
+    options: {
+      name: string
+      strict?: boolean
+      method?: 'functionCalling' | 'jsonMode' | 'jsonSchema'
+    }
+  ) {
     return {
       invoke: async () => {
         if (options.name === 'IntentClassification') {

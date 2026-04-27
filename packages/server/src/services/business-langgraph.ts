@@ -15,8 +15,63 @@ import {
 } from '@starlink/shared'
 import { computeGroundingRate, parseCitations } from './citation/index.js'
 import type { Evidence } from '@starlink/shared'
+import { agentRegistry, advisorRegistry } from '../capabilities/index.js'
+import {
+  SupervisorDecisionSchema,
+  type SupervisorDecision,
+  type RoutingDecision
+} from './routing-schema.js'
+import {
+  getHandoffLogger,
+  releaseHandoffLogger,
+  type Handoff,
+  type TaskAssignmentPayload,
+  type GenerationOutputPayload,
+  type RevisionRequestPayload
+} from '../infrastructure/handoff-log/index.js'
+import {
+  getWorkspaceMemoryStore,
+  isMemoryReadEnabled,
+  isMemoryWriteEnabled
+} from '../infrastructure/memory/workspace-memory-store.js'
+import { getCheckpointer } from '../infrastructure/langgraph/checkpointer.js'
+import { runDebate } from '../agents/shared/debate-orchestrator.js'
+import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
+import { trace, context as otelContext, SpanStatusCode, type Context as OtelContext } from '@opentelemetry/api'
+import { getTracer } from '../infrastructure/telemetry/otel-init.js'
+
+const otelTracer = getTracer('starlink/business-langgraph')
+
+// Per-conversation root span context, looked up by traceId so child spans
+// (supervisor / agent invoke / critic / debate) can attach as descendants
+// even when called from inside the LangGraph stream callback chain.
+const businessSpanContexts = new Map<string, OtelContext>()
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
+
+// ============== Phase C / 4.1 / 4.4 helpers ==============
+
+type OrchestrationMode = 'legacy' | 'registry'
+
+function getOrchestrationMode(): OrchestrationMode {
+  return process.env.ORCHESTRATION_MODE === 'registry' ? 'registry' : 'legacy'
+}
+
+function isDebateEnabled(): boolean {
+  return process.env.DEBATE_ENABLED === 'true'
+}
+
+const OPPONENT_MAP: Record<string, string> = {
+  'market-agent': 'market-opponent',
+  'product-agent': 'product-opponent',
+  'finance-agent': 'finance-opponent'
+}
+
+const AGENT_SIGNATURE_TO_ID: Record<string, string> = {
+  Market_Agent: 'market-agent',
+  Product_Agent: 'product-agent',
+  Finance_Agent: 'finance-agent'
+}
 
 const MAX_ROUNDS = 3
 const MAX_CONTEXT_CLAIMS_PER_CARD = 4
@@ -67,7 +122,15 @@ export type BusinessModel = {
   invoke: (messages: Array<SystemMessage | HumanMessage>) => Promise<unknown>
   withStructuredOutput: <T>(
     schema: z.ZodType<T>,
-    options: { name: string; strict: boolean }
+    options: {
+      name: string
+      strict?: boolean
+      // langchain-openai withStructuredOutput accepts a `method` discriminator
+      // — 'jsonSchema' is the default strict mode (OpenAI/Azure only),
+      // 'functionCalling' uses tool-call routing (DeepSeek-compatible),
+      // 'jsonMode' uses `response_format: { type: 'json_object' }`.
+      method?: 'functionCalling' | 'jsonMode' | 'jsonSchema'
+    }
   ) => {
     invoke: (messages: Array<SystemMessage | HumanMessage>) => Promise<T>
   }
@@ -78,6 +141,13 @@ const AGENT_TO_NODE: Record<string, string> = {
   [AGENT_TYPES.MARKET]: 'marketAgent',
   [AGENT_TYPES.PRODUCT]: 'productAgent',
   [AGENT_TYPES.FINANCE]: 'financeAgent'
+}
+
+/** Phase C bridge: registry kebab id → legacy camelCase node name. */
+const REGISTRY_ID_TO_NODE: Record<string, string> = {
+  'market-agent': 'marketAgent',
+  'product-agent': 'productAgent',
+  'finance-agent': 'financeAgent'
 }
 
 // ============== MacraNodeData Schema（用于验证 LLM 输出） ==============
@@ -112,9 +182,11 @@ type Intent = z.infer<typeof IntentSchema>
 
 // ============== Supervisor Directive ==============
 type SupervisorDirective = {
-  activeAgents: string[]       // 本轮需要执行的 Agent 节点名称
+  activeAgents: string[]       // 本轮需要执行的 Agent 节点名称（legacy 格式）
   guidance: string             // 给 Agent 的修正指导
   conflictSummary: string      // 上一轮的冲突摘要
+  /** Phase C+: structured routing decisions from runSupervisorRegistry. */
+  decisions?: RoutingDecision[]
 }
 
 // ============== Cross Context（Agent 间共享上下文） ==============
@@ -191,6 +263,7 @@ export type BusinessStreamUpdate =
   | { type: 'delta'; delta: GraphDelta }
   | { type: 'status'; status: 'completed' | 'failed'; message?: string }
   | { type: 'interrupt'; decision: string; conflicts: MacraNodeData[] }
+  | { type: 'handoff'; handoff: Handoff }
 
 // ============== Main Service ==============
 export class BusinessLangGraphService {
@@ -276,6 +349,18 @@ export class BusinessLangGraphService {
       status: 'started'
     })
 
+    // OTel root span for this conversation. Child spans attach via the context
+    // we register in `businessSpanContexts` keyed by traceId.
+    const businessSpan = otelTracer.startSpan('business.streamConversation', {
+      attributes: {
+        'starlink.workspace_id': context.workspaceId,
+        'starlink.user_id': context.userId,
+        'starlink.trace_id': traceId
+      }
+    })
+    const businessCtx = trace.setSpan(otelContext.active(), businessSpan)
+    businessSpanContexts.set(traceId, businessCtx)
+
     yield {
       type: 'init',
       graph: builder.getGraph(),
@@ -298,7 +383,23 @@ export class BusinessLangGraphService {
       return
     }
 
-    const graph = this.createGraph()
+    const graph = await this.createGraph()
+
+    // Phase 3.1 · subscribe to handoff logger so we can stream events to client.
+    const handoffLogger = getHandoffLogger(traceId)
+    const handoffQueue: Handoff[] = []
+    const unsubscribeHandoff = handoffLogger.subscribe((h) => handoffQueue.push(h))
+    const drainHandoffs = (): BusinessStreamUpdate[] => {
+      const out: BusinessStreamUpdate[] = []
+      while (handoffQueue.length > 0) {
+        const h = handoffQueue.shift()
+        if (h) out.push({ type: 'handoff', handoff: h })
+      }
+      return out
+    }
+
+    let bmcNodeCount = 0
+    let conflictCount = 0
 
     try {
       const stream = await graph.stream(
@@ -321,10 +422,17 @@ export class BusinessLangGraphService {
           conflicts: seededState.conflicts,
           edges: seededState.edges
         },
-        { streamMode: 'updates' }
+        {
+          streamMode: 'updates',
+          // Day-1b: thread_id propagation for LangSmith grouping.
+          configurable: { thread_id: traceId }
+        }
       )
 
       for await (const update of stream) {
+        // Phase 3.1: drain handoff events between iterations.
+        for (const evt of drainHandoffs()) yield evt
+
         const entries = Object.entries(update as Record<string, Record<string, unknown>>)
 
         for (const [nodeName, payload] of entries) {
@@ -372,6 +480,7 @@ export class BusinessLangGraphService {
           // General Responder
           if (nodeName === 'generalResponder' && payload.generalNodes) {
             const nodes = payload.generalNodes as MacraNodeData[]
+            bmcNodeCount += nodes.length
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -380,6 +489,7 @@ export class BusinessLangGraphService {
           // Market Agent
           if (nodeName === 'marketAgent' && payload.marketNodes) {
             const nodes = payload.marketNodes as MacraNodeData[]
+            bmcNodeCount += nodes.length
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -388,6 +498,7 @@ export class BusinessLangGraphService {
           // Product Agent
           if (nodeName === 'productAgent' && payload.productNodes) {
             const nodes = payload.productNodes as MacraNodeData[]
+            bmcNodeCount += nodes.length
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -396,6 +507,7 @@ export class BusinessLangGraphService {
           // Finance Agent
           if (nodeName === 'financeAgent' && payload.financeNodes) {
             const nodes = payload.financeNodes as MacraNodeData[]
+            bmcNodeCount += nodes.length
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -431,6 +543,7 @@ export class BusinessLangGraphService {
           // Critic
           if (nodeName === 'critic' && payload.conflicts) {
             const conflicts = payload.conflicts as MacraNodeData[]
+            conflictCount = conflicts.length
             yield {
               type: 'delta',
               delta: builder.replaceNodesByMacraType('conflict-alert', conflicts)
@@ -452,17 +565,31 @@ export class BusinessLangGraphService {
         }
       }
 
+      // Phase 3.1: final handoff drain + completion event.
+      for (const evt of drainHandoffs()) yield evt
+      handoffLogger.record({
+        from: '_system',
+        to: '_canvas',
+        kind: 'completion',
+        payload: { durationMs: Date.now() - streamStartedAt, eventCount: handoffLogger.size },
+        meta: { round: 0, threadId: traceId, traceId }
+      })
+      for (const evt of drainHandoffs()) yield evt
+
       this.logTrace({
         step: 'streamConversation',
         traceId,
         workspaceId: context.workspaceId,
         userId: context.userId,
         status: 'completed',
-        durationMs: Date.now() - streamStartedAt
+        durationMs: Date.now() - streamStartedAt,
+        metadata: { handoffCount: handoffLogger.size }
       })
       yield { type: 'status', status: 'completed' }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      businessSpan.recordException(error as Error)
+      businessSpan.setStatus({ code: SpanStatusCode.ERROR, message })
       auditLogger.error({
         action: 'business-langgraph.streamConversation',
         requestId: traceId,
@@ -480,20 +607,75 @@ export class BusinessLangGraphService {
         durationMs: Date.now() - streamStartedAt,
         metadata: { error: message }
       })
+      // Phase 3.1: also drain handoffs on failure.
+      for (const evt of drainHandoffs()) yield evt
+      handoffLogger.record({
+        from: '_system',
+        to: '_canvas',
+        kind: 'escalation',
+        payload: { error: message, durationMs: Date.now() - streamStartedAt },
+        meta: { round: 0, threadId: traceId, traceId }
+      })
+      for (const evt of drainHandoffs()) yield evt
       yield {
         type: 'delta',
         delta: builder.addInsightNode('执行失败', `错误信息：${message}`, 'review')
       }
       yield { type: 'status', status: 'failed', message }
+    } finally {
+      // Phase 4.4 (audit fix 2.2): write summary memory regardless of
+      // success/failure — even partial conversations are worth remembering
+      // (the bmcNodeCount/conflictCount tracked through the stream tell us
+      // how far we got before failing).
+      try {
+        await this.writeConversationSummary({
+          workspaceId: context.workspaceId,
+          traceId,
+          question: context.question,
+          bmcNodeCount,
+          conflictCount,
+          durationMs: Date.now() - streamStartedAt,
+          handoffCount: handoffLogger.size
+        })
+      } catch {
+        // writeConversationSummary already swallows; redundant guard.
+      }
+      unsubscribeHandoff()
+      releaseHandoffLogger(traceId)
+      businessSpanContexts.delete(traceId)
+      businessSpan.end()
     }
   }
 
   // ============== Graph Topology ==============
   // START → supervisor → [marketAgent|productAgent|financeAgent] → synthesizer → critic → (supervisor | END)
 
-  private createGraph() {
-    return new StateGraph(BusinessState)
-      .addNode('supervisor', async (state) => this.runSupervisor(state))
+  private async createGraph() {
+    // F2 · Conditionally attach PostgresSaver checkpointer.
+    //
+    // When LANGGRAPH_CHECKPOINTER_ENABLED=true (and PG is reachable),
+    // every node transition persists state into `checkpoints` keyed by the
+    // `thread_id` we pass in `configurable` (currently the conversationId/
+    // traceId). This unlocks:
+    //   - HITL resume across server restarts
+    //   - Cross-process scaling (any gateway instance can resume any thread)
+    //   - Post-mortem inspection of stuck seminars
+    //
+    // When the checkpointer is null (flag off, missing creds, or DDL failed),
+    // we compile without it — behaviour is identical to pre-F2 (in-memory
+    // execution, lost on restart).
+    //
+    // NOTE: The critic subgraph in agents/critic/graph.ts still uses MemorySaver
+    // — Phase 4.x will migrate it. Mixing is safe because each subgraph
+    // owns its own checkpointer namespace.
+    const checkpointer = await getCheckpointer()
+
+    const builder = new StateGraph(BusinessState)
+      .addNode('supervisor', async (state) =>
+        getOrchestrationMode() === 'registry'
+          ? this.runSupervisorRegistry(state)
+          : this.runSupervisor(state)
+      )
       .addNode('generalResponder', async (state) => this.runGeneralResponder(state))
       .addNode('marketAgent', async (state) => this.runMarketAgent(state))
       .addNode('productAgent', async (state) => this.runProductAgent(state))
@@ -531,7 +713,10 @@ export class BusinessLangGraphService {
         }
         return [END]
       })
-      .compile()
+
+    // Pass checkpointer only when present so existing default-compile shape
+    // is preserved when the flag is off.
+    return checkpointer ? builder.compile({ checkpointer }) : builder.compile()
   }
 
   // ============== Supervisor Node ==============
@@ -664,7 +849,10 @@ ${this.buildWorkspaceContextPrompt(state)}
     try {
       const structured = this.model.withStructuredOutput(IntentSchema, {
         name: 'IntentClassification',
-        strict: true
+        // DeepSeek's OpenAI-compat endpoint doesn't yet support
+        // `response_format: json_schema`, but it does support function-call
+        // tool routing — that's what `method: 'functionCalling'` selects.
+        method: 'functionCalling'
       })
       return await structured.invoke([new SystemMessage(prompt), new HumanMessage(state.question)])
     } catch (error) {
@@ -879,6 +1067,415 @@ ${snippets}
     return directive.activeAgents.includes(agentNodeName)
   }
 
+  // ============== Phase C · Registry-mode supervisor ==============
+
+  /** Resolves the parent OTel context for a given traceId, falling back to active. */
+  private parentCtx(traceId: string): OtelContext {
+    return businessSpanContexts.get(traceId) ?? otelContext.active()
+  }
+
+  private async runSupervisorRegistry(
+    state: BusinessStateType
+  ): Promise<Partial<BusinessStateType>> {
+    const startedAt = Date.now()
+    const nextRound = state.roundNumber + 1
+    if (!this.model) return this.runSupervisor(state)
+
+    const span = otelTracer.startSpan(
+      'business.supervisor.registry',
+      { attributes: { 'starlink.round': nextRound, 'starlink.trace_id': state.traceId } },
+      this.parentCtx(state.traceId)
+    )
+
+    try {
+    const generators = agentRegistry.filter((a) => a.role === 'generator')
+    if (generators.length === 0 || state.roundNumber > 0) {
+      return this.runSupervisor(state)
+    }
+
+    const capabilitySummary = generators
+      .map((d) => {
+        const caps = d.capabilities
+          .map((c) => (c.kind === 'generate' ? `生成 ${c.dimension}` : c.kind))
+          .join('、')
+        return `- ${d.id} (${d.name}): ${caps}`
+      })
+      .join('\n')
+
+    const memoryBlock = await this.readWorkspaceMemoriesPrompt(
+      state.workspaceId,
+      state.question
+    )
+
+    const systemPrompt =
+      `你是 Supervisor，需要根据用户问题选择需要执行的 agent。\n\n` +
+      `可用 agents:\n${capabilitySummary}\n\n` +
+      memoryBlock +
+      `请返回 SupervisorDecision JSON: { intent, decisions: [{ agent_id, prompt_vars, overrides, reason }], reasoning }\n` +
+      `选择规则: 完整 BMC → 选所有 generator；仅分析某域 → 仅选相关 agent；通用对话 → intent=general, decisions=[]`
+
+    try {
+      // Zod schema uses `.default({})` for `prompt_vars` and `overrides`, so
+      // the input type is wider than the output type. `withStructuredOutput<T>`
+      // wants in==out; cast on the schema arg to bridge — runtime parsing
+      // applies the defaults so callers always see the populated `T`.
+      const structured = this.model.withStructuredOutput<SupervisorDecision>(
+        SupervisorDecisionSchema as unknown as z.ZodType<SupervisorDecision>,
+        // See classifyIntent for why method: 'functionCalling' (DeepSeek-friendly).
+        { name: 'SupervisorDecision', method: 'functionCalling' }
+      )
+      const raw = await structured.invoke([
+        new SystemMessage(systemPrompt),
+        new HumanMessage(state.question)
+      ])
+
+      const validDecisions = raw.decisions.filter((d) => agentRegistry.has(d.agent_id))
+      if (
+        validDecisions.length === 0 &&
+        raw.intent !== 'general' &&
+        raw.intent !== 'detect_conflicts'
+      ) {
+        return this.runSupervisor(state)
+      }
+
+      const activeAgents = validDecisions.map(
+        (d) => REGISTRY_ID_TO_NODE[d.agent_id] ?? d.agent_id
+      )
+      const intent: Intent = { intent: raw.intent, reasoning: raw.reasoning }
+
+      this.logTrace({
+        step: 'supervisor',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          round: nextRound,
+          intent: raw.intent,
+          mode: 'registry',
+          activeAgents,
+          decisions: validDecisions.length
+        }
+      })
+
+      const logger = getHandoffLogger(state.traceId)
+      for (const decision of validDecisions) {
+        const taskPayload: TaskAssignmentPayload = {
+          promptVars: decision.prompt_vars,
+          overrides: decision.overrides,
+          reason: decision.reason,
+          capability: 'generate'
+        }
+        logger.record({
+          from: '_supervisor',
+          to: decision.agent_id,
+          kind: 'task-assignment',
+          payload: taskPayload as unknown as Record<string, unknown>,
+          meta: {
+            round: nextRound,
+            threadId: state.traceId,
+            traceId: state.traceId
+          }
+        })
+      }
+
+      return {
+        intent,
+        roundNumber: nextRound,
+        supervisorDirective: {
+          activeAgents:
+            raw.intent === 'general' || raw.intent === 'detect_conflicts'
+              ? []
+              : activeAgents,
+          guidance: raw.reasoning,
+          conflictSummary: '',
+          decisions: validDecisions
+        }
+      }
+    } catch (error) {
+      span.recordException(error as Error)
+      span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) })
+      auditLogger.warn({
+        action: 'business-langgraph.supervisorRegistry.fallback',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: { error: String(error) }
+      })
+      return this.runSupervisor(state)
+    }
+    } finally {
+      span.end()
+    }
+  }
+
+  private async invokeRegisteredAgent<Out extends Partial<BusinessStateType>>(
+    agentId: string,
+    state: BusinessStateType,
+    projectInput: (s: BusinessStateType, d: RoutingDecision | undefined) => Record<string, unknown>,
+    projectOutput: (result: Record<string, unknown>) => Out
+  ): Promise<Out | null> {
+    const descriptor = agentRegistry.get(agentId) ?? advisorRegistry.get(agentId)
+    if (!descriptor) return null
+
+    const decision = state.supervisorDirective?.decisions?.find(
+      (d) => d.agent_id === agentId
+    )
+
+    const subgraph = descriptor.buildSubgraph() as {
+      invoke: (
+        input: Record<string, unknown>,
+        config?: Record<string, unknown>
+      ) => Promise<Record<string, unknown>>
+    }
+
+    const span = otelTracer.startSpan(
+      'business.subagent.invoke',
+      {
+        attributes: {
+          'starlink.agent_id': agentId,
+          'starlink.round': state.roundNumber,
+          'starlink.trace_id': state.traceId
+        }
+      },
+      this.parentCtx(state.traceId)
+    )
+    try {
+      const result = await subgraph.invoke(projectInput(state, decision), {
+        configurable: {
+          thread_id: state.traceId,
+          agent_id: agentId,
+          prompt_vars: decision?.prompt_vars ?? {},
+          overrides: decision?.overrides ?? {}
+        },
+        tags: [agentId, 'bmc']
+      })
+      return projectOutput(result)
+    } catch (err) {
+      span.recordException(err as Error)
+      span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
+      throw err
+    } finally {
+      span.end()
+    }
+  }
+
+  // ============== Phase 4.4 · Workspace memory helpers ==============
+
+  private async readWorkspaceMemoriesPrompt(
+    workspaceId: string,
+    query?: string
+  ): Promise<string> {
+    if (!isMemoryReadEnabled()) return ''
+    try {
+      const store = getWorkspaceMemoryStore()
+      // When the supervisor knows the user's current question, pass it as
+      // `query` so the bridged store can do pgvector cosine retrieval
+      // (semantic relevance) instead of the default tag+recency listing.
+      // This makes "memory-driven supervisor routing" actually work.
+      const memories = await store.search(workspaceId, {
+        limit: 8,
+        query: query?.trim() || undefined
+      })
+      if (memories.length === 0) return ''
+      const lines = memories
+        .map((m, i) => `[${i + 1}] (${m.tags.join(',') || 'general'}) ${m.content}`)
+        .join('\n')
+      const header = query
+        ? '## 此工作区与当前问题语义相关的会话洞察（来自长期记忆）'
+        : '## 此工作区的近期会话洞察（来自长期记忆）'
+      return `\n\n${header}\n${lines}\n`
+    } catch (err) {
+      auditLogger.warn({
+        action: 'business-langgraph.readWorkspaceMemories.failed',
+        metadata: { workspaceId, error: String(err) }
+      })
+      return ''
+    }
+  }
+
+  private async writeConversationSummary(args: {
+    workspaceId: string
+    traceId: string
+    question: string
+    bmcNodeCount: number
+    conflictCount: number
+    durationMs: number
+    handoffCount: number
+  }): Promise<void> {
+    if (!isMemoryWriteEnabled()) return
+    try {
+      const store = getWorkspaceMemoryStore()
+      const tags = ['bmc-conversation']
+      if (args.conflictCount > 0) tags.push('had-conflicts')
+      if (args.bmcNodeCount >= 9) tags.push('full-9-dim-coverage')
+
+      const content =
+        `问题: ${args.question.slice(0, 120)} | 产出 ${args.bmcNodeCount} 个 BMC 节点 |` +
+        ` 冲突 ${args.conflictCount} 条 | 耗时 ${(args.durationMs / 1000).toFixed(1)}s |` +
+        ` 握手 ${args.handoffCount} 次`
+
+      await store.record(args.workspaceId, {
+        content,
+        tags,
+        sourceTraceId: args.traceId,
+        metadata: {
+          bmcNodeCount: args.bmcNodeCount,
+          conflictCount: args.conflictCount,
+          durationMs: args.durationMs,
+          handoffCount: args.handoffCount
+        }
+      })
+    } catch (err) {
+      auditLogger.warn({
+        action: 'business-langgraph.writeConversationSummary.failed',
+        metadata: { traceId: args.traceId, error: String(err) }
+      })
+    }
+  }
+
+  // ============== Phase 4.1 · Debate B trigger ==============
+
+  private async maybeRunDebates(
+    state: BusinessStateType,
+    conflicts: CriticConflict[]
+  ): Promise<void> {
+    if (!isDebateEnabled()) return
+    if (!agentRegistry.has('moderator')) return
+    const highSev = conflicts.filter((c) => c.severity === 'high')
+    if (highSev.length === 0) return
+
+    for (const conflict of highSev) {
+      const related = conflict.relatedAgents ?? []
+      for (const signature of related) {
+        const proponentId = AGENT_SIGNATURE_TO_ID[signature]
+        if (!proponentId) continue
+        const opponentId = OPPONENT_MAP[proponentId]
+        if (!opponentId) continue
+        if (!agentRegistry.has(proponentId)) continue
+        if (!advisorRegistry.has(opponentId)) continue
+
+        const debateSpan = otelTracer.startSpan(
+          'business.debate.run',
+          {
+            attributes: {
+              'starlink.proponent': proponentId,
+              'starlink.opponent': opponentId,
+              'starlink.round': state.roundNumber,
+              'starlink.conflict_id': conflict.id,
+              'starlink.trace_id': state.traceId
+            }
+          },
+          this.parentCtx(state.traceId)
+        )
+        try {
+          await runDebate(
+            {
+              proponent: proponentId,
+              opponent: opponentId,
+              moderator: 'moderator',
+              dimension: conflict.conflictType ?? undefined,
+              traceId: state.traceId,
+              threadId: state.traceId,
+              round: state.roundNumber,
+              disputedNodeIds: [conflict.id],
+              config: { maxRounds: 2 }
+            },
+            defaultLlmDebateInvoker
+          )
+        } catch (err) {
+          debateSpan.recordException(err as Error)
+          debateSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
+          auditLogger.warn({
+            action: 'business-langgraph.maybeRunDebates.debate-failed',
+            requestId: state.traceId,
+            workflowId: state.workspaceId,
+            userId: state.userId,
+            metadata: {
+              proponent: proponentId,
+              opponent: opponentId,
+              conflictId: conflict.id,
+              error: String(err)
+            }
+          })
+        } finally {
+          debateSpan.end()
+        }
+      }
+    }
+  }
+
+  // ============== Phase 3.1 · handoff emission helpers ==============
+
+  private emitGenerationOutput(
+    state: BusinessStateType,
+    agentNodeName: string,
+    nodes: MacraNodeData[],
+    usage?: Record<string, number> | undefined
+  ): void {
+    const payload: GenerationOutputPayload = {
+      nodeCount: nodes.length,
+      nodeIds: nodes.map((n) => n.id),
+      tokensUsed: usage?.['totalTokens'] ?? usage?.['total_tokens']
+    }
+    getHandoffLogger(state.traceId).record({
+      from: agentNodeName,
+      to: 'synthesizer',
+      kind: 'generation-output',
+      payload: payload as unknown as Record<string, unknown>,
+      meta: {
+        round: state.roundNumber,
+        threadId: state.traceId,
+        traceId: state.traceId
+      }
+    })
+    trace.getActiveSpan()?.addEvent('handoff', {
+      kind: 'generation-output',
+      from: agentNodeName,
+      to: 'synthesizer',
+      'starlink.node_count': nodes.length
+    })
+  }
+
+  private emitRevisionRequests(
+    state: BusinessStateType,
+    conflicts: CriticConflict[]
+  ): void {
+    if (conflicts.length === 0) return
+    const logger = getHandoffLogger(state.traceId)
+    for (const conflict of conflicts) {
+      const targets = conflict.relatedAgents ?? []
+      for (const target of targets) {
+        const payload: RevisionRequestPayload = {
+          conflictId: conflict.id,
+          severity: conflict.severity ?? 'medium',
+          conflictType: conflict.conflictType ?? 'other',
+          summary: conflict.label,
+          suggestedChange: conflict.content.split('\n')[0]
+        }
+        logger.record({
+          from: 'critic-agent',
+          to: target,
+          kind: 'revision-request',
+          payload: payload as unknown as Record<string, unknown>,
+          meta: {
+            round: state.roundNumber,
+            threadId: state.traceId,
+            traceId: state.traceId
+          }
+        })
+        trace.getActiveSpan()?.addEvent('handoff', {
+          kind: 'revision-request',
+          from: 'critic-agent',
+          to: target,
+          'starlink.conflict_id': conflict.id,
+          'starlink.severity': conflict.severity ?? 'medium'
+        })
+      }
+    }
+  }
+
   private getRevisionSuffix(state: BusinessStateType): string {
     if (state.roundNumber <= 1) return ''
     return `\n\n**重要：这是第 ${state.roundNumber} 轮修正。请根据上面的修正指导调整你的分析。**`
@@ -886,6 +1483,46 @@ ${snippets}
 
   private async runMarketAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
+
+    // Phase C: registry mode delegates to YAML market-agent subgraph.
+    if (getOrchestrationMode() === 'registry' && agentRegistry.has('market-agent')) {
+      if (!this.isAgentActive(state, 'marketAgent')) {
+        return { marketNodes: state.marketNodes }
+      }
+      try {
+        const projected = await this.invokeRegisteredAgent(
+          'market-agent',
+          state,
+          (s) => ({
+            traceId: s.traceId,
+            workspaceId: s.workspaceId,
+            userId: s.userId,
+            question: s.question,
+            roundNumber: s.roundNumber,
+            knowledgeEvidence: s.knowledgeEvidence,
+            messages: [],
+            marketNodes: []
+          }),
+          (result) => ({
+            marketNodes: (result.marketNodes as MacraNodeData[]) ?? []
+          })
+        )
+        if (projected) {
+          this.emitGenerationOutput(state, 'marketAgent', projected.marketNodes ?? [])
+          return projected
+        }
+      } catch (err) {
+        auditLogger.error({
+          action: 'business-langgraph.runMarketAgent.subgraph-failed',
+          requestId: state.traceId,
+          workflowId: state.workspaceId,
+          userId: state.userId,
+          metadata: { error: String(err) },
+          error: err as Error
+        })
+      }
+    }
+
     if (!this.isAgentActive(state, 'marketAgent')) {
       return { marketNodes: state.marketNodes }
     }
@@ -971,6 +1608,8 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           usage: extractUsageMetadata(response)
         }
       })
+      // P0.2.3: legacy LLM path also emits handoff so benchmark metrics aren't 0.
+      this.emitGenerationOutput(state, 'marketAgent', validatedNodes, extractUsageMetadata(response))
       return { marketNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
@@ -996,6 +1635,45 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 
   private async runProductAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
+
+    if (getOrchestrationMode() === 'registry' && agentRegistry.has('product-agent')) {
+      if (!this.isAgentActive(state, 'productAgent')) {
+        return { productNodes: state.productNodes }
+      }
+      try {
+        const projected = await this.invokeRegisteredAgent(
+          'product-agent',
+          state,
+          (s) => ({
+            traceId: s.traceId,
+            workspaceId: s.workspaceId,
+            userId: s.userId,
+            question: s.question,
+            roundNumber: s.roundNumber,
+            knowledgeEvidence: s.knowledgeEvidence,
+            messages: [],
+            productNodes: []
+          }),
+          (result) => ({
+            productNodes: (result.productNodes as MacraNodeData[]) ?? []
+          })
+        )
+        if (projected) {
+          this.emitGenerationOutput(state, 'productAgent', projected.productNodes ?? [])
+          return projected
+        }
+      } catch (err) {
+        auditLogger.error({
+          action: 'business-langgraph.runProductAgent.subgraph-failed',
+          requestId: state.traceId,
+          workflowId: state.workspaceId,
+          userId: state.userId,
+          metadata: { error: String(err) },
+          error: err as Error
+        })
+      }
+    }
+
     if (!this.isAgentActive(state, 'productAgent')) {
       return { productNodes: state.productNodes }
     }
@@ -1084,6 +1762,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           usage: extractUsageMetadata(response)
         }
       })
+      this.emitGenerationOutput(state, 'productAgent', validatedNodes, extractUsageMetadata(response))
       return { productNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
@@ -1109,6 +1788,45 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 
   private async runFinanceAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
+
+    if (getOrchestrationMode() === 'registry' && agentRegistry.has('finance-agent')) {
+      if (!this.isAgentActive(state, 'financeAgent')) {
+        return { financeNodes: state.financeNodes }
+      }
+      try {
+        const projected = await this.invokeRegisteredAgent(
+          'finance-agent',
+          state,
+          (s) => ({
+            traceId: s.traceId,
+            workspaceId: s.workspaceId,
+            userId: s.userId,
+            question: s.question,
+            roundNumber: s.roundNumber,
+            knowledgeEvidence: s.knowledgeEvidence,
+            messages: [],
+            financeNodes: []
+          }),
+          (result) => ({
+            financeNodes: (result.financeNodes as MacraNodeData[]) ?? []
+          })
+        )
+        if (projected) {
+          this.emitGenerationOutput(state, 'financeAgent', projected.financeNodes ?? [])
+          return projected
+        }
+      } catch (err) {
+        auditLogger.error({
+          action: 'business-langgraph.runFinanceAgent.subgraph-failed',
+          requestId: state.traceId,
+          workflowId: state.workspaceId,
+          userId: state.userId,
+          metadata: { error: String(err) },
+          error: err as Error
+        })
+      }
+    }
+
     if (!this.isAgentActive(state, 'financeAgent')) {
       return { financeNodes: state.financeNodes }
     }
@@ -1193,6 +1911,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           usage: extractUsageMetadata(response)
         }
       })
+      this.emitGenerationOutput(state, 'financeAgent', validatedNodes, extractUsageMetadata(response))
       return { financeNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
@@ -1377,6 +2096,71 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
   private async runCritic(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
 
+    // Phase 2.5 F5: registry mode delegates to YAML critic-agent subgraph.
+    if (
+      getOrchestrationMode() === 'registry' &&
+      advisorRegistry.has('critic-agent')
+    ) {
+      const criticSpan = otelTracer.startSpan(
+        'business.critic.subgraph',
+        {
+          attributes: {
+            'starlink.agent_id': 'critic-agent',
+            'starlink.round': state.roundNumber,
+            'starlink.trace_id': state.traceId
+          }
+        },
+        this.parentCtx(state.traceId)
+      )
+      try {
+        const allNodesForCritic = [
+          ...state.marketNodes,
+          ...state.productNodes,
+          ...state.financeNodes
+        ]
+        if (allNodesForCritic.length === 0) {
+          return { conflicts: [], roundNumber: state.roundNumber }
+        }
+        const descriptor = advisorRegistry.get('critic-agent')!
+        const subgraph = descriptor.buildSubgraph() as {
+          invoke: (input: Record<string, unknown>, config?: Record<string, unknown>) => Promise<Record<string, unknown>>
+        }
+        const result = await subgraph.invoke(
+          {
+            traceId: state.traceId,
+            workspaceId: state.workspaceId,
+            userId: state.userId,
+            question: state.question,
+            roundNumber: state.roundNumber,
+            nodesSummary: renderCompactBmcCardsForPrompt(allNodesForCritic),
+            workspaceContext: this.buildWorkspaceContextPrompt(state)
+          },
+          {
+            configurable: { thread_id: state.traceId, agent_id: 'critic-agent' },
+            tags: ['critic-agent', 'bmc']
+          }
+        )
+        const conflicts = (result.conflicts as CriticConflict[]) ?? []
+        criticSpan.setAttribute('starlink.conflict_count', conflicts.length)
+        await this.maybeRunDebates(state, conflicts)
+        this.emitRevisionRequests(state, conflicts)
+        return { conflicts, roundNumber: state.roundNumber }
+      } catch (err) {
+        criticSpan.recordException(err as Error)
+        criticSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
+        auditLogger.error({
+          action: 'business-langgraph.runCritic.subgraph-failed',
+          requestId: state.traceId,
+          workflowId: state.workspaceId,
+          userId: state.userId,
+          metadata: { error: String(err) },
+          error: err as Error
+        })
+      } finally {
+        criticSpan.end()
+      }
+    }
+
     const allNodes = [...state.marketNodes, ...state.productNodes, ...state.financeNodes]
     if (allNodes.length === 0) {
       this.logTrace({
@@ -1422,7 +2206,8 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     try {
       const structured = this.model.withStructuredOutput(CriticOutputSchema, {
         name: 'ConflictAnalysis',
-        strict: true
+        // See classifyIntent for why method: 'functionCalling' (DeepSeek-friendly).
+        method: 'functionCalling'
       })
 
       const response = await structured.invoke([
@@ -1476,6 +2261,9 @@ ${workspaceContext}
           usage: extractUsageMetadata(response)
         }
       })
+      // P0.2.3: legacy LLM critic path also fires debate + revision-request handoffs.
+      await this.maybeRunDebates(state, conflicts)
+      this.emitRevisionRequests(state, conflicts)
       return { conflicts, roundNumber: state.roundNumber }
     } catch (error) {
       auditLogger.error({
@@ -1498,6 +2286,10 @@ ${workspaceContext}
         durationMs: Date.now() - startedAt,
         metadata: { conflictCount: conflicts.length, mode: 'rule-based-fallback' }
       })
+      // P0.2.3: rule-based fallback also emits handoffs (otherwise this
+      // common production path is invisible to benchmark eval).
+      await this.maybeRunDebates(state, conflicts)
+      this.emitRevisionRequests(state, conflicts)
       return { conflicts, roundNumber: state.roundNumber }
     }
   }
