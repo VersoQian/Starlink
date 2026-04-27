@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { Download, FileImage, Loader2 } from 'lucide-react'
 import { CC_BMC_DOMAINS, type CCBMCDomain } from '@/types/macra'
 import { IDEATION_HUE, TOKENS } from '@/features/comfy/components/canvas-design-tokens'
 import { useIdeationStore } from '../store/ideation-store'
@@ -9,6 +10,8 @@ import {
   mapIdeationToBmc,
   type MappedNode
 } from '../utils/ideation-to-bmc-mapping'
+import { buildBmcSvg } from '../utils/build-bmc-svg'
+import { downloadPng, downloadSvg } from '../utils/download-bmc'
 
 /**
  * Ideation → BMC 9-grid output view.
@@ -58,10 +61,11 @@ export function IdeationBmcView() {
   const openInspector = useIdeationStore((s) => s.openInspector)
 
   const result = useMemo(() => mapIdeationToBmc(nodes, edges), [nodes, edges])
+  const totalNodeCount = nodes.length
 
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
-      <CoverageScorecard result={result} />
+      <CoverageScorecard result={result} totalNodeCount={totalNodeCount} />
       {/* The 9-grid */}
       <div
         className="grid min-h-0 flex-1 gap-2"
@@ -96,12 +100,36 @@ export function IdeationBmcView() {
 // =============================================================================
 
 function CoverageScorecard({
-  result
+  result,
+  totalNodeCount
 }: {
   result: ReturnType<typeof mapIdeationToBmc>
+  totalNodeCount: number
 }) {
   const { coverage } = result
   const gapCount = coverage.total - coverage.covered
+  const [pngBusy, setPngBusy] = useState(false)
+
+  const handleSvg = () => {
+    const svg = buildBmcSvg(result, totalNodeCount)
+    downloadSvg(svg)
+  }
+  const handlePng = async () => {
+    if (pngBusy) return
+    setPngBusy(true)
+    try {
+      const svg = buildBmcSvg(result, totalNodeCount)
+      await downloadPng(svg)
+    } catch (err) {
+      console.error('[bmc-export] PNG render failed', err)
+      // Fall back to SVG so the user always gets something
+      const svg = buildBmcSvg(result, totalNodeCount)
+      downloadSvg(svg)
+    } finally {
+      setPngBusy(false)
+    }
+  }
+  const exportDisabled = totalNodeCount === 0
 
   return (
     <div className="flex shrink-0 items-center gap-4 rounded-lg border border-white/[0.08] bg-slate-950/40 px-4 py-2.5">
@@ -122,7 +150,7 @@ function CoverageScorecard({
         </p>
       </div>
       {/* LED dot row — one per dim, in canonical reading order */}
-      <div className="ml-auto flex items-center gap-2">
+      <div className="flex items-center gap-2">
         {coverage.perDimension.map((d) => (
           <span
             key={d.domain}
@@ -144,6 +172,35 @@ function CoverageScorecard({
             </span>
           </span>
         ))}
+      </div>
+      {/* Export cluster — paper-figure exporter */}
+      <div className="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          onClick={handleSvg}
+          disabled={exportDisabled}
+          className={`${TOKENS.button.ghost} disabled:opacity-40 disabled:cursor-not-allowed`}
+          aria-label="导出 SVG（论文用矢量）"
+          title="导出 SVG · 用于 LaTeX / Inkscape / 矢量编辑"
+        >
+          <FileImage className="h-3.5 w-3.5" strokeWidth={1.75} />
+          SVG
+        </button>
+        <button
+          type="button"
+          onClick={handlePng}
+          disabled={exportDisabled || pngBusy}
+          className={`${TOKENS.button.primary} disabled:opacity-50 disabled:cursor-not-allowed`}
+          aria-label="导出 PNG（演示 / 博客）"
+          title="导出 PNG @2x · 用于幻灯片 / 博客 / 文档"
+        >
+          {pngBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+          ) : (
+            <Download className="h-3.5 w-3.5" strokeWidth={2} />
+          )}
+          PNG
+        </button>
       </div>
     </div>
   )
