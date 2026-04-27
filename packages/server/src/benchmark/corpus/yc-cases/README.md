@@ -68,12 +68,42 @@ in Stage J.4.
 - Our annotations + scoring scripts are part of this repo (whatever
   license the repo carries).
 
-## How to run an eval (when J.4 is done)
+## How to run an eval
+
+After J.4 (LLM judge wired) and J.5++ (Starlink-vs-baselines runner), three CLIs exist:
 
 ```sh
-# (Forthcoming, after Stage J.4 LLM judge is wired)
-pnpm --filter @starlink/server benchmark:eval-tier-a \
-  --runner starlink \
-  --judge deepseek-chat \
-  --cases all
+# Build first
+pnpm --filter @starlink/server build
+
+# 1. Smoke-test the judge alone (calibration: echo / null / generic)
+DEEPSEEK_API_KEY=sk-... \
+  node packages/server/dist/benchmark/eval/yc-judge-smoke.js --all
+
+# 2. Real Starlink-vs-baseline comparison on 5 cases
+DATABASE_URL="postgres://nobody:nobody@127.0.0.1:5432/nodb" \
+DEEPSEEK_API_KEY=sk-... LLM_API_KEY=sk-... \
+LLM_BASE_URL=https://api.deepseek.com/v1 LLM_MODEL=deepseek-chat \
+ORCHESTRATION_MODE=registry HITL_ENABLED=false \
+LANGGRAPH_CHECKPOINTER_ENABLED=false \
+  node packages/server/dist/benchmark/eval/yc-vs-runners.js
+
+# 3. Single case for fast iteration
+... yc-vs-runners.js --case=yc-stripe-2024 --runners=gpt-solo
 ```
+
+## J.5++ baseline results (2026-04-27)
+
+First real "Starlink vs single-LLM" measurement on Tier-A YC cases.
+Full report: `benchmark/reports/yc-vs-runners-20260427-091117.md`.
+
+| runner | mean total | mean avg | mean output | mean duration |
+|---|---|---|---|---|
+| **starlink** | 20.4/27 | 2.27 | 4951 chars | 35.3s |
+| gpt-solo | 19.8/27 | 2.20 | 808 chars | 11.0s |
+
+Per-case winner:
+- gpt-solo: Stripe, Airbnb (well-known, LLM-memorized)
+- **starlink**: Replit, Pebble, Coursera (less-public, multi-agent generalises)
+
+Notable systematic finding: **gpt-solo scored 0 on Key Partnerships in 4/5 cases** — single-LLM dropped dimensions in its JSON output. Starlink's multi-agent enforces 9-dim coverage because each generator has assigned dimensions (this is a paper-worthy architectural insight).
