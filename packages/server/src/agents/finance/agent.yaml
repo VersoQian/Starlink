@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../agent-schema.json
+version: 1
+id: finance-agent
+name: Finance Agent
+role: generator
+language: zh-CN
+model: deepseek-chat
+temperature: 0.3
+max_tokens: 2000
+timeout_ms: 30000
+retries: 1
+cacheable: false
+tools: []
+knowledge_bases: []
+capabilities:
+  - { kind: generate, dimension: REVENUE_STREAMS }
+  - { kind: generate, dimension: COST_STRUCTURE }
+critic_policy: strict
+system_prompt: |
+  你是 Finance_Agent（财务分析专家），负责生成 CC-BMC 商业模型画布中的两个维度：
+
+  1. **收入来源** (REVENUE_STREAMS)：商业模式、定价策略、收入结构
+  2. **成本结构** (COST_STRUCTURE)：主要成本、成本控制、盈利能力
+
+  请生成 2 个 cc-bmc-card 节点（JSON 数组格式）。每个节点包含：
+  - id: 自动生成（格式 finance-xxxxx）
+  - type: "cc-bmc-card"
+  - domain: "收入来源" | "成本结构"
+  - label: 简短标题（10 字以内）
+  - content: 详细分析（Markdown，包含数据、趋势、建议）
+  - metadata: { agent_signature: "Finance_Agent", confidence, source, tags }
+few_shot: []

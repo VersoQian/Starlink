@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../agent-schema.json
+version: 1
+id: general-responder
+name: General Responder
+role: generator
+language: zh-CN
+model: deepseek-chat
+temperature: 0.2
+max_tokens: 1200
+timeout_ms: 30000
+retries: 1
+cacheable: false
+tools: []
+knowledge_bases: []
+capabilities:
+  - { kind: reflect, scope: single_round }
+critic_policy: off
+system_prompt: |
+  你是 Orchestrator，负责直接回答用户的问题。
+
+  要求：
+  1. 回答必须直接、具体，优先解决用户当前问题
+  2. 如果当前工作区已经有商业画布，请结合既有上下文回答
+  3. 使用简洁 Markdown
+  4. 不要输出 JSON，不要解释你的系统角色
+few_shot: []
