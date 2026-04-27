@@ -416,35 +416,99 @@ export const useIdeationStore = create<IdeationStore>()(
     }))
 
     if (mode === 'wizard') {
-      // Commit answer to current step → mutations + next AI message
+      // Wave γ: try LLM-augmented step processing first, fall back to
+      // scripted commitWizardStep on failure. The store flips
+      // `coachThinking` so the chat panel renders a thinking bubble while
+      // we wait for the LLM (~1-2s) — same UX as coach mode.
       const { wizardStep } = get()
-      const result = commitWizardStep(wizardStep, trimmed)
-      set((state) => {
-        const applied = applyMutations(result.mutations, {
-          nodes: state.nodes,
-          edges: state.edges,
-          traceToNodeId: state.traceToNodeId
-        })
-        return {
-          nodes: applied.nodes,
-          edges: applied.edges,
-          traceToNodeId: applied.traceToNodeId,
-          wizardStep: result.nextStep,
-          chatMessages: [
-            ...state.chatMessages,
-            {
-              id: newId('msg'),
-              role: 'ai',
-              content: result.nextAiMessage,
-              createdAt: NOW()
+      set({ coachThinking: true })
+      void (async () => {
+        try {
+          const llmResult = await callWizardStepLlm(get())
+          set((state) => {
+            const applied = applyMutations(
+              [
+                {
+                  type: 'add-node',
+                  kind: llmResult.extracted.kind,
+                  label: llmResult.extracted.label,
+                  content: llmResult.extracted.content,
+                  trace: state.wizardStep
+                },
+                // Link to the previous step's node when both exist
+                ...(state.traceToNodeId[previousTraceOf(state.wizardStep)]
+                  ? [
+                      {
+                        type: 'link' as const,
+                        fromTrace: previousTraceOf(state.wizardStep),
+                        toTrace: state.wizardStep
+                      }
+                    ]
+                  : [])
+              ],
+              {
+                nodes: state.nodes,
+                edges: state.edges,
+                traceToNodeId: state.traceToNodeId
+              }
+            )
+            return {
+              coachThinking: false,
+              nodes: applied.nodes,
+              edges: applied.edges,
+              traceToNodeId: applied.traceToNodeId,
+              wizardStep: llmResult.nextStep,
+              chatMessages: [
+                ...state.chatMessages,
+                {
+                  id: newId('msg'),
+                  role: 'ai',
+                  content: llmResult.nextQuestion,
+                  scaffold: 'meta',
+                  source: llmResult.source,
+                  latencyMs: llmResult.latencyMs,
+                  createdAt: NOW()
+                }
+              ]
             }
-          ]
+          })
+          if (llmResult.nextStep === 'done') {
+            get().exitWizard()
+          }
+        } catch (err) {
+          // True fallback: use scripted commit
+          console.warn('[ideation-store] wizard LLM call failed, using scripted', err)
+          const result = commitWizardStep(wizardStep, trimmed)
+          set((state) => {
+            const applied = applyMutations(result.mutations, {
+              nodes: state.nodes,
+              edges: state.edges,
+              traceToNodeId: state.traceToNodeId
+            })
+            return {
+              coachThinking: false,
+              nodes: applied.nodes,
+              edges: applied.edges,
+              traceToNodeId: applied.traceToNodeId,
+              wizardStep: result.nextStep,
+              chatMessages: [
+                ...state.chatMessages,
+                {
+                  id: newId('msg'),
+                  role: 'ai',
+                  content: result.nextAiMessage,
+                  scaffold: 'meta',
+                  source: 'scripted',
+                  createdAt: NOW()
+                }
+              ]
+            }
+          })
+          if (result.nextStep === 'done') {
+            get().exitWizard()
+          }
         }
-      })
-      // Auto-exit when wizard completes
-      if (result.nextStep === 'done') {
-        get().exitWizard()
-      }
+      })()
     } else {
       // Coach mode — Stage A doesn't have a real LLM, so we just acknowledge.
       // Stage C will route this through the LLM with the canvas snapshot as
@@ -719,6 +783,91 @@ function buildOrchestratorContext(
     },
     recentChat,
     firedMetaIds: Array.from(state.firedMetaIds)
+  }
+}
+
+/**
+ * Wizard step ids in canonical order, used to look up "previous trace" for
+ * inter-step linking. Mirrors the backend's STEP_ORDER in
+ * /api/ideation/wizard-step/route.ts.
+ */
+const WIZARD_STEP_ORDER: StepId[] = [
+  'core-idea',
+  'customer-pain',
+  'value-angle',
+  'hypothesis',
+  'validation',
+  'revenue',
+  'risk',
+  'meta',
+  'done'
+]
+
+function previousTraceOf(step: StepId): StepId {
+  const idx = WIZARD_STEP_ORDER.indexOf(step)
+  if (idx <= 0) return step
+  return WIZARD_STEP_ORDER[idx - 1]
+}
+
+interface WizardLlmResult {
+  extracted: {
+    kind: IdeationNodeKind
+    label: string
+    content: string
+  }
+  nextQuestion: string
+  nextStep: StepId
+  source: 'llm' | 'scripted' | 'error'
+  latencyMs?: number
+}
+
+/**
+ * Call /api/ideation/wizard-step. Wraps the fetch in a 12s timeout via
+ * AbortController (matches backend timeout). Returns the parsed JSON or
+ * throws — store handles the throw with scripted fallback.
+ */
+async function callWizardStepLlm(state: IdeationStore): Promise<WizardLlmResult> {
+  const lastUserMsg = state.chatMessages
+    .filter((m) => m.role === 'user')
+    .at(-1)
+  if (!lastUserMsg) throw new Error('no user answer to commit')
+
+  const canvas = {
+    nodes: state.nodes.slice(-20).map((n) => ({
+      id: n.id,
+      kind: n.data.kind,
+      label: n.data.label,
+      content: n.data.content.slice(0, 200)
+    })),
+    edgeCount: state.edges.length
+  }
+  const recentChat = state.chatMessages
+    .filter((m) => m.role === 'ai' || m.role === 'user')
+    .slice(-8)
+    .map((m) => ({
+      role: m.role as 'ai' | 'user',
+      content: m.content.slice(0, 240)
+    }))
+
+  const ac = new AbortController()
+  const timeoutId = setTimeout(() => ac.abort(), 12_000)
+  try {
+    const res = await fetch('/api/ideation/wizard-step', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        step: state.wizardStep,
+        userAnswer: lastUserMsg.content,
+        canvas,
+        recentChat
+      }),
+      signal: ac.signal
+    })
+    if (!res.ok) throw new Error(`wizard-step HTTP ${res.status}`)
+    const json = (await res.json()) as WizardLlmResult
+    return json
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
