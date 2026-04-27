@@ -4,8 +4,11 @@ import {
   ReflectionResponseSchema,
   type ReflectionRequest,
   type ReflectionResponse,
-  type ScaffoldKind
-} from '@/features/ideation/types/coach-rpc-types'
+  type ScaffoldKind,
+  COACH_SYSTEM_PROMPT,
+  buildCoachUserMessage,
+  parseCoachReply
+} from '@starlink/shared'
 
 /**
  * POST /api/ideation/reflect
@@ -37,92 +40,8 @@ const DEEPSEEK_MODEL = process.env.LLM_MODEL ?? 'deepseek-chat'
 const TIMEOUT_MS = 12_000
 
 // =============================================================================
-// Prompt construction
-// =============================================================================
-
-const SYSTEM_PROMPT = `You are a Meflex-style entrepreneurship coach for the Starlink Ideation Canvas.
-
-CRITICAL ROLE BOUNDARIES (Luo et al. 2026):
-1. You ASK ONE focused reflection question. You NEVER write content for the user.
-2. You scaffold the user's thinking; you DO NOT replace it.
-3. You DO NOT propose specific node content, copy, or answers.
-4. Output is in 中文 (zh-CN), 1–3 short paragraphs, Markdown allowed for *emphasis*.
-
-PICK ONE SCAFFOLD KIND for each response:
-- "why"             — challenge the user's reasoning / surface assumptions
-- "how"             — push them on cheap validation / mechanics
-- "so-what"         — surface implications / falsifiability / consequences
-- "evidence-needed" — flag missing first-hand evidence
-- "meta"            — cross-node observation about coverage gaps
-
-IDEATION_NODE_KIND vocabulary (you'll see these in the canvas snapshot):
-core-idea, customer-pain, value-angle, hypothesis, validation-channel, revenue, risk, evidence, reflection.
-
-OUTPUT: a JSON object exactly like:
-  { "scaffold": "<one of the 5 kinds>", "content": "<your question, 1-3 short paragraphs>" }
-
-Constraints:
-- content is at most 480 chars (~200 汉字)
-- one focused question, not a list
-- Chinese only`
-
-function buildUserMessage(input: ReflectionRequest): string {
-  const { event, canvas, recentChat, firedMetaIds } = input
-
-  const canvasSummary = (() => {
-    const counts = canvas.nodeCountByKind
-    const kindBreakdown = Object.entries(counts)
-      .filter(([, n]) => n > 0)
-      .map(([k, n]) => `${k}:${n}`)
-      .join(', ')
-    return `${canvas.nodes.length} nodes (${kindBreakdown || 'empty'}), ${canvas.edgeCount} links.`
-  })()
-
-  const nodeList = canvas.nodes.length
-    ? canvas.nodes
-        .slice(0, 20)
-        .map(
-          (n, i) =>
-            `  [${i + 1}] ${n.kind} · "${n.label}"${
-              n.content ? ` — ${n.content.slice(0, 160).replace(/\n+/g, ' ')}` : ''
-            }`
-        )
-        .join('\n')
-    : '  (no nodes yet)'
-
-  const eventLine = (() => {
-    switch (event.type) {
-      case 'node-added':
-        return `Just ADDED a "${event.kind}" node labeled "${event.label}".`
-      case 'node-linked':
-        return `Just LINKED a "${event.fromKind}" node → "${event.toKind}" node.`
-      case 'meta-check':
-        return 'CANVAS THRESHOLD reached — produce a META observation about coverage gaps. ' +
-          (firedMetaIds.length > 0
-            ? `Already fired meta ids (DO NOT repeat themes): ${firedMetaIds.join(', ')}.`
-            : '')
-    }
-  })()
-
-  const chatLines = recentChat.length
-    ? recentChat
-        .map((m) => `  ${m.role.toUpperCase()}: ${m.content.slice(0, 240).replace(/\n+/g, ' ')}`)
-        .join('\n')
-    : '  (no prior exchange)'
-
-  return `CANVAS:
-${canvasSummary}
-${nodeList}
-
-EVENT:
-${eventLine}
-
-RECENT EXCHANGE (newest last):
-${chatLines}
-
-Respond with the JSON object only.`
-}
-
+// Prompt + parser are now in `@starlink/shared/ideation-coach` (Wave F).
+// COACH_SYSTEM_PROMPT, buildCoachUserMessage, parseCoachReply imported above.
 // =============================================================================
 // Fallback (graceful degradation when LLM is unavailable)
 // =============================================================================
@@ -203,30 +122,8 @@ async function callDeepSeek(
   const content = json.choices?.[0]?.message?.content?.trim()
   if (!content) throw new Error('DeepSeek returned empty content')
 
-  // Best-effort JSON parse — some models wrap in ```json fences
-  const stripped = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(stripped)
-  } catch {
-    throw new Error(`DeepSeek output is not valid JSON: ${content.slice(0, 120)}`)
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('DeepSeek output is not an object')
-  }
-  const obj = parsed as { scaffold?: unknown; content?: unknown }
-  if (
-    typeof obj.scaffold !== 'string' ||
-    !['why', 'how', 'so-what', 'evidence-needed', 'meta'].includes(obj.scaffold) ||
-    typeof obj.content !== 'string' ||
-    obj.content.length < 8
-  ) {
-    throw new Error('DeepSeek output failed shape check')
-  }
-  return {
-    scaffold: obj.scaffold as ScaffoldKind,
-    content: obj.content.slice(0, 500)
-  }
+  // Shared parser handles ```json fences + Zod-shape validation.
+  return parseCoachReply(content)
 }
 
 // =============================================================================
@@ -254,8 +151,8 @@ export async function POST(request: Request) {
   const timeoutId = setTimeout(() => ac.abort(), TIMEOUT_MS)
 
   try {
-    const userPrompt = buildUserMessage(parsedBody)
-    const llm = await callDeepSeek(SYSTEM_PROMPT, userPrompt, ac.signal)
+    const userPrompt = buildCoachUserMessage(parsedBody)
+    const llm = await callDeepSeek(COACH_SYSTEM_PROMPT, userPrompt, ac.signal)
     clearTimeout(timeoutId)
 
     const response: ReflectionResponse = {

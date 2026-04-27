@@ -1,0 +1,88 @@
+/**
+ * Ideation Coach RPC schemas — single source of truth across runtimes.
+ *
+ * Wave F.3: lifted from `apps/web/src/features/ideation/types/coach-rpc-types.ts`.
+ * The web file now re-exports from here.
+ *
+ * IDEATION_NODE_KINDS is duplicated here (it lives in apps/web ideation
+ * types currently). When ideation types are themselves promoted to
+ * @starlink/shared, the duplication can be removed.
+ */
+
+import { z } from 'zod'
+
+export const IDEATION_NODE_KINDS = [
+  'core-idea',
+  'customer-pain',
+  'value-angle',
+  'hypothesis',
+  'validation-channel',
+  'revenue',
+  'risk',
+  'evidence',
+  'reflection'
+] as const
+
+export type IdeationNodeKind = (typeof IDEATION_NODE_KINDS)[number]
+
+const ScaffoldKindSchema = z.enum([
+  'why',
+  'how',
+  'so-what',
+  'evidence-needed',
+  'meta'
+])
+export type ScaffoldKind = z.infer<typeof ScaffoldKindSchema>
+
+const NodeKindZ = z.enum(IDEATION_NODE_KINDS)
+
+export const ReflectionRequestSchema = z.object({
+  event: z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('node-added'),
+      kind: NodeKindZ,
+      label: z.string()
+    }),
+    z.object({
+      type: z.literal('node-linked'),
+      fromKind: NodeKindZ,
+      toKind: NodeKindZ
+    }),
+    z.object({ type: z.literal('meta-check') })
+  ]),
+  canvas: z.object({
+    nodes: z
+      .array(
+        z.object({
+          id: z.string(),
+          kind: NodeKindZ,
+          label: z.string(),
+          content: z.string()
+        })
+      )
+      .max(40),
+    edgeCount: z.number().int().nonnegative(),
+    nodeCountByKind: z.record(z.string(), z.number())
+  }),
+  recentChat: z
+    .array(
+      z.object({
+        role: z.enum(['ai', 'user']),
+        content: z.string()
+      })
+    )
+    .max(8),
+  firedMetaIds: z.array(z.string()).default([])
+})
+
+export type ReflectionRequest = z.infer<typeof ReflectionRequestSchema>
+
+export const ReflectionResponseSchema = z.object({
+  scaffold: ScaffoldKindSchema,
+  content: z.string().min(8).max(500),
+  metaIdFired: z.string().nullable().optional(),
+  source: z.enum(['llm', 'scripted', 'error']),
+  latencyMs: z.number().int().nonnegative().optional()
+})
+
+export type ReflectionResponse = z.infer<typeof ReflectionResponseSchema>
