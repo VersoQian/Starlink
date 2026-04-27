@@ -470,4 +470,110 @@ export const typeDefs = gql`
     conversationProgress(workspaceId: ID!, conversationId: ID): ConversationEvent!
     flowExecutionProgress(executionId: ID!): FlowExecutionEvent!
   }
+
+  # ─── Ideation Coach (Wave F.6 + F.7) ─────────────────────────────────
+  # GraphQL surface for the Meflex-style scaffolded coach. Mirrors the
+  # existing Next.js REST routes at /api/ideation/{reflect,wizard-step}
+  # with the same shared prompt + schema (see packages/shared/src/
+  # ideation-coach/). Frontend can pick whichever surface; both call
+  # the same DeepSeek prompts under the hood.
+
+  enum IdeationScaffoldKind {
+    why
+    how
+    so_what
+    evidence_needed
+    meta
+  }
+
+  enum IdeationSourceKind {
+    llm
+    scripted
+    error
+  }
+
+  input IdeationCanvasNodeInput {
+    id: ID!
+    kind: String!
+    label: String!
+    content: String!
+  }
+
+  input IdeationCanvasInput {
+    nodes: [IdeationCanvasNodeInput!]!
+    edgeCount: Int!
+    nodeCountByKind: JSON!
+  }
+
+  input IdeationChatTurnInput {
+    role: String!  # 'ai' | 'user'
+    content: String!
+  }
+
+  input ReflectOnIdeationEventInput {
+    type: String!  # 'node-added' | 'node-linked' | 'meta-check'
+    kind: String
+    label: String
+    fromKind: String
+    toKind: String
+  }
+
+  input ReflectOnIdeationInput {
+    event: ReflectOnIdeationEventInput!
+    canvas: IdeationCanvasInput!
+    recentChat: [IdeationChatTurnInput!]!
+    firedMetaIds: [String!]!
+  }
+
+  type IdeationReflection {
+    scaffold: IdeationScaffoldKind!
+    content: String!
+    source: IdeationSourceKind!
+    latencyMs: Int
+  }
+
+  input IdeationWizardCanvasInput {
+    nodes: [IdeationCanvasNodeInput!]!
+    edgeCount: Int!
+  }
+
+  input ProcessIdeationWizardStepInput {
+    step: String!  # one of WIZARD_STEP_ORDER ids
+    userAnswer: String!
+    canvas: IdeationWizardCanvasInput!
+    recentChat: [IdeationChatTurnInput!]!
+  }
+
+  type IdeationWizardExtractedNode {
+    kind: String!
+    label: String!
+    content: String!
+  }
+
+  type IdeationWizardStepResult {
+    extracted: IdeationWizardExtractedNode!
+    nextQuestion: String!
+    nextStep: String!
+    source: IdeationSourceKind!
+    latencyMs: Int
+  }
+
+  extend type Mutation {
+    """
+    Generate one Meflex-style reflection prompt against the current
+    Ideation canvas snapshot. Mirrors POST /api/ideation/reflect.
+    Falls back to a scripted reflection on LLM failure (source returned
+    in the response so the client can label the bubble accordingly).
+    """
+    reflectOnIdeation(input: ReflectOnIdeationInput!): IdeationReflection!
+
+    """
+    Process one wizard-step answer: extracts a structured node from
+    the user's free-text answer + generates the next contextual question.
+    Mirrors POST /api/ideation/wizard-step.
+    """
+    processIdeationWizardStep(
+      input: ProcessIdeationWizardStepInput!
+    ): IdeationWizardStepResult!
+  }
 `

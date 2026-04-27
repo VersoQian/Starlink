@@ -26,6 +26,10 @@ import {
   searchKnowledgeBase
 } from '../services/kb-task-service.js'
 import { pubsub, FLOW_EXECUTION_PROGRESS, publishExecutionEvent } from './subscriptions.js'
+import {
+  reflectOnIdeation,
+  processIdeationWizardStep
+} from '../services/ideation-coach-service.js'
 
 export const resolvers = {
   JSON: GraphQLJSON,
@@ -650,6 +654,77 @@ export const resolvers = {
         const workspace = await ctx.conversationStore.updateWorkspace(input, ctx.userId)
         return workspaceDirectoryItemSchema.parse(workspace)
       })
+    },
+
+    // ── Ideation Coach mutations (Wave F.6 + F.7) ──────────────────
+    // Mirror the existing apps/web Next.js routes at
+    //   /api/ideation/reflect
+    //   /api/ideation/wizard-step
+    // via the shared @starlink/shared/ideation-coach module. Both
+    // surfaces consume the same prompt + parser. Frontend can use
+    // either; benchmark consumers / future mobile clients use this
+    // GraphQL surface.
+    reflectOnIdeation: async (
+      _: unknown,
+      args: {
+        input: {
+          event: {
+            type: string
+            kind?: string | null
+            label?: string | null
+            fromKind?: string | null
+            toKind?: string | null
+          }
+          canvas: {
+            nodes: Array<{ id: string; kind: string; label: string; content: string }>
+            edgeCount: number
+            nodeCountByKind: Record<string, number>
+          }
+          recentChat: Array<{ role: string; content: string }>
+          firedMetaIds: string[]
+        }
+      }
+    ) => {
+      // Cast to ReflectionRequest — Apollo strips the GraphQL types;
+      // shared Zod will reject anything malformed downstream, but this
+      // resolver only does the bare adaptation.
+      const req = args.input as unknown as Parameters<typeof reflectOnIdeation>[0]
+      const result = await reflectOnIdeation(req)
+      // Map scaffold "so-what" / "evidence-needed" to their GraphQL enum
+      // forms (snake_case) since GraphQL enums can't have hyphens.
+      const SCAFFOLD_GQL: Record<string, string> = {
+        why: 'why',
+        how: 'how',
+        'so-what': 'so_what',
+        'evidence-needed': 'evidence_needed',
+        meta: 'meta'
+      }
+      return {
+        scaffold: SCAFFOLD_GQL[result.scaffold] ?? result.scaffold,
+        content: result.content,
+        source: result.source,
+        latencyMs: result.latencyMs
+      }
+    },
+
+    processIdeationWizardStep: async (
+      _: unknown,
+      args: {
+        input: {
+          step: string
+          userAnswer: string
+          canvas: {
+            nodes: Array<{ id: string; kind: string; label: string; content: string }>
+            edgeCount: number
+          }
+          recentChat: Array<{ role: string; content: string }>
+        }
+      }
+    ) => {
+      const req = args.input as unknown as Parameters<
+        typeof processIdeationWizardStep
+      >[0]
+      return await processIdeationWizardStep(req)
     }
   },
   // ── Flow / Tool resolvers ────────────────────────────────
