@@ -204,26 +204,141 @@ export function dualJudgeConsensus(
 }
 
 // =============================================================================
-// Public API stubs — to be filled in Stage J.4 (real LLM judge)
+// Real LLM judge (Stage J.4 — DeepSeek wired)
 // =============================================================================
 
+const DEEPSEEK_URL =
+  process.env.DEEPSEEK_BASE_URL?.replace(/\/+$/, '') ?? 'https://api.deepseek.com/v1'
+const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? ''
+const DEEPSEEK_MODEL = process.env.JUDGE_MODEL ?? process.env.LLM_MODEL ?? 'deepseek-chat'
+const JUDGE_TIMEOUT_MS = 20_000
+
+interface DeepSeekChoice {
+  message?: { content?: string | null }
+}
+interface DeepSeekResp {
+  choices?: DeepSeekChoice[]
+  error?: { message?: string }
+}
+
+interface RawJudgeOutput {
+  score: number
+  rationale: string
+  covered?: string[]
+  missed?: string[]
+  violations?: string[]
+}
+
+async function callDeepSeekJudge(
+  rubric: JudgeRubric,
+  dimensionId: BmcDimensionId
+): Promise<RawJudgeOutput> {
+  if (!DEEPSEEK_KEY) {
+    throw new Error('JUDGE: no DEEPSEEK_API_KEY / LLM_API_KEY configured')
+  }
+  const ac = new AbortController()
+  const timeoutId = setTimeout(() => ac.abort(), JUDGE_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${DEEPSEEK_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK_KEY}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: JUDGE_SYSTEM_PROMPT },
+          { role: 'user', content: buildJudgeUserMessage(rubric, dimensionId) }
+        ],
+        response_format: { type: 'json_object' },
+        // Lower temperature for evaluator stability — we want repeatable
+        // scores, not creative ones.
+        temperature: 0.2,
+        max_tokens: 400
+      }),
+      signal: ac.signal
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`DeepSeek HTTP ${res.status}: ${text.slice(0, 200)}`)
+    }
+    const json = (await res.json()) as DeepSeekResp
+    if (json.error) throw new Error(`DeepSeek error: ${json.error.message ?? 'unknown'}`)
+    const content = json.choices?.[0]?.message?.content?.trim()
+    if (!content) throw new Error('DeepSeek returned empty content')
+
+    const stripped = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(stripped)
+    } catch {
+      throw new Error(`Judge output is not valid JSON: ${content.slice(0, 120)}`)
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Judge output is not an object')
+    }
+    const obj = parsed as Record<string, unknown>
+    const score = typeof obj.score === 'number' ? obj.score : Number(obj.score)
+    if (!Number.isInteger(score) || score < 0 || score > 3) {
+      throw new Error(`Judge score out of range or not integer: ${obj.score}`)
+    }
+    return {
+      score,
+      rationale:
+        typeof obj.rationale === 'string' ? obj.rationale.slice(0, 400) : 'no rationale',
+      covered: Array.isArray(obj.covered) ? obj.covered.filter((t) => typeof t === 'string') : [],
+      missed: Array.isArray(obj.missed) ? obj.missed.filter((t) => typeof t === 'string') : [],
+      violations: Array.isArray(obj.violations)
+        ? obj.violations.filter((t) => typeof t === 'string')
+        : []
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 /**
- * Run a judge LLM (DeepSeek + optional second model) on a candidate BMC
- * output for one dimension. Returns the consensus score + disagreement.
+ * Run a judge LLM on a candidate BMC output for one dimension.
  *
- * STUB: currently just calls heuristicScore. Real implementation will
- * fetch judge LLM, parse JSON, run dual-judge consensus.
+ * Strategy:
+ *   1. If `JUDGE_MODE=heuristic` env or no API key → heuristic-only path
+ *      (pure token-overlap; reproducible, free, used in CI / smoke).
+ *   2. Otherwise → DeepSeek with structured-JSON output + 20s timeout +
+ *      Zod-shape validation. On failure of any kind, fall back to the
+ *      heuristic so the eval pipeline never crashes mid-run.
  *
- * Stage J.4 work:
- *   1. Wire DeepSeek (or GPT-4o + Claude dual) call here
- *   2. Parse JSON response per JudgeScore shape
- *   3. Validate via Zod
- *   4. Apply dualJudgeConsensus()
- *   5. Add latency / cost metrics
+ * Note: the function takes `dimensionId` so the judge prompt can carry
+ * the dimension's canonical id (helps the LLM stay in scope, especially
+ * for adjacent-but-not-identical dims like CUSTOMER_SEGMENTS vs CR).
  */
-export async function runJudge(rubric: JudgeRubric): Promise<JudgeScore> {
-  // TODO(stage-j-4): replace with real LLM judge call
-  return heuristicScore(rubric)
+export async function runJudge(
+  rubric: JudgeRubric,
+  dimensionId: BmcDimensionId
+): Promise<JudgeScore> {
+  const heuristicMode = process.env.JUDGE_MODE === 'heuristic'
+  if (heuristicMode || !DEEPSEEK_KEY) {
+    return heuristicScore(rubric)
+  }
+  try {
+    const raw = await callDeepSeekJudge(rubric, dimensionId)
+    return {
+      score: raw.score as 0 | 1 | 2 | 3,
+      rationale: raw.rationale,
+      covered: raw.covered ?? [],
+      missed: raw.missed ?? [],
+      violations: raw.violations ?? []
+    }
+  } catch (err) {
+    // Eval pipeline never crashes — fall back to heuristic
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.warn(`[agent-as-judge] LLM judge failed for ${dimensionId}, using heuristic`, errMsg)
+    const fallback = heuristicScore(rubric)
+    return {
+      ...fallback,
+      rationale: `${fallback.rationale} [llm-fallback: ${errMsg.slice(0, 80)}]`
+    }
+  }
 }
 
 /**
@@ -245,12 +360,15 @@ export async function evaluateCase(
     const truth = testCase.ground_truth_bmc[dimId]
     if (!truth) continue
     const candidateText = candidate[dimId] ?? ''
-    const score = await runJudge({
-      candidate: candidateText,
-      ground_truth: truth.ground_truth,
-      must_cover: truth.must_cover ?? [],
-      must_not_cover: truth.must_not_cover ?? []
-    })
+    const score = await runJudge(
+      {
+        candidate: candidateText,
+        ground_truth: truth.ground_truth,
+        must_cover: truth.must_cover ?? [],
+        must_not_cover: truth.must_not_cover ?? []
+      },
+      dimId
+    )
     perDimension[dimId] = score
     totalScore += score.score
     scoredDimensions += 1
