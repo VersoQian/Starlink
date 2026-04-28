@@ -7,7 +7,7 @@
  */
 
 import { Annotation, StateGraph, START, END } from '@langchain/langgraph'
-import { ToolNode } from '@langchain/langgraph/prebuilt'
+import { createReactAgent } from '@langchain/langgraph/prebuilt'
 import {
   SystemMessage,
   HumanMessage,
@@ -157,23 +157,37 @@ export function buildBmcGeneratorSubgraph(
       .compile()
   }
 
-  const modelWithTools =
-    lcTools.length > 0 && 'bindTools' in model
-      ? (model as unknown as {
-          bindTools: (t: StructuredToolInterface[]) => BusinessModel
-        }).bindTools(lcTools)
-      : model
+  // ReAct loop is now delegated to LangGraph's `createReactAgent` prebuilt
+  // (replaces the manual `call-llm ⇄ tools` cycle we used to hand-roll).
+  // Built ONCE at compile time; the per-state system prompt is rendered
+  // by the `invoke-agent` outer node and prepended as the first message
+  // when invoking. The prebuilt also auto-tags spans for LangSmith
+  // tracing in the right "react agent" semantic, which our manual
+  // version didn't.
+  //
+  // Why we still wrap it in an outer StateGraph instead of just registering
+  // the prebuilt directly: we need the `parse` node — `extractAndParseJSON`
+  // with partial-recovery for malformed JSON, plus `normalizeDomainNodes`
+  // to validate and slot output into the agent-specific output field
+  // (marketNodes / productNodes / financeNodes). Those are domain-specific
+  // and don't fit the prebuilt's `responseFormat` (which expects strict
+  // structured output, not JSON-with-recovery).
+  const reactAgent = createReactAgent({
+    llm: model as unknown as Parameters<typeof createReactAgent>[0]['llm'],
+    tools: lcTools
+  })
 
-  const callLLM = async (
+  const invokeAgent = async (
     state: BmcGeneratorStateType
   ): Promise<Partial<BmcGeneratorStateType>> => {
-    const firstCall = state.messages.length === 0
-    const inputMessages = firstCall
-      ? [new SystemMessage(buildSystemPrompt(profile, state)), new HumanMessage(state.question)]
-      : state.messages
-
-    const response = await modelWithTools.invoke(inputMessages as Array<SystemMessage | HumanMessage>)
-    return { messages: firstCall ? [...inputMessages, response as BaseMessage] : [response as BaseMessage] }
+    const systemPromptText = buildSystemPrompt(profile, state)
+    const result = (await reactAgent.invoke({
+      messages: [
+        new SystemMessage(systemPromptText),
+        new HumanMessage(state.question)
+      ]
+    })) as { messages: BaseMessage[] }
+    return { messages: result.messages }
   }
 
   const parseNode = async (
@@ -196,22 +210,11 @@ export function buildBmcGeneratorSubgraph(
     return { [cfg.outputField]: validated } as Partial<BmcGeneratorStateType>
   }
 
-  const shouldUseTools = (state: BmcGeneratorStateType): 'tools' | 'parse' => {
-    const lastMsg = state.messages.at(-1)
-    if (!lastMsg || lastMsg._getType() !== 'ai') return 'parse'
-    const ai = lastMsg as AIMessage
-    return ai.tool_calls && ai.tool_calls.length > 0 ? 'tools' : 'parse'
-  }
-
-  const toolNode = new ToolNode(lcTools)
-
   return new StateGraph(BmcGeneratorState)
-    .addNode('call-llm', callLLM)
-    .addNode('tools', toolNode)
+    .addNode('invoke-agent', invokeAgent)
     .addNode('parse', parseNode)
-    .addEdge(START, 'call-llm')
-    .addConditionalEdges('call-llm', shouldUseTools, { tools: 'tools', parse: 'parse' })
-    .addEdge('tools', 'call-llm')
+    .addEdge(START, 'invoke-agent')
+    .addEdge('invoke-agent', 'parse')
     .addEdge('parse', END)
     .compile()
 }
