@@ -18,7 +18,8 @@ import {
   END,
   MemorySaver,
   interrupt,
-  Command
+  Command,
+  type BaseCheckpointSaver
 } from '@langchain/langgraph'
 import { SystemMessage, HumanMessage } from '@langchain/core/messages'
 
@@ -263,7 +264,16 @@ function shouldAwaitHuman(state: CriticSubgraphStateType): 'await-human' | typeo
 export function buildCriticSubgraph(
   model: BusinessModel | null,
   systemPrompt: string,
-  checkpointer: MemorySaver | undefined = new MemorySaver()
+  /**
+   * Defaults to a per-instance MemorySaver for backward compat (in-process
+   * tests, scripts that don't have a PG pool). Production wiring in `ready`
+   * below now passes the shared PostgresSaver from
+   * `infrastructure/langgraph/checkpointer.ts` so HITL `interrupt` state
+   * survives gateway restarts and is shared across multiple gateway
+   * instances. Without this, a server bounce while the critic was waiting
+   * for human review left the resume thread orphaned.
+   */
+  checkpointer: BaseCheckpointSaver | undefined = new MemorySaver()
 ) {
   const detectNode = makeDetectConflictsNode(model, systemPrompt)
 
@@ -291,7 +301,19 @@ const relevanceScorer: RelevanceScorer<CriticRelevantState> = (state) =>
 export const ready: Promise<void> = (async () => {
   const profile = await getProfile()
   const model = createLLMModelFor(profile)
-  const compiled = buildCriticSubgraph(model, profile.system_prompt)
+  // Reach for the shared PostgresSaver so HITL interrupt state is durable
+  // across gateway restarts (was MemorySaver — process-local, lost on
+  // bounce). `getCheckpointer()` returns null when LANGGRAPH_CHECKPOINTER_
+  // ENABLED=false or when no DATABASE_URL is set; in either case fall back
+  // to MemorySaver (the previous behaviour) so dev / unit tests keep
+  // working without a PG.
+  const { getCheckpointer } = await import('../../infrastructure/langgraph/checkpointer.js')
+  const pgCheckpointer = await getCheckpointer().catch(() => null)
+  const compiled = buildCriticSubgraph(
+    model,
+    profile.system_prompt,
+    pgCheckpointer ?? undefined
+  )
   registerAdvisor(
     profileToAdvisorDescriptor<CriticRelevantState>(
       profile,

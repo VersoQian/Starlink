@@ -267,6 +267,31 @@ export type BusinessStreamUpdate =
   | { type: 'status'; status: 'completed' | 'failed'; message?: string }
   | { type: 'interrupt'; decision: string; conflicts: MacraNodeData[] }
   | { type: 'handoff'; handoff: Handoff }
+  /**
+   * Subgraph progress event — emitted when a registered agent subgraph
+   * yields an internal state update (ToolNode invocation, intermediate
+   * LLM call, etc) BEFORE the subgraph's final output reaches the parent
+   * graph as a node-level update. Only fires when `subgraphs: true` is
+   * passed to graph.stream() (Fix #2 of LangGraph hygiene pass).
+   *
+   * - `ns` is the LangGraph namespace path: each entry is
+   *   `<parentNode>:<subgraphCheckpointId>`.
+   * - `nodeName` is the subgraph-internal node that produced the update
+   *   (e.g. 'call-llm', 'tools', 'parse' for the BMC ReAct subgraph).
+   * - `payloadKeys` lists which top-level keys of the subgraph state
+   *   were updated; the values themselves are NOT forwarded to keep
+   *   the stream payload bounded (full state lives in the subgraph
+   *   checkpoint anyway).
+   *
+   * Frontend can render "market-agent is calling web-search…" by reading
+   * `ns[0]` (parent node = 'marketAgent') + `nodeName` ('tools').
+   */
+  | {
+      type: 'subagent-progress'
+      ns: string[]
+      nodeName: string
+      payloadKeys: string[]
+    }
 
 // ============== Main Service ==============
 export class BusinessLangGraphService {
@@ -441,15 +466,49 @@ export class BusinessLangGraphService {
         {
           streamMode: 'updates',
           // Day-1b: thread_id propagation for LangSmith grouping.
-          configurable: { thread_id: traceId }
+          configurable: { thread_id: traceId },
+          // LangGraph hygiene fix #2: surface subgraph internal updates
+          // (ToolNode invocations, ReAct intermediate states) so the
+          // frontend can render "market-agent is calling web-search…"
+          // instead of just seeing the final marketNodes payload. With
+          // this flag the stream yields tuples [namespace_path, update]
+          // where namespace_path is [] for top-level and non-empty for
+          // subgraph events; we destructure on read.
+          subgraphs: true
         }
       )
 
-      for await (const update of stream) {
+      for await (const yielded of stream) {
+        // With `subgraphs: true` LangGraph yields tuples [ns, update].
+        // For backward compat against any future re-routing that disables
+        // the flag, also accept a bare update object (treated as ns=[]).
+        const [ns, update] = Array.isArray(yielded)
+          ? (yielded as [string[], Record<string, Record<string, unknown>>])
+          : ([[], yielded as Record<string, Record<string, unknown>>] as [
+              string[],
+              Record<string, Record<string, unknown>>
+            ])
+
         // Phase 3.1: drain handoff events between iterations.
         for (const evt of drainHandoffs()) yield evt
 
-        const entries = Object.entries(update as Record<string, Record<string, unknown>>)
+        // Subgraph-level updates: emit a lightweight progress event
+        // (no full payload — frontend uses ns + nodeName + payloadKeys
+        // to render breadcrumbs). Top-level updates (ns=[]) fall through
+        // to the existing per-node handling below.
+        if (ns.length > 0) {
+          for (const [subNodeName, subPayload] of Object.entries(update)) {
+            yield {
+              type: 'subagent-progress',
+              ns,
+              nodeName: subNodeName,
+              payloadKeys: Object.keys(subPayload ?? {})
+            }
+          }
+          continue
+        }
+
+        const entries = Object.entries(update)
 
         for (const [nodeName, payload] of entries) {
           this.logTrace({

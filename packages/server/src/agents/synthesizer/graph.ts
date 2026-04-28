@@ -158,6 +158,19 @@ export function buildSynthesizerSubgraph(
 export const ready: Promise<void> = (async () => {
   const profile = await getProfile()
   const model = createLLMModelFor(profile)
-  const compiled = buildSynthesizerSubgraph(model, profile.system_prompt)
-  registerAgent(profileToDescriptor(profile, () => compiled))
+  // Lazy compile (LangGraph hygiene fix #4): orphan agents that may never
+  // be invoked don't pay the StateGraph.compile() cost at module load.
+  // First invocation triggers the build and caches the result; subsequent
+  // invocations reuse. Synthesizer is currently NEVER invoked through the
+  // registry (top-level uses runSynthesizer rule-based code), so the
+  // cached value typically stays undefined for the entire process.
+  let cachedCompiled: ReturnType<typeof buildSynthesizerSubgraph> | undefined
+  registerAgent(
+    profileToDescriptor(profile, () => {
+      if (!cachedCompiled) {
+        cachedCompiled = buildSynthesizerSubgraph(model, profile.system_prompt)
+      }
+      return cachedCompiled
+    })
+  )
 })()

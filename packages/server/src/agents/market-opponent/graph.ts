@@ -1,6 +1,13 @@
+/**
+ * Market-opponent agent registration (orphan — see orphan-subgraph-stub.ts).
+ *
+ * Profile is read by `LlmDebateInvoker.nextTurn()` directly when debate
+ * is triggered for a market-related conflict. LangGraph subgraph
+ * invocation is not wired — stub used to skip `.compile()` at boot.
+ */
+
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Annotation, StateGraph, START, END } from '@langchain/langgraph'
 
 import {
   makeProfileGetter,
@@ -8,6 +15,7 @@ import {
   registerAdvisor,
   type RelevanceScorer
 } from '../../capabilities/index.js'
+import { getOrphanSubgraphStub } from '../shared/orphan-subgraph-stub.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const getProfile = makeProfileGetter(join(here, 'agent.yaml'))
@@ -27,24 +35,12 @@ const relevanceScorer: RelevanceScorer<OpponentRelevantState> = (state) => {
   return marketDisputed ? 1 : 0
 }
 
-const PassthroughState = Annotation.Root({
-  challenges: Annotation<unknown[]>({ reducer: (_a, b) => b, default: () => [] })
-})
-
-function buildPassthroughSubgraph() {
-  return new StateGraph(PassthroughState)
-    .addNode('noop', async () => ({ challenges: [] }))
-    .addEdge(START, 'noop')
-    .addEdge('noop', END)
-    .compile()
-}
-
 export const ready: Promise<void> = (async () => {
   const profile = await getProfile()
   registerAdvisor(
     profileToAdvisorDescriptor<OpponentRelevantState>(
       profile,
-      () => buildPassthroughSubgraph(),
+      () => getOrphanSubgraphStub(),
       relevanceScorer
     )
   )

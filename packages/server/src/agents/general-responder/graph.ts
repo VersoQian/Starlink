@@ -148,6 +148,16 @@ export function buildGeneralResponderSubgraph(
 export const ready: Promise<void> = (async () => {
   const profile = await getProfile()
   const model = createLLMModelFor(profile)
-  const compiled = buildGeneralResponderSubgraph(model, profile.system_prompt)
-  registerAgent(profileToDescriptor(profile, () => compiled))
+  // Lazy compile (LangGraph hygiene fix #4): same rationale as the
+  // synthesizer — orphan agent, never invoked through the registry,
+  // skip the eager StateGraph.compile() at module load.
+  let cachedCompiled: ReturnType<typeof buildGeneralResponderSubgraph> | undefined
+  registerAgent(
+    profileToDescriptor(profile, () => {
+      if (!cachedCompiled) {
+        cachedCompiled = buildGeneralResponderSubgraph(model, profile.system_prompt)
+      }
+      return cachedCompiled
+    })
+  )
 })()
