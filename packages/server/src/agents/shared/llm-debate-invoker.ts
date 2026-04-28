@@ -4,6 +4,7 @@
 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createAuditLogger } from '@starlink/shared'
 import { LLMClient } from '../../services/llm-client.js'
 import { makeProfileGetter } from '../../capabilities/profile-loader.js'
 import type { AgentId } from '../../infrastructure/handoff-log/handoff-types.js'
@@ -12,6 +13,8 @@ import type {
   DebateTurn,
   DebateVerdict
 } from './debate-orchestrator.js'
+
+const auditLogger = createAuditLogger('packages/server:agents:llm-debate-invoker')
 
 const here = dirname(fileURLToPath(import.meta.url))
 const agentsDir = join(here, '..')
@@ -100,15 +103,15 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
     disputedNodeIds: string[]
   }): Promise<DebateTurn> {
     const round = Math.floor(params.priorTurns.length / 2) + 1
-    const fallback: DebateTurn = {
+    const buildFallback = (reason: string): DebateTurn => ({
       round,
       speaker: params.speaker,
       addressee: params.addressee,
       kind: params.priorTurns.length === 0 ? 'claim' : 'rebuttal',
       targetNodeId: params.disputedNodeIds[0],
-      message: `[fallback] ${params.speaker} could not produce turn content`,
+      message: `[fallback:${reason}] ${params.speaker} could not produce turn content`,
       citations: []
-    }
+    })
 
     try {
       const profile = await getProfileFor(params.speaker)()
@@ -128,7 +131,18 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
       })
       const content = response.content ?? ''
       const match = content.match(/\{[\s\S]*\}/)
-      if (!match) return fallback
+      if (!match) {
+        auditLogger.warn({
+          action: 'llm-debate-invoker.nextTurn.no-json',
+          metadata: {
+            speaker: params.speaker,
+            addressee: params.addressee,
+            round,
+            contentPreview: content.slice(0, 120)
+          }
+        })
+        return buildFallback('no-json')
+      }
       const parsed = JSON.parse(match[0]) as {
         kind?: string
         target_node_id?: string
@@ -139,7 +153,7 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
         parsed.kind as never
       )
         ? (parsed.kind as DebateTurn['kind'])
-        : fallback.kind
+        : (params.priorTurns.length === 0 ? 'claim' : 'rebuttal')
 
       return {
         round,
@@ -147,21 +161,33 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
         addressee: params.addressee,
         kind,
         targetNodeId: parsed.target_node_id ?? params.disputedNodeIds[0],
-        message: parsed.message ?? fallback.message,
+        message: parsed.message ?? `[fallback:empty-message] ${params.speaker}`,
         citations: Array.isArray(parsed.citations) ? parsed.citations : []
       }
-    } catch {
-      return fallback
+    } catch (error) {
+      const reason = error instanceof SyntaxError ? 'parse-error' : 'llm-error'
+      auditLogger.warn({
+        action: 'llm-debate-invoker.nextTurn.failed',
+        metadata: {
+          speaker: params.speaker,
+          addressee: params.addressee,
+          round,
+          reason,
+          message: error instanceof Error ? error.message : String(error)
+        }
+      })
+      return buildFallback(reason)
     }
   }
 
   async judge(params: { moderator: AgentId; turns: DebateTurn[] }): Promise<DebateVerdict> {
-    const fallback: DebateVerdict = {
+    const buildFallback = (reason: string): DebateVerdict => ({
       convergedAfterRounds: Math.ceil(params.turns.length / 2),
       outcome: { kind: 'max-rounds-reached', decision: 'partial' },
-      reasoning: '[fallback] moderator profile load or LLM parse failed',
+      reasoning: `[fallback:${reason}] moderator profile load or LLM parse failed`,
       nodeOutcomes: []
-    }
+    })
+    const fallback = buildFallback('unknown')
 
     try {
       const profile = await getProfileFor(params.moderator)()
@@ -177,7 +203,17 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
       })
       const content = response.content ?? ''
       const match = content.match(/\{[\s\S]*\}/)
-      if (!match) return fallback
+      if (!match) {
+        auditLogger.warn({
+          action: 'llm-debate-invoker.judge.no-json',
+          metadata: {
+            moderator: params.moderator,
+            turnCount: params.turns.length,
+            contentPreview: content.slice(0, 120)
+          }
+        })
+        return buildFallback('no-json')
+      }
       const parsed = JSON.parse(match[0]) as Partial<DebateVerdict> & {
         outcome?: Record<string, unknown>
       }
@@ -221,8 +257,18 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
         reasoning: parsed.reasoning ?? fallback.reasoning,
         nodeOutcomes: Array.isArray(parsed.nodeOutcomes) ? parsed.nodeOutcomes : []
       }
-    } catch {
-      return fallback
+    } catch (error) {
+      const reason = error instanceof SyntaxError ? 'parse-error' : 'llm-error'
+      auditLogger.warn({
+        action: 'llm-debate-invoker.judge.failed',
+        metadata: {
+          moderator: params.moderator,
+          turnCount: params.turns.length,
+          reason,
+          message: error instanceof Error ? error.message : String(error)
+        }
+      })
+      return buildFallback(reason)
     }
   }
 }
