@@ -1,10 +1,22 @@
 /**
  * General Responder (Generator) · Phase 2.5 P1.2.5 · Real LLM-driven subgraph.
  *
- * Mirrors legacy runGeneralResponder in business-langgraph.ts: a single LLM
- * call that answers the user's question directly when intent === 'general'.
- * Reads question + workspaceContext + knowledgeEvidence from state and
- * produces generalNodes: MacraNodeData[] with one insight-note node.
+ * ⚠️ STATUS: ORPHAN. Same as synthesizer/graph.ts — registered but not invoked.
+ * The top-level business-langgraph builds the `generalResponder` node from
+ * `runGeneralResponder` (inline LLM call in business-langgraph.ts:873) which
+ * already renders workspaceContext + knowledgeContext via the existing
+ * builders. The legacy path is authoritative for the `intent === 'general'`
+ * branch and produces a single insight-note via createGeneralResponseNode.
+ *
+ * To make this YAML version live, the wiring is:
+ *   1. Add a registry-mode branch in `runGeneralResponder` following the
+ *      market/product/finance pattern.
+ *   2. Decide whether to additionally pass crossContext (probably no — when
+ *      intent='general', no BMC generators run, so siblings' state is empty
+ *      anyway).
+ *
+ * Edit freely; production behaviour unaffected until the legacy path delegates
+ * here.
  *
  * Subgraph topology:
  *   START → respond → END

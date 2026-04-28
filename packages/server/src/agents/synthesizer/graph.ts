@@ -1,11 +1,22 @@
 /**
  * Synthesizer (Generator) · Phase 2.5 P1.2.4 · Real LLM-driven subgraph.
  *
- * The legacy rule-based runSynthesizer in business-langgraph.ts is still
- * authoritative for agentAvatars / edges / crossContext. This YAML synthesizer
- * runs as a *parallel LLM perspective*: given the three BMC dimensions, it
- * proposes additional consistency observations + relationship edges between
- * BMC nodes via withStructuredOutput.
+ * ⚠️ STATUS: ORPHAN. This subgraph is registered via `registerAgent()` below
+ * but the top-level business-langgraph builds the `synthesizer` node from
+ * `runSynthesizer` (rule-based code in business-langgraph.ts:1967), NOT from
+ * `invokeRegisteredAgent('synthesizer', ...)`. The legacy rule-based path is
+ * authoritative for agentAvatars / edges / crossContext / consistencyNotes.
+ *
+ * If a future revision wants this LLM perspective live, the wiring is:
+ *   1. Add a `runSynthesizerRegistry` branch in business-langgraph.ts following
+ *      the market/product/finance pattern (registry-mode delegate via
+ *      invokeRegisteredAgent + projectBlackboardForGenerator-equivalent).
+ *   2. Decide whether the LLM `insights` augment crossContext.consistencyNotes
+ *      (currently rule-based) or replace it.
+ *
+ * Until that wiring lands, this file is dormant — it does not contribute to
+ * the eval scores reported in benchmark/reports/. Edit it freely if iterating
+ * on LLM-augmented synthesis; production behaviour is unaffected.
  *
  * Subgraph topology:
  *   START → synthesize → END

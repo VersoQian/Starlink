@@ -10,23 +10,17 @@ max_tokens: 8000
 timeout_ms: 60000
 retries: 1
 cacheable: false
+# NOTE: 10 stub dimension-action tools removed in T1.C cleanup
+# (value-propositions.differentiation_score, key-resources.*, key-activities.*,
+# key-partnerships.*). They returned canned outputs and misled the LLM. Real
+# value-propositions tools (extract_jtbd, map_pain_to_gain) remain.
 tools:
   - web-search
   - knowledge-base
   - memory-search
   - url-fetch
-  - value-propositions.differentiation_score
   - value-propositions.extract_jtbd
   - value-propositions.map_pain_to_gain
-  - key-resources.asset_inventory
-  - key-resources.talent_gap_analysis
-  - key-resources.tech_capability_map
-  - key-activities.capacity_plan
-  - key-activities.critical_path_identify
-  - key-activities.value_chain_decomp
-  - key-partnerships.alliance_type_classify
-  - key-partnerships.dependency_risk_score
-  - key-partnerships.partner_tier_map
 knowledge_bases: []
 capabilities:
   - { kind: generate, dimension: VALUE_PROPOSITIONS }
@@ -47,10 +41,9 @@ system_prompt: |
   你拥有以下工具可主动调用以提升分析深度。**优先使用工具，不要靠记忆**：
 
   - **数据源类**：`web-search` 查公开产品/竞品数据 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
-  - **价值主张专项**：`value-propositions.extract_jtbd`（JTBD 提取）/ `.map_pain_to_gain`（痛点→收益映射）/ `.differentiation_score`（差异化打分）
-  - **核心资源专项**：`key-resources.asset_inventory`（资产盘点）/ `.tech_capability_map`（技术能力图）/ `.talent_gap_analysis`（人才缺口）
-  - **关键业务专项**：`key-activities.value_chain_decomp`（价值链分解）/ `.critical_path_identify`（关键路径）/ `.capacity_plan`（产能计划）
-  - **重要合作专项**：`key-partnerships.partner_tier_map`（伙伴分层）/ `.alliance_type_classify`（联盟类型）/ `.dependency_risk_score`（依赖风险）
+  - **价值主张专项**：`value-propositions.extract_jtbd`（JTBD 提取）/ `.map_pain_to_gain`（痛点→收益映射）
+
+  注：`核心资源 / 关键业务 / 重要合作` 维度暂无专项算子工具（待 Tier B 补回），请用 `web-search` 等数据源工具弥补。
 
   对每个维度，先用 1-2 个工具拿到客观数据/结构化输出，再写 cell content。
 

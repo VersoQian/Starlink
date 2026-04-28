@@ -2152,6 +2152,12 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
         const subgraph = descriptor.buildSubgraph() as {
           invoke: (input: Record<string, unknown>, config?: Record<string, unknown>) => Promise<Record<string, unknown>>
         }
+        const directive = state.supervisorDirective
+        const supervisorDirective = directive?.guidance
+          ? directive.conflictSummary
+            ? `${directive.guidance}\n\n冲突摘要：${directive.conflictSummary}`
+            : directive.guidance
+          : ''
         const result = await subgraph.invoke(
           {
             traceId: state.traceId,
@@ -2160,7 +2166,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
             question: state.question,
             roundNumber: state.roundNumber,
             nodesSummary: renderCompactBmcCardsForPrompt(allNodesForCritic),
-            workspaceContext: this.buildWorkspaceContextPrompt(state)
+            workspaceContext: this.buildWorkspaceContextPrompt(state),
+            supervisorDirective,
+            knowledgeEvidence: this.buildKnowledgePrompt(state)
           },
           {
             configurable: { thread_id: state.traceId, agent_id: 'critic-agent' },

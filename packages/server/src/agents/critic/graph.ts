@@ -77,6 +77,18 @@ export function parseHumanDecision(raw: unknown): CriticHumanDecision {
 
 // ============== State ==============
 
+/**
+ * Blackboard view consumed by the critic subgraph (parity with the BMC
+ * generators; see bmc-generator-subgraph.ts:44 for the canonical shape).
+ *
+ * - `nodesSummary`           ← cross-agent context: union of market+product+finance nodes
+ * - `workspaceContext`       ← workspace canvas + memories (from buildWorkspaceContextPrompt)
+ * - `supervisorDirective`    ← previous round's revision directive; lets round-2+ critic
+ *                              avoid re-flagging conflicts the supervisor already routed
+ *                              to a generator for fix
+ * - `knowledgeEvidence`      ← retrieved facts; lets critic check claims against evidence
+ *                              instead of relying purely on internal consistency
+ */
 export const CriticSubgraphState = Annotation.Root({
   traceId: Annotation<string>(),
   workspaceId: Annotation<string>(),
@@ -85,6 +97,8 @@ export const CriticSubgraphState = Annotation.Root({
   roundNumber: Annotation<number>({ reducer: (_a, b) => b, default: () => 0 }),
   nodesSummary: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
   workspaceContext: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+  supervisorDirective: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+  knowledgeEvidence: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
   conflicts: Annotation<CriticConflict[]>({ reducer: (_a, b) => b, default: () => [] }),
   humanDecision: Annotation<CriticHumanDecision>({
     reducer: (_a, b) => b,
@@ -180,11 +194,28 @@ function makeDetectConflictsNode(model: BusinessModel | null, systemPrompt: stri
         strict: true
       })
 
-      const prompt =
-        systemPrompt +
-        `\n\n## 商业模型各维度内容\n${state.nodesSummary}` +
-        (state.workspaceContext ? `\n\n${state.workspaceContext}` : '') +
-        `\n\n如果没有发现冲突，返回空数组 conflicts=[]。不要制造不存在的冲突。`
+      const sections: string[] = [
+        systemPrompt,
+        `\n\n## 商业模型各维度内容\n${state.nodesSummary}`
+      ]
+      if (state.workspaceContext) sections.push('\n\n' + state.workspaceContext.trim())
+      if (state.supervisorDirective) {
+        sections.push(
+          '\n\n## Supervisor 上一轮修正指导（仅供参考，避免重复标记已分发待修的冲突）\n' +
+            state.supervisorDirective.trim()
+        )
+      }
+      if (state.knowledgeEvidence) {
+        sections.push(
+          '\n\n## 知识库证据\n' +
+            state.knowledgeEvidence.trim() +
+            '\n\n如果某个 claim 与上方证据矛盾，应作为冲突标出。'
+        )
+      }
+      sections.push(
+        '\n\n如果没有发现冲突，返回空数组 conflicts=[]。不要制造不存在的冲突。'
+      )
+      const prompt = sections.join('')
 
       const response = await structured.invoke([
         new SystemMessage(prompt),

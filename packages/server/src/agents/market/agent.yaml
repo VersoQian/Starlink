@@ -10,6 +10,12 @@ max_tokens: 8000
 timeout_ms: 60000
 retries: 1
 cacheable: false
+# NOTE: 19 stub dimension-action tools (channels.* / customer-relationships.* /
+# cost-structure.* / key-activities.* / key-partnerships.* / key-resources.* /
+# value-propositions.differentiation_score) were removed in the T1.C cleanup —
+# they were StubDimensionAction subclasses returning canned outputs and were
+# misleading the LLM into citing fake "tool data". Only LLM-backed real tools
+# remain. Re-implementations (Tier B follow-up) should be added back here.
 tools:
   - web-search
   - knowledge-base
@@ -18,12 +24,6 @@ tools:
   - customer-segments.cluster_personas
   - customer-segments.estimate_market_size
   - customer-segments.rank_by_accessibility
-  - channels.compute_cac_by_channel
-  - channels.map_channel_touchpoints
-  - channels.simulate_funnel
-  - customer-relationships.churn_risk_analysis
-  - customer-relationships.lifecycle_stage_map
-  - customer-relationships.segment_engagement_model
 knowledge_bases: []
 capabilities:
   - { kind: generate, dimension: CUSTOMER_SEGMENTS }
@@ -43,8 +43,8 @@ system_prompt: |
 
   - **数据源类**：`web-search` 查公开市场数据 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
   - **客户细分专项**：`customer-segments.cluster_personas`（聚类 persona）/ `.estimate_market_size`（市场规模）/ `.rank_by_accessibility`（可触达排序）
-  - **渠道通路专项**：`channels.map_channel_touchpoints`（触点地图）/ `.simulate_funnel`（漏斗模拟）/ `.compute_cac_by_channel`（CAC 测算）
-  - **客户关系专项**：`customer-relationships.lifecycle_stage_map`（生命周期）/ `.segment_engagement_model`（互动模型）/ `.churn_risk_analysis`（流失风险）
+
+  注：`渠道通路` 与 `客户关系` 维度暂无专项算子工具（待 Tier B 补回），请用 `web-search` 等数据源工具弥补。
 
   对每个维度，先用 1-2 个工具拿到客观数据/结构化输出，再写 cell content。
 
