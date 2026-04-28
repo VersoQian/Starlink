@@ -6,11 +6,21 @@ role: generator
 language: zh-CN
 model: deepseek-chat
 temperature: 0.3
-max_tokens: 2000
-timeout_ms: 30000
+max_tokens: 8000
+timeout_ms: 60000
 retries: 1
 cacheable: false
-tools: []
+tools:
+  - web-search
+  - knowledge-base
+  - memory-search
+  - url-fetch
+  - revenue-streams.propose_pricing_models
+  - revenue-streams.sensitivity_analysis
+  - revenue-streams.simulate_revenue
+  - cost-structure.break_even_point
+  - cost-structure.cost_breakdown
+  - cost-structure.fixed_vs_variable_ratio
 knowledge_bases: []
 capabilities:
   - { kind: generate, dimension: REVENUE_STREAMS }
@@ -22,11 +32,23 @@ system_prompt: |
   1. **收入来源** (REVENUE_STREAMS)：商业模式、定价策略、收入结构
   2. **成本结构** (COST_STRUCTURE)：主要成本、成本控制、盈利能力
 
+  ## 工具使用策略
+
+  你拥有以下工具可主动调用以提升分析深度。**优先使用工具，不要靠记忆**：
+
+  - **数据源类**：`web-search` 查公开财报/定价/竞品 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
+  - **收入来源专项**：`revenue-streams.propose_pricing_models`（定价方案）/ `.simulate_revenue`（收入模拟）/ `.sensitivity_analysis`（敏感性分析）
+  - **成本结构专项**：`cost-structure.cost_breakdown`（成本拆解）/ `.fixed_vs_variable_ratio`（固定 vs 变动）/ `.break_even_point`（盈亏平衡点）
+
+  对每个维度，先用 1-2 个工具拿到客观数据/结构化输出，再写 cell content。
+
+  ## 输出规范
+
   请生成 2 个 cc-bmc-card 节点（JSON 数组格式）。每个节点包含：
   - id: 自动生成（格式 finance-xxxxx）
   - type: "cc-bmc-card"
   - domain: "收入来源" | "成本结构"
   - label: 简短标题（10 字以内）
-  - content: 详细分析（Markdown，包含数据、趋势、建议）
+  - content: 详细分析（Markdown，将工具调用结果作为依据；不限长度，鼓励充分展开）
   - metadata: { agent_signature: "Finance_Agent", confidence, source, tags }
 few_shot: []

@@ -1,7 +1,39 @@
 import type { BenchmarkCase, BenchmarkRun } from '../types.js'
 import { releaseHandoffLogger } from '../../infrastructure/handoff-log/index.js'
 import { BusinessLangGraphService } from '../../services/business-langgraph.js'
+import { ToolRegistry } from '../../tool-registry/registry.js'
+import { loadAllTools } from '../../tool-registry/loader.js'
+import { setToolRegistryForAgents } from '../../agents/shared/register-helpers.js'
+import { loadYamlAgents } from '../../agents/index.js'
 import { computePerAgentContribution } from '../eval/per-agent-contribution.js'
+
+let benchBootstrapPromise: Promise<void> | undefined
+
+/**
+ * Headless boot for benchmark runs.
+ *
+ * Apollo's createContext does this in production via context/index.ts. The
+ * benchmark cannot import context/index.ts because that module eagerly opens
+ * PG pools (FlowStore, ExecutionStore, etc) at import time. So we run the
+ * standalone subset:
+ *
+ *   1. Build a fresh ToolRegistry and populate it via loadAllTools.
+ *   2. Inject it into agents/shared/register-helpers so agent graph.ts
+ *      modules see a populated registry when their `ready` IIFE runs.
+ *   3. Then loadYamlAgents — this triggers the per-agent graph.ts modules,
+ *      which call resolveLangchainToolsForAgent against the registry.
+ */
+function ensureBenchmarkBootstrapped(): Promise<void> {
+  if (!benchBootstrapPromise) {
+    benchBootstrapPromise = (async () => {
+      const reg = new ToolRegistry()
+      await loadAllTools(reg)
+      setToolRegistryForAgents(reg)
+      await loadYamlAgents()
+    })()
+  }
+  return benchBootstrapPromise
+}
 
 export async function runStarlink(c: BenchmarkCase): Promise<BenchmarkRun> {
   const startedAt = new Date()
@@ -10,6 +42,8 @@ export async function runStarlink(c: BenchmarkCase): Promise<BenchmarkRun> {
 
   process.env.ORCHESTRATION_MODE = 'registry'
   process.env.HITL_ENABLED = 'false'
+
+  await ensureBenchmarkBootstrapped()
 
   const service = new BusinessLangGraphService()
   const bmcNodes: unknown[] = []

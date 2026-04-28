@@ -8,6 +8,7 @@ import { createConversationRuntimeRepository } from '../application/conversation
 import { ToolRegistry } from '../tool-registry/registry.js'
 import { loadAllTools } from '../tool-registry/loader.js'
 import { ensureYamlAgentsLoaded } from '../agents/index.js'
+import { setToolRegistryForAgents } from '../agents/shared/register-helpers.js'
 import { FlowStore } from '../application/flow-store.js'
 import { ExecutionStore } from '../application/execution-store.js'
 import { GraphCompiler } from '../engine/graph-compiler.js'
@@ -68,6 +69,7 @@ async function ensureToolsLoaded(): Promise<void> {
   if (!toolsLoaded) {
     try {
       await loadAllTools(toolRegistry)
+      setToolRegistryForAgents(toolRegistry)
     } catch (err) {
       console.warn('[context] Failed to load tools:', err)
     }

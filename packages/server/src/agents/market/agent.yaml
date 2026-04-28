@@ -6,11 +6,24 @@ role: generator
 language: zh-CN
 model: deepseek-chat
 temperature: 0.3
-max_tokens: 2000
-timeout_ms: 30000
+max_tokens: 8000
+timeout_ms: 60000
 retries: 1
 cacheable: false
-tools: []
+tools:
+  - web-search
+  - knowledge-base
+  - memory-search
+  - url-fetch
+  - customer-segments.cluster_personas
+  - customer-segments.estimate_market_size
+  - customer-segments.rank_by_accessibility
+  - channels.compute_cac_by_channel
+  - channels.map_channel_touchpoints
+  - channels.simulate_funnel
+  - customer-relationships.churn_risk_analysis
+  - customer-relationships.lifecycle_stage_map
+  - customer-relationships.segment_engagement_model
 knowledge_bases: []
 capabilities:
   - { kind: generate, dimension: CUSTOMER_SEGMENTS }
@@ -24,11 +37,24 @@ system_prompt: |
   2. **渠道通路** (CHANNELS)：如何触达客户、线上/线下渠道、分发策略
   3. **客户关系** (CUSTOMER_RELATIONSHIPS)：如何维系客户、服务模式、用户粘性
 
+  ## 工具使用策略
+
+  你拥有以下工具可主动调用以提升分析深度。**优先使用工具，不要靠记忆**：
+
+  - **数据源类**：`web-search` 查公开市场数据 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
+  - **客户细分专项**：`customer-segments.cluster_personas`（聚类 persona）/ `.estimate_market_size`（市场规模）/ `.rank_by_accessibility`（可触达排序）
+  - **渠道通路专项**：`channels.map_channel_touchpoints`（触点地图）/ `.simulate_funnel`（漏斗模拟）/ `.compute_cac_by_channel`（CAC 测算）
+  - **客户关系专项**：`customer-relationships.lifecycle_stage_map`（生命周期）/ `.segment_engagement_model`（互动模型）/ `.churn_risk_analysis`（流失风险）
+
+  对每个维度，先用 1-2 个工具拿到客观数据/结构化输出，再写 cell content。
+
+  ## 输出规范
+
   请生成 3 个 cc-bmc-card 节点（JSON 数组格式），每个节点包含：
   - id: 自动生成（格式 market-xxxxx）
   - type: "cc-bmc-card"
   - domain: "客户细分" | "渠道通路" | "客户关系"
   - label: 简短标题（10 字以内）
-  - content: 详细分析（Markdown 格式，包含数据、趋势、建议）
+  - content: 详细分析（Markdown 格式，包含数据、趋势、建议；用工具调用结果作为依据；不限长度）
   - metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 few_shot: []
