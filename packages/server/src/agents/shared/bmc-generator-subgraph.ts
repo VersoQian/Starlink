@@ -41,6 +41,16 @@ export interface BmcGeneratorConfig {
 
 // ============== State factory ==============
 
+/**
+ * Blackboard view passed from the top-level graph into a generator subgraph.
+ *
+ * `contextPrompt`, `crossContextPrompt` and `supervisorDirectivePrompt` are
+ * pre-rendered strings — the top-level graph owns the truth (full
+ * `WorkspaceContextSnapshot`, full sibling-agent outputs, full
+ * `SupervisorDirective` shape) and renders the slice each agent needs into a
+ * markdown block. We pass strings rather than typed objects to keep the
+ * subgraph state schema decoupled from the top-level types.
+ */
 export function makeBmcGeneratorState() {
   return Annotation.Root({
     traceId: Annotation<string>(),
@@ -51,6 +61,12 @@ export function makeBmcGeneratorState() {
     knowledgeEvidence: Annotation<KnowledgeEvidence[]>({
       reducer: (_a, b) => b,
       default: () => []
+    }),
+    contextPrompt: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+    crossContextPrompt: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+    supervisorDirectivePrompt: Annotation<string>({
+      reducer: (_a, b) => b,
+      default: () => ''
     }),
     messages: Annotation<BaseMessage[]>({
       reducer: (a, b) => a.concat(b),
@@ -87,13 +103,29 @@ function getRevisionSuffix(round: number): string {
   return `\n\n**重要：这是第 ${round} 轮修正。请根据上面的修正指导调整你的分析。**`
 }
 
+/**
+ * Assemble the full prompt visible to a single generator from the blackboard.
+ *
+ * Order matters — agents read top-down:
+ *   1. role-specific system prompt (from agent.yaml)
+ *   2. user question (the case)
+ *   3. workspace context (canvas summary + memories + recent messages)
+ *   4. cross-agent context (what siblings have written this round)
+ *   5. supervisor directive (critic's revision guidance, if any)
+ *   6. retrieved knowledge evidence
+ *   7. round suffix
+ *
+ * Each non-empty block is wrapped with a clear section header so the LLM can
+ * navigate. Empty blocks are omitted to keep the prompt tight.
+ */
 function buildSystemPrompt(profile: AgentProfile, state: BmcGeneratorStateType): string {
-  return (
-    profile.system_prompt +
-    `\n\n用户问题：${state.question}` +
-    renderKnowledgeContext(state.knowledgeEvidence ?? []) +
-    getRevisionSuffix(state.roundNumber)
-  )
+  const sections: string[] = [profile.system_prompt, `\n\n用户问题：${state.question}`]
+  if (state.contextPrompt) sections.push('\n\n' + state.contextPrompt.trim())
+  if (state.crossContextPrompt) sections.push('\n\n' + state.crossContextPrompt.trim())
+  if (state.supervisorDirectivePrompt) sections.push('\n\n' + state.supervisorDirectivePrompt.trim())
+  sections.push(renderKnowledgeContext(state.knowledgeEvidence ?? []))
+  sections.push(getRevisionSuffix(state.roundNumber))
+  return sections.join('')
 }
 
 // ============== Subgraph factory ==============

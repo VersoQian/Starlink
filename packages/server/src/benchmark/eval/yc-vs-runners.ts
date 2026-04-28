@@ -183,10 +183,12 @@ interface ResultRow {
   candidateLengthChars: number
 }
 
+type RunnerName = 'starlink' | 'gpt-solo' | 'gpt-solo-forced'
+
 async function evalOneRunner(
   yc: YcCompanyCase,
   benchCase: BenchmarkCase,
-  runnerName: 'starlink' | 'gpt-solo',
+  runnerName: RunnerName,
   runnerFn: (c: BenchmarkCase) => Promise<BenchmarkRun>
 ): Promise<ResultRow> {
   console.error(`  · ${runnerName} on ${yc.case_id} …`)
@@ -330,14 +332,18 @@ async function main() {
     process.exit(1)
   }
 
-  const runnerNames: Array<'starlink' | 'gpt-solo'> = runnersArg
-    ? (runnersArg.split(',').filter((r) => r === 'starlink' || r === 'gpt-solo') as Array<
-        'starlink' | 'gpt-solo'
-      >)
+  const validRunners = ['starlink', 'gpt-solo', 'gpt-solo-forced'] as const
+  const runnerNames: RunnerName[] = runnersArg
+    ? (runnersArg
+        .split(',')
+        .filter((r): r is RunnerName =>
+          (validRunners as readonly string[]).includes(r)
+        ) as RunnerName[])
     : ['starlink', 'gpt-solo']
-  const runnerFns: Record<typeof runnerNames[number], typeof runStarlink> = {
+  const runnerFns: Record<RunnerName, (c: BenchmarkCase) => Promise<BenchmarkRun>> = {
     starlink: runStarlink,
-    'gpt-solo': runGptSolo
+    'gpt-solo': (c) => runGptSolo(c),
+    'gpt-solo-forced': (c) => runGptSolo(c, { forceNineCells: true })
   }
 
   console.error(

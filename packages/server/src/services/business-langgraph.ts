@@ -1481,6 +1481,60 @@ ${snippets}
     return `\n\n**重要：这是第 ${state.roundNumber} 轮修正。请根据上面的修正指导调整你的分析。**`
   }
 
+  /**
+   * Phase X (blackboard fix): project the full top-level BusinessState into the
+   * shape expected by a BMC-generator subgraph, **carrying the full blackboard
+   * view** (workspace context + cross-agent context + supervisor directive)
+   * rather than just the question + roundNumber as before.
+   *
+   * Round-1 semantics: cross-context renders empty because no sibling has
+   * written yet, so every generator independently produces a first draft from
+   * (role + question + workspace memory + retrieved knowledge). Round-2+ each
+   * agent additionally sees its siblings' last-round output and the critic's
+   * revision directive — this is what gives the multi-agent system its
+   * deliberative advantage.
+   *
+   * The agent's own previous-round output (e.g. marketAgent sees its own
+   * marketNodes) is preserved so the subgraph can build on prior work rather
+   * than restarting from scratch.
+   */
+  private projectBlackboardForGenerator(
+    state: BusinessStateType,
+    self: 'market' | 'product' | 'finance'
+  ) {
+    const contextPrompt = this.buildWorkspaceContextPrompt(state)
+    const crossContextPrompt = this.buildCrossContextPrompt(state, self)
+    const directive = state.supervisorDirective
+    const supervisorDirectivePrompt = directive?.guidance
+      ? `\n## Supervisor 修正指导（critic 反馈）\n${directive.guidance}${
+          directive.conflictSummary
+            ? `\n\n冲突摘要：${directive.conflictSummary}`
+            : ''
+        }`
+      : ''
+
+    const ownPrevious =
+      self === 'market'
+        ? { marketNodes: state.marketNodes ?? [] }
+        : self === 'product'
+        ? { productNodes: state.productNodes ?? [] }
+        : { financeNodes: state.financeNodes ?? [] }
+
+    return {
+      traceId: state.traceId,
+      workspaceId: state.workspaceId,
+      userId: state.userId,
+      question: state.question,
+      roundNumber: state.roundNumber,
+      knowledgeEvidence: state.knowledgeEvidence,
+      contextPrompt,
+      crossContextPrompt,
+      supervisorDirectivePrompt,
+      messages: [],
+      ...ownPrevious
+    }
+  }
+
   private async runMarketAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
 
@@ -1493,16 +1547,7 @@ ${snippets}
         const projected = await this.invokeRegisteredAgent(
           'market-agent',
           state,
-          (s) => ({
-            traceId: s.traceId,
-            workspaceId: s.workspaceId,
-            userId: s.userId,
-            question: s.question,
-            roundNumber: s.roundNumber,
-            knowledgeEvidence: s.knowledgeEvidence,
-            messages: [],
-            marketNodes: []
-          }),
+          (s) => this.projectBlackboardForGenerator(s, 'market'),
           (result) => ({
             marketNodes: (result.marketNodes as MacraNodeData[]) ?? []
           })
@@ -1644,16 +1689,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
         const projected = await this.invokeRegisteredAgent(
           'product-agent',
           state,
-          (s) => ({
-            traceId: s.traceId,
-            workspaceId: s.workspaceId,
-            userId: s.userId,
-            question: s.question,
-            roundNumber: s.roundNumber,
-            knowledgeEvidence: s.knowledgeEvidence,
-            messages: [],
-            productNodes: []
-          }),
+          (s) => this.projectBlackboardForGenerator(s, 'product'),
           (result) => ({
             productNodes: (result.productNodes as MacraNodeData[]) ?? []
           })
@@ -1797,16 +1833,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
         const projected = await this.invokeRegisteredAgent(
           'finance-agent',
           state,
-          (s) => ({
-            traceId: s.traceId,
-            workspaceId: s.workspaceId,
-            userId: s.userId,
-            question: s.question,
-            roundNumber: s.roundNumber,
-            knowledgeEvidence: s.knowledgeEvidence,
-            messages: [],
-            financeNodes: []
-          }),
+          (s) => this.projectBlackboardForGenerator(s, 'finance'),
           (result) => ({
             financeNodes: (result.financeNodes as MacraNodeData[]) ?? []
           })

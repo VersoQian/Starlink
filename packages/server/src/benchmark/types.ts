@@ -81,7 +81,7 @@ export type PerAgentContribution = z.infer<typeof PerAgentContributionSchema>
 
 export const BenchmarkRunSchema = z.object({
   case_id: z.string(),
-  runner: z.enum(['starlink', 'gpt-solo', 'metagpt', 'autogen']),
+  runner: z.enum(['starlink', 'gpt-solo', 'gpt-solo-forced', 'metagpt', 'autogen']),
   started_at: z.string(),
   ended_at: z.string(),
   duration_ms: z.number(),
