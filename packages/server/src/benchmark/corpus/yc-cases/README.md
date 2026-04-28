@@ -6,12 +6,12 @@ verifiable startup info + hand-authored ground-truth BMCs.
 
 ## Status
 
-- **Tier A**: 8 hand-curated seed cases ✅
+- **Tier A**: 12 hand-curated seed cases ✅
 - **Tier A target**: 30-50 cases stratified by sector + outcome
 - **Tier B**: Recruit 3-5 MBA annotators via Prolific → ~50 cases × 3 annotators × 45 min × $20/hr ≈ $2,250. Compute Krippendorff's α inter-annotator agreement.
 - **Tier C**: Domain-expert annotated (Wharton/INSEAD/IESE entrepreneurship faculty), IRB-blessed, ~200 cases. Released as CC-BMC-Bench v1.0 on HuggingFace.
 
-## Current cases (8)
+## Current cases (12)
 
 | case_id | sector | outcome | notes |
 |---|---|---|---|
@@ -23,6 +23,14 @@ verifiable startup info + hand-authored ground-truth BMCs.
 | `yc-notion-2024` | consumer-saas | active | Bottom-up cross-segment SaaS, blocks model |
 | `yc-coinbase-2021` | fintech | public | Regulated marketplace, compliance-heavy cost |
 | `yc-doordash-2020` | logistics | public | Three-sided gig marketplace, courier-pay dominates cost |
+| `yc-twitch-2014` | gaming | acquired | Two-sided creator platform; first acquired-outcome case |
+| `yc-segment-2020` | b2b-saas | acquired | First b2b-saas case; CDP / developer-led GTM |
+| `yc-brex-2024` | fintech | active | Non-API fintech; credit losses dominate cost |
+| `yc-substack-2024` | media | active | First media case; revenue-share + creator partnerships |
+
+**Sector coverage at N=12** (sectors / 12): fintech ×3, marketplace, devtools, hardware, edtech, consumer-saas, logistics, gaming, b2b-saas, media — 10 of 15 enum values represented.
+
+**Outcome coverage at N=12**: active ×5, public ×4, acquired ×2, shut-down ×1 — all 4 enum values represented.
 
 ## Schema
 

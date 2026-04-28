@@ -22,6 +22,10 @@ import { ycCourseraCase } from './yc-coursera.js'
 import { ycNotionCase } from './yc-notion.js'
 import { ycCoinbaseCase } from './yc-coinbase.js'
 import { ycDoorDashCase } from './yc-doordash.js'
+import { ycTwitchCase } from './yc-twitch.js'
+import { ycSegmentCase } from './yc-segment.js'
+import { ycBrexCase } from './yc-brex.js'
+import { ycSubstackCase } from './yc-substack.js'
 
 const SEED_CASES: YcCompanyCase[] = [
   ycStripeCase,
@@ -31,7 +35,11 @@ const SEED_CASES: YcCompanyCase[] = [
   ycCourseraCase,
   ycNotionCase,
   ycCoinbaseCase,
-  ycDoorDashCase
+  ycDoorDashCase,
+  ycTwitchCase,
+  ycSegmentCase,
+  ycBrexCase,
+  ycSubstackCase
 ]
 
 /**
