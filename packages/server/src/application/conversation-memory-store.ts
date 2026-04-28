@@ -15,6 +15,12 @@ import {
 } from '@starlink/shared'
 import { pool } from '../infrastructure/db/pool.js'
 import { embedText, toPgVector } from '../services/embedding-service.js'
+import {
+  encryptIfConfigured,
+  decryptIfNeeded,
+  encryptUserSkillMetadata,
+  decryptUserSkillMetadata
+} from '../services/user-skill-crypto.js'
 
 type JsonRecord = Record<string, unknown>
 
@@ -283,9 +289,23 @@ export class ConversationMemoryStore {
   async upsertMemory(input: UpsertMemoryInput): Promise<MemoryItem> {
     await this.ensureTables()
     const id = input.id ?? await this.findMemoryIdBySource(input) ?? nanoid()
+    // Embedding is computed BEFORE encryption — embeddings are never
+    // encrypted (they need to be queryable for `<=>` similarity). This
+    // means the embedding vector itself can leak content via inversion
+    // attacks (Pan et al. 2020+); user-skill-crypto.ts documents this as
+    // residual risk. For non-user-skill rows, plaintext is stored anyway,
+    // so the embedding is no extra leak.
     const embedding = await embedText(renderMemoryEmbeddingInput(input))
-    const metadata = {
-      ...(input.metadata ?? {}),
+    const isUserSkill = (input.kind ?? 'insight') === 'user-skill'
+    // For user-skill rows, encrypt sensitive fields (title, content,
+    // metadata.revisionTrend nested fields) at the storage boundary.
+    // No-op when USER_SKILL_ENCRYPTION_KEY is unset → plaintext fallthrough.
+    const storedTitle = isUserSkill ? encryptIfConfigured(input.title) : input.title
+    const storedContent = isUserSkill ? encryptIfConfigured(input.content) : input.content
+    const storedMetadata = {
+      ...(isUserSkill
+        ? (encryptUserSkillMetadata(input.metadata ?? {}) as Record<string, unknown>)
+        : (input.metadata ?? {})),
       embeddingProvider: embedding.provider
     }
     const result = await pool.query(
@@ -317,14 +337,14 @@ export class ConversationMemoryStore {
         input.userId ?? null,
         input.scope ?? 'workspace',
         input.kind ?? 'insight',
-        input.title,
-        input.content,
+        storedTitle,
+        storedContent,
         input.sourceType ?? 'manual',
         input.sourceId ?? null,
         clampScore(input.importance ?? 0.5),
         clampScore(input.confidence ?? 0.7),
         input.tags ?? [],
-        JSON.stringify(metadata),
+        JSON.stringify(storedMetadata),
         toPgVector(embedding.vector),
         embedding.model,
         embedding.dimensions
@@ -717,20 +737,28 @@ function rowToMessage(row: Record<string, unknown>): ConversationMessage {
 }
 
 function rowToMemory(row: Record<string, unknown>): MemoryItem {
+  // For user-skill rows, decrypt the sensitive fields at the storage
+  // boundary so the rest of the codebase sees plaintext. Non-user-skill
+  // rows pass through `decryptIfNeeded` which is a no-op for non-prefixed
+  // values — zero overhead for the common case.
+  const isUserSkill = row.kind === 'user-skill'
+  const rawMetadata = parseJsonRecord(row.metadata)
   return memoryItemSchema.parse({
     id: row.id,
     workspaceId: row.workspace_id,
     userId: row.user_id ?? null,
     scope: row.scope,
     kind: row.kind,
-    title: row.title,
-    content: row.content,
+    title: isUserSkill ? decryptIfNeeded(row.title as string) : row.title,
+    content: isUserSkill ? decryptIfNeeded(row.content as string) : row.content,
     sourceType: row.source_type,
     sourceId: row.source_id ?? null,
     importance: Number(row.importance ?? 0.5),
     confidence: Number(row.confidence ?? 0.7),
     tags: Array.isArray(row.tags) ? row.tags : [],
-    metadata: parseJsonRecord(row.metadata),
+    metadata: isUserSkill
+      ? (decryptUserSkillMetadata(rawMetadata) as JsonRecord)
+      : rawMetadata,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     lastUsedAt: row.last_used_at ? toIso(row.last_used_at) : null,
