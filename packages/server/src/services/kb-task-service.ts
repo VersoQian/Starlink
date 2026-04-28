@@ -1,4 +1,5 @@
 import {
+  createAuditLogger,
   knowledgeBaseListResponseSchema,
   knowledgeBaseSchema,
   knowledgeBaseStatusResponseSchema,
@@ -8,6 +9,8 @@ import {
   type KnowledgeSearchResult as SharedKnowledgeSearchResult,
   type KnowledgeTask
 } from '@starlink/shared'
+
+const auditLogger = createAuditLogger('packages/server:services:kb-task-service')
 
 export type GatewayKnowledgeBase = {
   id: KnowledgeBase['id']
@@ -49,9 +52,14 @@ export async function listKnowledgeBases(workspaceId: string): Promise<GatewayKn
     })
 
     if (!response.ok) {
-      console.warn('[kb-task-service] failed to list knowledge bases', {
-        status: response.status,
-        statusText: response.statusText
+      auditLogger.warn({
+        action: 'kb-task-service.listKnowledgeBases.http-error',
+        workflowId: workspaceId,
+        metadata: {
+          status: response.status,
+          statusText: response.statusText,
+          baseUrl
+        }
       })
       return []
     }
@@ -68,7 +76,16 @@ export async function listKnowledgeBases(workspaceId: string): Promise<GatewayKn
       publishedAt: item.publishedAt ?? null
     }))
   } catch (error) {
-    console.warn('[kb-task-service] request failed', { error: String(error) })
+    const message = error instanceof Error ? error.message : String(error)
+    auditLogger.warn({
+      action: 'kb-task-service.listKnowledgeBases.failed',
+      workflowId: workspaceId,
+      metadata: {
+        baseUrl,
+        reason: error instanceof TypeError ? 'network-error' : 'unknown',
+        message
+      }
+    })
     return []
   }
 }
@@ -211,9 +228,17 @@ export async function searchKnowledgeBase(
     })
 
     if (!response.ok) {
-      console.warn('[kb-task-service] search failed', {
-        status: response.status,
-        statusText: response.statusText
+      auditLogger.warn({
+        action: 'kb-task-service.searchKnowledgeBase.http-error',
+        workflowId: workspaceId,
+        metadata: {
+          kbId,
+          query: query.slice(0, 80),
+          topK,
+          status: response.status,
+          statusText: response.statusText,
+          baseUrl
+        }
       })
       return []
     }
@@ -221,7 +246,19 @@ export async function searchKnowledgeBase(
     const payload = knowledgeSearchResponseSchema.parse(await response.json())
     return Array.isArray(payload.results) ? payload.results : []
   } catch (error) {
-    console.warn('[kb-task-service] search request failed', { error: String(error) })
+    const message = error instanceof Error ? error.message : String(error)
+    auditLogger.warn({
+      action: 'kb-task-service.searchKnowledgeBase.failed',
+      workflowId: workspaceId,
+      metadata: {
+        kbId,
+        query: query.slice(0, 80),
+        topK,
+        baseUrl,
+        reason: error instanceof TypeError ? 'network-error' : 'unknown',
+        message
+      }
+    })
     return []
   }
 }

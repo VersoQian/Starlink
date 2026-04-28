@@ -27,6 +27,14 @@
  *
  *   # Force scripted-judge (no judge LLM cost):
  *   JUDGE_MODE=heuristic ... yc-vs-runners.js
+ *
+ *   # Prompt-richness ablation: strip the detailed description from
+ *   # the question, keeping only one_liner + sector. Both runners are
+ *   # affected equally; useful for measuring how much the prompt
+ *   # context was contributing. This is NOT a RAG ablation —
+ *   # workspace_knowledge is always [] in this eval (real RAG via
+ *   # KB / pgvector is a separate path not exercised here).
+ *   ... yc-vs-runners.js --minimal-context
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -53,7 +61,10 @@ import { runGptSolo } from '../runners/run-gpt-solo.js'
  * each dimension's must_cover into the BenchmarkCase expectation shape
  * for compat with downstream metric consumers.
  */
-function ycToBenchmarkCase(yc: YcCompanyCase): BenchmarkCase {
+function ycToBenchmarkCase(
+  yc: YcCompanyCase,
+  options: { minimalContext?: boolean } = {}
+): BenchmarkCase {
   const dimensions: BenchmarkCase['expected_output']['dimensions'] = {}
   for (const dim of BMC_DIMENSION_IDS) {
     const truth = yc.ground_truth_bmc[dim]
@@ -63,6 +74,24 @@ function ycToBenchmarkCase(yc: YcCompanyCase): BenchmarkCase {
       must_not_cover: truth.must_not_cover ?? []
     }
   }
+
+  const fullQuestion = `请为以下创业项目生成完整的 CC-BMC 商业模型画布（覆盖 9 个维度）：
+
+公司：${yc.company_name}
+一句话定位：${yc.one_liner}
+
+详细描述：
+${yc.description}
+
+行业：${yc.sector}`
+
+  const minimalQuestion = `请为以下创业项目生成完整的 CC-BMC 商业模型画布（覆盖 9 个维度）：
+
+公司：${yc.company_name}
+一句话定位：${yc.one_liner}
+
+行业：${yc.sector}`
+
   return {
     case_id: yc.case_id,
     domain: yc.sector,
@@ -72,15 +101,10 @@ function ycToBenchmarkCase(yc: YcCompanyCase): BenchmarkCase {
       citation: `${yc.company_name} (${yc.yc_batch}) — ${yc.source_url}`
     },
     input: {
-      question: `请为以下创业项目生成完整的 CC-BMC 商业模型画布（覆盖 9 个维度）：
-
-公司：${yc.company_name}
-一句话定位：${yc.one_liner}
-
-详细描述：
-${yc.description}
-
-行业：${yc.sector}`,
+      question: options.minimalContext ? minimalQuestion : fullQuestion,
+      // NOTE: workspace_knowledge is intentionally empty — these YC cases
+      // do not exercise the RAG / vector-retrieval path. Real RAG testing
+      // requires a populated KB (kb-task-service) and is a separate eval.
       workspace_knowledge: [],
       constraints: []
     },
@@ -187,7 +211,7 @@ async function evalOneRunner(
 // Markdown report
 // =============================================================================
 
-function renderReport(rows: ResultRow[]): string {
+function renderReport(rows: ResultRow[], options: { minimalContext?: boolean } = {}): string {
   const lines: string[] = []
   const cases = [...new Set(rows.map((r) => r.case_id))]
   const runners = [...new Set(rows.map((r) => r.runner))]
@@ -198,6 +222,11 @@ function renderReport(rows: ResultRow[]): string {
   lines.push(`Cases: ${cases.length} (${cases.join(', ')})`)
   lines.push(`Runners: ${runners.join(', ')}`)
   lines.push(`Judge: Agent-as-a-Judge (Zhuge et al. 2024) ${process.env.JUDGE_MODE === 'heuristic' ? '· **heuristic mode**' : '· DeepSeek deepseek-chat'}`)
+  if (options.minimalContext) {
+    lines.push(`Context: **minimal** (one_liner + sector only — detailed description stripped). Prompt-richness ablation; not a RAG ablation.`)
+  } else {
+    lines.push(`Context: full (one_liner + detailed description + sector). workspace_knowledge=[] (RAG path not exercised).`)
+  }
   lines.push('')
   lines.push('## TL;DR — total scores per case × runner')
   lines.push('')
@@ -288,6 +317,7 @@ async function main() {
   const args = process.argv.slice(2)
   const caseIdArg = args.find((a) => a.startsWith('--case='))?.split('=')[1]
   const runnersArg = args.find((a) => a.startsWith('--runners='))?.split('=')[1]
+  const minimalContext = args.includes('--minimal-context')
 
   const allCases = loadAllYcCases()
   const cases = caseIdArg
@@ -316,11 +346,16 @@ async function main() {
   console.error(
     `[yc-vs-runners] each Starlink run is full multi-agent pipeline (~15-30s); gpt-solo is single LLM call (~3-8s)`
   )
+  if (minimalContext) {
+    console.error(
+      `[yc-vs-runners] --minimal-context: stripping detailed description, keeping only one_liner + sector. NOTE: this is a prompt-richness ablation, NOT a RAG ablation (workspace_knowledge is always [] in YC eval).`
+    )
+  }
   console.error('')
 
   const rows: ResultRow[] = []
   for (const yc of cases) {
-    const benchCase = ycToBenchmarkCase(yc)
+    const benchCase = ycToBenchmarkCase(yc, { minimalContext })
     for (const r of runnerNames) {
       const fn = runnerFns[r]
       try {
@@ -332,7 +367,7 @@ async function main() {
     }
   }
 
-  const md = renderReport(rows)
+  const md = renderReport(rows, { minimalContext })
   console.log(md)
 
   // Persist
@@ -345,7 +380,8 @@ async function main() {
       .replace(/[-:]/g, '')
       .replace(/\..+/, '')
       .replace('T', '-')
-    const fp = join(reportsDir, `yc-vs-runners-${ts}.md`)
+    const suffix = minimalContext ? '-minctx' : ''
+    const fp = join(reportsDir, `yc-vs-runners-${ts}${suffix}.md`)
     writeFileSync(fp, md)
     console.error(`\n[yc-vs-runners] report written: ${fp}`)
   } catch (err) {
