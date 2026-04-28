@@ -2535,6 +2535,83 @@ function readNumber(source: Record<string, unknown>, keys: string[]) {
   return undefined
 }
 
+/**
+ * Extract one balanced top-level JSON object substring starting at `start`
+ * (which must point at `{`). Tracks string-state so braces inside string
+ * literals don't trip the depth counter. Returns the substring including
+ * outer braces, or null if no balanced object found before EOF.
+ */
+function extractBalancedObject(src: string, start: number): string | null {
+  if (src[start] !== '{') return null
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < src.length; i++) {
+    const ch = src[i]
+    if (escape) { escape = false; continue }
+    if (ch === '\\') { escape = true; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return src.slice(start, i + 1)
+    }
+  }
+  return null
+}
+
+/**
+ * Per-cell partial-recovery fallback. When the top-level JSON.parse fails
+ * (a single malformed cell taints the whole array), this iterates the
+ * cleaned source extracting balanced `{...}` blocks one at a time and
+ * tries to parse each independently. Even one broken cell of three no
+ * longer drops the entire batch — the surviving cells are returned.
+ *
+ * Without this, a single SyntaxError at position N inside cell 2 would
+ * zero out cells 1, 2, AND 3 — a single point of failure for 3 BMC
+ * dimensions. Observed on Notion + Coursera in N=12 evals where
+ * market-agent's verbose JSON occasionally trips on Chinese punctuation.
+ */
+function partialRecoveryParseObjects(
+  cleaned: string,
+  agentName: string
+): MacraNodeData[] {
+  const nodes: MacraNodeData[] = []
+  let cursor = cleaned.indexOf('{')
+  let attempts = 0
+  let recovered = 0
+  while (cursor !== -1 && attempts < 20) {
+    attempts++
+    const objStr = extractBalancedObject(cleaned, cursor)
+    if (!objStr) break
+    try {
+      const cleanedObj = objStr.replace(/,(\s*[}\]])/g, '$1')
+      const node = JSON.parse(cleanedObj) as MacraNodeData
+      // Lightweight shape check: must look like a cc-bmc-card cell
+      if (
+        node &&
+        typeof node === 'object' &&
+        typeof (node as { domain?: string }).domain === 'string' &&
+        typeof (node as { content?: string }).content === 'string'
+      ) {
+        nodes.push(node)
+        recovered++
+      }
+    } catch {
+      // skip this object, continue scanning
+    }
+    cursor = cleaned.indexOf('{', cursor + objStr.length)
+  }
+  if (recovered > 0) {
+    auditLogger.warn({
+      action: `business-langgraph.${agentName}.parseJSON.partial-recovery`,
+      metadata: { recovered, attempts }
+    })
+  }
+  return nodes
+}
+
 export function extractAndParseJSON(content: string, agentName: string): MacraNodeData[] {
   try {
     // 1. 移除 Markdown 代码块标记
@@ -2568,6 +2645,21 @@ export function extractAndParseJSON(content: string, agentName: string): MacraNo
 
     return nodes
   } catch (error) {
+    // Per-cell partial recovery: don't lose ALL cells just because ONE has
+    // a syntax error somewhere in the JSON.
+    const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '')
+    const recovered = partialRecoveryParseObjects(cleanedContent, agentName)
+    if (recovered.length > 0) {
+      auditLogger.warn({
+        action: `business-langgraph.${agentName}.parseJSON.recovered`,
+        metadata: {
+          originalError: String(error),
+          recoveredCount: recovered.length,
+          errorType: error instanceof SyntaxError ? 'SyntaxError' : 'UnknownError'
+        }
+      })
+      return recovered
+    }
     auditLogger.error({
       action: `business-langgraph.${agentName}.parseJSON`,
       metadata: {
