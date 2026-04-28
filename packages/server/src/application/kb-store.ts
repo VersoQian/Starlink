@@ -39,6 +39,11 @@
 import { nanoid } from 'nanoid'
 import { pool } from '../infrastructure/db/pool.js'
 import { embedText, toPgVector } from '../services/embedding-service.js'
+import {
+  detectContentType,
+  extractText,
+  normalizeContentType
+} from './kb-extractor.js'
 import type { KnowledgeSearchResult } from '@starlink/shared'
 
 // =============================================================================
@@ -196,16 +201,31 @@ export class KbStore {
   }
 
   /**
-   * Insert (or replace, when `docId` is provided) a document. Chunks the
-   * content, embeds each chunk, and persists both rows + chunk vectors in
-   * a single transaction.
+   * Insert (or replace, when `docId` is provided) a document.
+   *
+   * Pipeline:
+   *   1. Resolve content-type: explicit `contentType` arg wins; if missing,
+   *      sniff from content via kb-extractor.detectContentType.
+   *   2. Extract prose: kb-extractor.extractText handles plaintext /
+   *      markdown / html / json natively; throws on PDF with install hint.
+   *   3. Chunk the prose via chunkText.
+   *   4. Embed each chunk and persist atomically.
+   *
+   * The original raw content is still stored on `kb_documents.content` so
+   * downstream consumers can re-extract / re-chunk if format support
+   * improves later (e.g. PDF library is added).
    */
   async addDocument(input: AddDocumentInput): Promise<AddDocumentResult> {
     await this.ensureTables()
     const docId = input.docId ?? nanoid()
-    const chunks = chunkText(input.content)
+    const resolvedContentType =
+      input.contentType && input.contentType !== 'text/plain'
+        ? normalizeContentType(input.contentType)
+        : detectContentType(input.content, input.contentType)
+    const prose = extractText(input.content, resolvedContentType)
+    const chunks = chunkText(prose)
     if (chunks.length === 0) {
-      throw new Error('kb-store.addDocument: empty content after chunking')
+      throw new Error('kb-store.addDocument: empty content after extraction + chunking')
     }
 
     const client = await pool.connect()
@@ -232,9 +252,15 @@ export class KbStore {
           input.kbId,
           input.title,
           input.content,
-          input.contentType ?? 'text/plain',
+          // Persist the RESOLVED content type (after sniffing), not the
+          // raw input arg — so listDocuments shows what was actually
+          // detected. Original raw arg lives in metadata for audit.
+          resolvedContentType,
           input.sourceUrl ?? null,
-          JSON.stringify(input.metadata ?? {})
+          JSON.stringify({
+            ...(input.metadata ?? {}),
+            originalContentTypeArg: input.contentType ?? null
+          })
         ]
       )
 

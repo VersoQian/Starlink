@@ -21,6 +21,19 @@ export type HandoffKind =
   | 'debate-verdict'
   | 'action-invocation'
   | 'action-result'
+  /**
+   * Emitted when a registered-agent (registry-mode) subgraph invocation
+   * fails and the orchestrator falls through to legacy inline-LLM. The
+   * conversation continues, but the agent's "registered" path didn't
+   * deliver — operators need to know about the silent downgrade.
+   */
+  | 'agent-degraded'
+  /**
+   * Emitted when a debate or other LLM-budgeted operation hits its
+   * per-trace ceiling and aborts gracefully instead of recursing further.
+   * Conflict ends up unresolved; critic state moves on.
+   */
+  | 'budget-exceeded'
 
 export interface HandoffMeta {
   round: number
@@ -86,6 +99,26 @@ export interface ActionResultPayload {
   ok: boolean
   resultSummary: string
   error?: string
+}
+
+export interface AgentDegradedPayload {
+  /** Which agent's registry path failed. */
+  agentId: string
+  /** Error message from the subgraph attempt. */
+  error: string
+  /** Path the orchestrator fell back to. */
+  fallback: 'legacy-inline-llm' | 'rule-based' | 'noop'
+}
+
+export interface BudgetExceededPayload {
+  /** What budget hit its ceiling. */
+  budgetKind: 'debate-llm-calls' | 'debate-rounds'
+  /** Configured limit (numeric). */
+  limit: number
+  /** Actual usage that triggered the abort. */
+  used: number
+  /** Free-text describing what was aborted (e.g. "debate on conflict X"). */
+  context: string
 }
 
 export interface HandoffLogger {
