@@ -36,8 +36,11 @@ export const USER_SKILL_TAGS = [
  */
 export const UserSkillPayloadSchema = z.object({
   scope: z.enum(['user', 'workspace']),
-  /** Short trait name. Persisted into `memory_items.title`. */
-  title: z.string().min(1).max(24),
+  /** Short trait name. Persisted into `memory_items.title`. Cap raised
+   *  to 60 (was 24) after observing LLM output occasionally producing
+   *  English-language titles ~30-40 chars. The system prompt still asks
+   *  for ≤24 chars; the schema is the runtime safety net. */
+  title: z.string().min(1).max(60),
   /** Descriptive sentence. Persisted into `memory_items.content`. */
   content: z.string().min(4).max(480),
   /** Tags used for retrieval filtering and prompt rendering grouping. */

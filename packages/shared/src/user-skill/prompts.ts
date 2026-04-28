@@ -38,12 +38,15 @@ EXTRACTION RULES:
                     targets SMB", "this product is hardware-heavy"). Tag with
                     the workspaceId in evidence.
 5. Title MUST be ≤ 24 chars. Content MUST be ≤ 480 chars and describe the
-   trait + how the coach should adjust (e.g. "Has B2B SaaS operational
-   background; prefer enterprise-sales examples and skip B2C analogies").
+   trait + how the coach should adjust (e.g. "B2B SaaS 资深背景：偏好
+   企业销售案例，少用 to-C 类比").
 6. confidence ∈ [0, 1]. New skills should start at 0.5–0.7 unless the
    evidence is overwhelming (≥ 0.85).
+7. **Title and content MUST be written in 中文 (Simplified Chinese)** to
+   match the language of conversation summaries and the downstream coach
+   prompts. English in title or content is treated as a malformed output.
 
-7. REFINE (rewrite an existing skill's title/content) when accumulated
+8. REFINE (rewrite an existing skill's title/content) when accumulated
    evidence diverges from the stored text. Use refines for course-correction:
    "5y B2B" → after evidence "actually 3y B2B + 2y B2C". Only newTitle and/or
    newContent fields you want to change; null = keep. Always provide \`reason\`.
@@ -60,7 +63,13 @@ OUTPUT exactly one JSON object, NO markdown fences:
   "decays":  [{"id": "..."}]
 }
 
-If nothing meets the threshold, return all-empty arrays. Do NOT pad output.`
+If nothing meets the threshold, return all-empty arrays. Do NOT pad output.
+
+When multiple DISTINCT durable traits are observable across the summaries
+(e.g. domain background + thinking style + a recurring blind spot all
+showing up in 2+ conversations each), surface them as separate \`creates\`
+entries rather than collapsing into one. Aim for 1-5 creates when evidence
+supports them; the goal is coverage of orthogonal traits, not minimalism.`
 
 /**
  * Build the per-extraction user message. Pairs with USER_SKILL_SYSTEM_PROMPT.

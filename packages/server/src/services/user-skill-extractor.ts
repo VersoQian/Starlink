@@ -22,7 +22,7 @@
 import {
   USER_SKILL_SYSTEM_PROMPT,
   buildUserSkillUserMessage,
-  parseUserSkillExtractionReply,
+  parseUserSkillExtractionReplyDetailed,
   type UserSkillExtractionInput,
   createAuditLogger
 } from '@starlink/shared'
@@ -102,22 +102,25 @@ export class UserSkillExtractor {
         temperature: 0.2
       })
 
-      const parsed = parseUserSkillExtractionReply(response.content ?? '')
-      if (!parsed) {
+      const parseResult = parseUserSkillExtractionReplyDetailed(response.content ?? '')
+      if (!parseResult.ok || !parseResult.data) {
         auditLogger.warn({
           action: 'user-skill-extractor.parse-failed',
           userId: params.userId,
           metadata: {
             traceId: params.traceId,
-            preview: (response.content ?? '').slice(0, 200)
+            reason: parseResult.reason,
+            issues: parseResult.issues ?? null,
+            preview: parseResult.rawPreview ?? (response.content ?? '').slice(0, 200)
           }
         })
         return 0
       }
+      const parsed = parseResult.data
 
       let applied = 0
       // ---- creates ----
-      for (const c of parsed.creates) {
+      for (const [idx, c] of parsed.creates.entries()) {
         const input: UpsertMemoryInput = {
           workspaceId: c.scope === 'workspace' ? params.workspaceId : params.workspaceId,
           userId: params.userId,
@@ -126,7 +129,10 @@ export class UserSkillExtractor {
           title: c.title,
           content: c.content,
           sourceType: 'user-skill-extractor',
-          sourceId: params.traceId,
+          // Differentiate per-create so upsert dedup-by-source doesn't
+          // collapse multiple skills from the same extraction pass into
+          // one row. Each new skill needs its own row identity.
+          sourceId: `${params.traceId}#${idx}`,
           importance: c.importance,
           confidence: c.confidence,
           tags: c.tags,
