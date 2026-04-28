@@ -3,7 +3,20 @@ import { knowledgeEvidenceSchema } from './conversation.js'
 
 export const conversationMessageRoleSchema = z.enum(['user', 'assistant', 'system', 'tool'])
 export const memoryScopeSchema = z.enum(['workspace', 'user', 'agent'])
-export const memoryKindSchema = z.enum(['preference', 'decision', 'insight', 'constraint', 'summary', 'canvas'])
+/**
+ * Memory kinds. The `'user-skill'` kind (added 2026-04-28) carries durable
+ * traits about a specific user — domain background, thinking style, blind
+ * spots — extracted across conversations by `UserSkillExtractor`. Conventions:
+ *
+ *   - `kind === 'user-skill'` rows MUST have non-null `userId`
+ *   - `scope === 'user'`: `workspace_id` should be null (cross-idea / global)
+ *   - `scope === 'workspace'`: both `userId` and `workspaceId` filled (idea-specific)
+ *   - `title` ≤ 24 chars (short trait name)
+ *   - `content` ≤ 480 chars (descriptive sentence)
+ *   - `metadata` carries `{ observedEvidence: string[], lastReinforcedAt: ISO,
+ *     confidenceTrend: number[] }`
+ */
+export const memoryKindSchema = z.enum(['preference', 'decision', 'insight', 'constraint', 'summary', 'canvas', 'user-skill'])
 
 export const conversationSessionSchema = z.object({
   id: z.string(),

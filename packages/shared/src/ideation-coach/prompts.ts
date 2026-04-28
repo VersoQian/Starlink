@@ -53,7 +53,7 @@ Constraints:
  * user just did, recent chat history, and meta dedup hints.
  */
 export function buildCoachUserMessage(input: ReflectionRequest): string {
-  const { event, canvas, recentChat, firedMetaIds } = input
+  const { event, canvas, recentChat, firedMetaIds, userSkillBlock } = input
 
   const canvasSummary = (() => {
     const counts = canvas.nodeCountByKind
@@ -101,12 +101,21 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
         .join('\n')
     : '  (no prior exchange)'
 
+  // Optional user-skill block: when the server has fetched durable traits
+  // for this user, they're rendered here so the LLM can calibrate its
+  // scaffold-type and word choice. Empty/missing → section omitted entirely
+  // so the prompt stays identical to the pre-personalization shape (zero
+  // regression risk on first-session users).
+  const skillSection = userSkillBlock?.trim()
+    ? `\n\n## 用户长期画像（仅供你 calibrate 反思类型 + 用词，不要在回答里复述）\n${userSkillBlock.trim()}`
+    : ''
+
   return `CANVAS:
 ${canvasSummary}
 ${nodeList}
 
 EVENT:
-${eventLine}
+${eventLine}${skillSection}
 
 RECENT EXCHANGE (newest last):
 ${chatLines}

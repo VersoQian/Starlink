@@ -34,6 +34,9 @@ import {
   isMemoryReadEnabled,
   isMemoryWriteEnabled
 } from '../infrastructure/memory/workspace-memory-store.js'
+import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
+import { UserSkillExtractor } from './user-skill-extractor.js'
+import { buildUserSkillPrompt as buildUserSkillPromptShared } from './user-skill-prompt.js'
 import { getCheckpointer } from '../infrastructure/langgraph/checkpointer.js'
 import { runDebate } from '../agents/shared/debate-orchestrator.js'
 import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
@@ -268,9 +271,22 @@ export type BusinessStreamUpdate =
 // ============== Main Service ==============
 export class BusinessLangGraphService {
   private readonly model: BusinessModel | null
+  private readonly conversationMemoryStore: ConversationMemoryStore
+  private readonly userSkillExtractor: UserSkillExtractor
 
-  constructor(model: BusinessModel | null = createLLMModel()) {
+  constructor(
+    model: BusinessModel | null = createLLMModel(),
+    options: {
+      conversationMemoryStore?: ConversationMemoryStore
+      userSkillExtractor?: UserSkillExtractor
+    } = {}
+  ) {
     this.model = model
+    this.conversationMemoryStore =
+      options.conversationMemoryStore ?? new ConversationMemoryStore()
+    this.userSkillExtractor =
+      options.userSkillExtractor ??
+      new UserSkillExtractor({ memoryStore: this.conversationMemoryStore })
   }
 
   private logTrace(params: {
@@ -630,6 +646,7 @@ export class BusinessLangGraphService {
       try {
         await this.writeConversationSummary({
           workspaceId: context.workspaceId,
+          userId: context.userId,
           traceId,
           question: context.question,
           bmcNodeCount,
@@ -1007,6 +1024,26 @@ ${snippets}
   }
 
   /**
+   * Thin instance wrapper around the standalone `buildUserSkillPrompt`
+   * helper (services/user-skill-prompt.ts). Honours `MEMORY_READ_ENABLED`
+   * gate; the standalone helper itself does no env check so callers from
+   * other paths (GraphQL resolver, Next.js routes) decide their own gating.
+   */
+  async buildUserSkillPrompt(
+    userId: string,
+    workspaceId: string,
+    query: string
+  ): Promise<string> {
+    if (!isMemoryReadEnabled()) return ''
+    return buildUserSkillPromptShared(
+      this.conversationMemoryStore,
+      userId,
+      workspaceId,
+      query
+    )
+  }
+
+  /**
    * Collect evidenceSet in the format expected by citation-parser, deriving
    * snippetId when the raw KnowledgeEvidence entries lack one.
    */
@@ -1297,6 +1334,7 @@ ${snippets}
 
   private async writeConversationSummary(args: {
     workspaceId: string
+    userId: string
     traceId: string
     question: string
     bmcNodeCount: number
@@ -1331,6 +1369,18 @@ ${snippets}
       auditLogger.warn({
         action: 'business-langgraph.writeConversationSummary.failed',
         metadata: { traceId: args.traceId, error: String(err) }
+      })
+    }
+
+    // Fire-and-forget user-skill extraction (Layer-1 self-evolution).
+    // Throttled to every Nth call per user via USER_SKILL_EXTRACT_EVERY_N
+    // env (default 3) inside the extractor itself; safe to invoke every
+    // conversation. Errors swallowed by the extractor.
+    if (args.userId && isMemoryWriteEnabled()) {
+      void this.userSkillExtractor.extractUserSkills({
+        userId: args.userId,
+        workspaceId: args.workspaceId,
+        traceId: args.traceId
       })
     }
   }
@@ -1500,7 +1550,15 @@ ${snippets}
    */
   private projectBlackboardForGenerator(
     state: BusinessStateType,
-    self: 'market' | 'product' | 'finance'
+    self: 'market' | 'product' | 'finance',
+    /**
+     * Pre-rendered user-skill block; computed by `buildUserSkillPrompt` in
+     * the runMarketAgent / runProductAgent / runFinanceAgent caller before
+     * invokeRegisteredAgent (because that helper takes a synchronous
+     * projection callback). Empty string means "no skill section to render"
+     * — the subgraph's buildSystemPrompt skips empty blocks.
+     */
+    userSkillPrompt: string
   ) {
     const contextPrompt = this.buildWorkspaceContextPrompt(state)
     const crossContextPrompt = this.buildCrossContextPrompt(state, self)
@@ -1530,6 +1588,7 @@ ${snippets}
       contextPrompt,
       crossContextPrompt,
       supervisorDirectivePrompt,
+      userSkillPrompt,
       messages: [],
       ...ownPrevious
     }
@@ -1544,10 +1603,15 @@ ${snippets}
         return { marketNodes: state.marketNodes }
       }
       try {
+        const userSkillPrompt = await this.buildUserSkillPrompt(
+          state.userId,
+          state.workspaceId,
+          state.question
+        )
         const projected = await this.invokeRegisteredAgent(
           'market-agent',
           state,
-          (s) => this.projectBlackboardForGenerator(s, 'market'),
+          (s) => this.projectBlackboardForGenerator(s, 'market', userSkillPrompt),
           (result) => ({
             marketNodes: (result.marketNodes as MacraNodeData[]) ?? []
           })
@@ -1686,10 +1750,15 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
         return { productNodes: state.productNodes }
       }
       try {
+        const userSkillPrompt = await this.buildUserSkillPrompt(
+          state.userId,
+          state.workspaceId,
+          state.question
+        )
         const projected = await this.invokeRegisteredAgent(
           'product-agent',
           state,
-          (s) => this.projectBlackboardForGenerator(s, 'product'),
+          (s) => this.projectBlackboardForGenerator(s, 'product', userSkillPrompt),
           (result) => ({
             productNodes: (result.productNodes as MacraNodeData[]) ?? []
           })
@@ -1830,10 +1899,15 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
         return { financeNodes: state.financeNodes }
       }
       try {
+        const userSkillPrompt = await this.buildUserSkillPrompt(
+          state.userId,
+          state.workspaceId,
+          state.question
+        )
         const projected = await this.invokeRegisteredAgent(
           'finance-agent',
           state,
-          (s) => this.projectBlackboardForGenerator(s, 'finance'),
+          (s) => this.projectBlackboardForGenerator(s, 'finance', userSkillPrompt),
           (result) => ({
             financeNodes: (result.financeNodes as MacraNodeData[]) ?? []
           })

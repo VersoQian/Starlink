@@ -523,6 +523,13 @@ export const typeDefs = gql`
     canvas: IdeationCanvasInput!
     recentChat: [IdeationChatTurnInput!]!
     firedMetaIds: [String!]!
+    """
+    Optional. When provided, the resolver fetches the user's durable
+    user-skill memories scoped to (userId, workspaceId) and renders them
+    into the coach prompt as a "## 用户长期画像" block. Empty/missing →
+    no block (current behaviour preserved).
+    """
+    workspaceId: ID
   }
 
   type IdeationReflection {
@@ -542,6 +549,11 @@ export const typeDefs = gql`
     userAnswer: String!
     canvas: IdeationWizardCanvasInput!
     recentChat: [IdeationChatTurnInput!]!
+    """
+    Optional. Same semantics as ReflectOnIdeationInput.workspaceId — when
+    set, the resolver injects the user-skill block into the wizard prompt.
+    """
+    workspaceId: ID
   }
 
   type IdeationWizardExtractedNode {

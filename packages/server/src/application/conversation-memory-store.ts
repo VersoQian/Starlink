@@ -58,6 +58,17 @@ type MemorySearchOptions = {
   scope?: MemoryScope
   kind?: MemoryKind
   limit?: number
+  /**
+   * Filter by user. When set, queries restrict to rows where
+   * `user_id = userId`. Required when reading `kind === 'user-skill'` rows.
+   */
+  userId?: string
+  /**
+   * When true, the workspace_id filter widens to "matches workspaceId OR is
+   * NULL" — returns both workspace-scoped and global (cross-workspace) rows.
+   * Used by user-skill reads which want both per-idea and per-user traits.
+   */
+  includeGlobalUser?: boolean
 }
 
 type CaptureConversationOutcomeInput = {
@@ -360,7 +371,7 @@ export class ConversationMemoryStore {
     workspaceId: string,
     query: string,
     limit = 8,
-    options: Pick<MemorySearchOptions, 'scope' | 'kind'> = {}
+    options: Pick<MemorySearchOptions, 'scope' | 'kind' | 'userId' | 'includeGlobalUser'> = {}
   ): Promise<MemoryItem[]> {
     await this.ensureTables()
     const normalizedQuery = query.trim()
@@ -387,7 +398,7 @@ export class ConversationMemoryStore {
     workspaceId: string,
     query: string,
     limit: number,
-    options: Pick<MemorySearchOptions, 'scope' | 'kind'>
+    options: Pick<MemorySearchOptions, 'scope' | 'kind' | 'userId' | 'includeGlobalUser'>
   ): Promise<MemoryItem[]> {
     try {
       const embedding = await embedText(query)
@@ -416,6 +427,77 @@ export class ConversationMemoryStore {
       })
       return []
     }
+  }
+
+  /**
+   * User-skill specific helper. Two layers in one query:
+   *   - workspace-scoped skills for this idea (scope='workspace', workspace_id=$W)
+   *   - global user skills across ideas (scope='user', workspace_id IS NULL)
+   *
+   * Both filtered by userId. If `query` is empty/missing, falls back to a
+   * recency-ordered list (no embedding required) — useful for the extractor
+   * which wants to see all of a user's skills regardless of similarity to
+   * any current query.
+   *
+   * Confidence threshold: callers should filter `confidence < 0.5` items
+   * themselves at render time; this method returns all rows so the
+   * extractor can also see low-confidence items it might want to reinforce.
+   */
+  async searchUserSkills(
+    userId: string,
+    workspaceId: string,
+    options: { query?: string; limit?: number } = {}
+  ): Promise<MemoryItem[]> {
+    await this.ensureTables()
+    const limit = clampLimit(options.limit ?? 20, 1, 50)
+    const query = options.query?.trim()
+
+    if (query) {
+      return this.searchMemories(workspaceId, query, limit, {
+        kind: 'user-skill',
+        userId,
+        includeGlobalUser: true
+      })
+    }
+
+    // Recency fallback (no embedding cost).
+    const { filters, params } = buildMemoryFilters(workspaceId, {
+      kind: 'user-skill',
+      userId,
+      includeGlobalUser: true
+    })
+    params.push(limit)
+    const result = await pool.query(
+      `SELECT * FROM memory_items
+       WHERE ${filters.join(' AND ')}
+       ORDER BY confidence DESC, updated_at DESC
+       LIMIT $${params.length}`,
+      params
+    )
+    return result.rows.map(rowToMemory)
+  }
+
+  /**
+   * Read recent conversation summaries for a single user across ALL their
+   * workspaces — used by `UserSkillExtractor` to look at cross-idea patterns
+   * before deciding which traits are durable enough to promote to user-skill.
+   *
+   * Pulls rows where kind='summary' (the kind written by
+   * writeConversationSummary in business-langgraph.ts). Bypasses
+   * workspace_id filter intentionally — this is the one query in the store
+   * that is per-USER not per-WORKSPACE.
+   */
+  async listUserSummaries(userId: string, limit = 10): Promise<MemoryItem[]> {
+    await this.ensureTables()
+    const clamped = clampLimit(limit, 1, 30)
+    const result = await pool.query(
+      `SELECT * FROM memory_items
+       WHERE user_id = $1 AND kind = 'summary' AND archived_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [userId, clamped]
+    )
+    return result.rows.map(rowToMemory)
   }
 
   async captureConversationOutcome(input: CaptureConversationOutcomeInput): Promise<MemoryItem[]> {
@@ -548,14 +630,35 @@ export class ConversationMemoryStore {
       [ids]
     )
   }
+
+  /**
+   * Soft-archive a memory row. Sets `archived_at = now()` so subsequent
+   * filters (which include `archived_at IS NULL`) skip it. Used by
+   * `UserSkillExtractor` to retire stale / contradicted skills without
+   * losing the audit trail.
+   */
+  async archiveMemory(id: string): Promise<void> {
+    await this.ensureTables()
+    await pool.query(
+      'UPDATE memory_items SET archived_at = now() WHERE id = $1 AND archived_at IS NULL',
+      [id]
+    )
+  }
 }
 
 function buildMemoryFilters(
   workspaceId: string,
-  options: Pick<MemorySearchOptions, 'scope' | 'kind'> = {}
+  options: Pick<MemorySearchOptions, 'scope' | 'kind' | 'userId' | 'includeGlobalUser'> = {}
 ) {
   const params: unknown[] = [workspaceId]
-  const filters = ['workspace_id = $1', 'archived_at IS NULL']
+  // includeGlobalUser widens the workspace match to also include cross-user
+  // global rows (workspace_id IS NULL). Used by user-skill reads which want
+  // both per-idea (scope='workspace') AND per-user (scope='user') in the
+  // same query.
+  const workspaceFilter = options.includeGlobalUser
+    ? '(workspace_id = $1 OR workspace_id IS NULL)'
+    : 'workspace_id = $1'
+  const filters = [workspaceFilter, 'archived_at IS NULL']
 
   if (options.scope) {
     params.push(options.scope)
@@ -564,6 +667,10 @@ function buildMemoryFilters(
   if (options.kind) {
     params.push(options.kind)
     filters.push(`kind = $${params.length}`)
+  }
+  if (options.userId) {
+    params.push(options.userId)
+    filters.push(`user_id = $${params.length}`)
   }
 
   return { filters, params }

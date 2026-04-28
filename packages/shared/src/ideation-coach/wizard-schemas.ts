@@ -49,7 +49,15 @@ export const WizardStepRequestSchema = z.object({
         content: z.string()
       })
     )
-    .max(8)
+    .max(8),
+  /**
+   * Pre-rendered user-skill markdown block (server-fetched). See the same
+   * field on `ReflectionRequestSchema` (schemas.ts) for the shape; the
+   * wizard prompt injects this so step-by-step extraction can pick a more
+   * informed `nextQuestion` (e.g. skip basic to-B/to-C clarification when
+   * the user-skill profile already says "B2B background").
+   */
+  userSkillBlock: z.string().optional()
 })
 
 export type WizardStepRequest = z.infer<typeof WizardStepRequestSchema>

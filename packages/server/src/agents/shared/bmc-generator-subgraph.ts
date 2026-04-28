@@ -68,6 +68,13 @@ export function makeBmcGeneratorState() {
       reducer: (_a, b) => b,
       default: () => ''
     }),
+    /**
+     * Pre-rendered user-skill block (server fetched). Empty when memory
+     * read is disabled, the user has no extracted skills yet, or the
+     * benchmark uses a fresh userId. Renders below `supervisorDirective`
+     * so per-user calibration influences round-2+ revisions explicitly.
+     */
+    userSkillPrompt: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
     messages: Annotation<BaseMessage[]>({
       reducer: (a, b) => a.concat(b),
       default: () => []
@@ -123,6 +130,12 @@ function buildSystemPrompt(profile: AgentProfile, state: BmcGeneratorStateType):
   if (state.contextPrompt) sections.push('\n\n' + state.contextPrompt.trim())
   if (state.crossContextPrompt) sections.push('\n\n' + state.crossContextPrompt.trim())
   if (state.supervisorDirectivePrompt) sections.push('\n\n' + state.supervisorDirectivePrompt.trim())
+  if (state.userSkillPrompt) {
+    sections.push(
+      '\n\n## 用户长期画像（仅供你 calibrate cell 内容深度 + 用词，不要在回答里复述）\n' +
+        state.userSkillPrompt.trim()
+    )
+  }
   sections.push(renderKnowledgeContext(state.knowledgeEvidence ?? []))
   sections.push(getRevisionSuffix(state.roundNumber))
   return sections.join('')

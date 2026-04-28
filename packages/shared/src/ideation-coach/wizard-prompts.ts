@@ -74,12 +74,17 @@ export function buildWizardUserMessage(
         .join('\n')
     : '  (no prior exchange)'
   const nextStep = nextWizardStep(input.step)
+  // Same pattern as buildCoachUserMessage: optional user-skill block,
+  // server-fetched, only rendered when non-empty.
+  const skillSection = input.userSkillBlock?.trim()
+    ? `\n\n## 用户长期画像（仅供你避免重复问已知信息 + 调整下一题难度，不要在回答里复述）\n${input.userSkillBlock.trim()}`
+    : ''
   return `CURRENT STEP: ${input.step}
 EXPECTED KIND for extraction: ${expectedKind}
 NEXT STEP: ${nextStep}
 
 CANVAS (so far):
-${canvasSummary}
+${canvasSummary}${skillSection}
 
 RECENT EXCHANGE (newest last):
 ${chatLines}

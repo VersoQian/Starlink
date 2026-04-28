@@ -72,7 +72,16 @@ export const ReflectionRequestSchema = z.object({
       })
     )
     .max(8),
-  firedMetaIds: z.array(z.string()).default([])
+  firedMetaIds: z.array(z.string()).default([]),
+  /**
+   * Pre-rendered user-skill markdown block (server-fetched). When present,
+   * the coach prompt builder injects it as "## 用户长期画像" so the LLM can
+   * calibrate its scaffold-type choice + word choice without the coach
+   * itself re-querying the memory store. Server is source of truth; client
+   * never fills this. See `packages/shared/src/user-skill/prompts.ts`
+   * `renderUserSkillBlock` for the format.
+   */
+  userSkillBlock: z.string().optional()
 })
 
 export type ReflectionRequest = z.infer<typeof ReflectionRequestSchema>

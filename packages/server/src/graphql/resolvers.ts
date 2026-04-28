@@ -30,6 +30,14 @@ import {
   reflectOnIdeation,
   processIdeationWizardStep
 } from '../services/ideation-coach-service.js'
+import { buildUserSkillPrompt } from '../services/user-skill-prompt.js'
+import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
+
+// Lazy module-level singleton: constructed on first use, shares the same
+// `pool` (infrastructure/db/pool.ts) all other store consumers use, so no
+// extra connections. Used by the user-skill block fetch in the
+// reflectOnIdeation / processIdeationWizardStep resolvers below.
+const defaultConversationMemoryStore = new ConversationMemoryStore()
 
 export const resolvers = {
   JSON: GraphQLJSON,
@@ -682,13 +690,33 @@ export const resolvers = {
           }
           recentChat: Array<{ role: string; content: string }>
           firedMetaIds: string[]
+          workspaceId?: string | null
         }
-      }
+      },
+      context: GraphQLContext
     ) => {
       // Cast to ReflectionRequest — Apollo strips the GraphQL types;
       // shared Zod will reject anything malformed downstream, but this
       // resolver only does the bare adaptation.
-      const req = args.input as unknown as Parameters<typeof reflectOnIdeation>[0]
+      const baseReq = args.input as unknown as Parameters<typeof reflectOnIdeation>[0]
+      // User-skill block: server-fetched (never trusted from client).
+      // Skip fetch when workspaceId / userId missing — both layers of the
+      // skill query require them. Build helper returns '' on any failure
+      // (no PG, no skills, etc) so the downstream prompt stays identical
+      // to the pre-personalization shape.
+      const userSkillBlock =
+        context.userId && args.input.workspaceId
+          ? await buildUserSkillPrompt(
+              defaultConversationMemoryStore,
+              context.userId,
+              args.input.workspaceId,
+              args.input.canvas.nodes
+                .map((n) => `${n.label}: ${n.content}`)
+                .join(' · ')
+                .slice(0, 240) || 'reflection'
+            )
+          : ''
+      const req = { ...baseReq, userSkillBlock }
       const result = await reflectOnIdeation(req)
       // Map scaffold "so-what" / "evidence-needed" to their GraphQL enum
       // forms (snake_case) since GraphQL enums can't have hyphens.
@@ -718,12 +746,24 @@ export const resolvers = {
             edgeCount: number
           }
           recentChat: Array<{ role: string; content: string }>
+          workspaceId?: string | null
         }
-      }
+      },
+      context: GraphQLContext
     ) => {
-      const req = args.input as unknown as Parameters<
+      const baseReq = args.input as unknown as Parameters<
         typeof processIdeationWizardStep
       >[0]
+      const userSkillBlock =
+        context.userId && args.input.workspaceId
+          ? await buildUserSkillPrompt(
+              defaultConversationMemoryStore,
+              context.userId,
+              args.input.workspaceId,
+              args.input.userAnswer.slice(0, 240) || args.input.step
+            )
+          : ''
+      const req = { ...baseReq, userSkillBlock }
       return await processIdeationWizardStep(req)
     }
   },
