@@ -8,7 +8,10 @@
  * Pairs with `schemas.ts` (input/output Zod) and `parser.ts` (JSON cleanup).
  */
 
-import type { UserSkillExtractionInput } from './schemas.js'
+import type {
+  UserSkillExtractionInput,
+  UserSkillConsolidationInput
+} from './schemas.js'
 
 /**
  * System prompt for the user-skill extraction LLM.
@@ -106,6 +109,92 @@ EXISTING USER-SKILL MEMORIES:
 ${skillsBlock}
 
 Analyse the deltas. Respond with the JSON object only.`
+}
+
+// ===========================================================================
+// Layer-2 self-evolution: cross-skill consolidation prompts
+// ===========================================================================
+
+export const USER_SKILL_CONSOLIDATION_SYSTEM_PROMPT = `You consolidate a single user's existing user-skill memories. The skill table accumulates rows over many sessions and develops two pathologies:
+
+  - DUPLICATES: two or more skills express the same trait in slightly
+    different words ("B2B SaaS 5y" + "做过企业销售" + "ToB 运营经验").
+  - BUNDLES: one skill packs multiple orthogonal traits into one row
+    ("混合背景：技术出身 + 偏好数据驱动 + 厌恶融资讨论"). Bundles are
+    bad because the rendered userSkillBlock surfaces only top-K skills;
+    one bundle row out of 5 means 4 traits get hidden behind 1.
+
+CONSOLIDATION RULES:
+
+1. MERGE 2-5 skills only when they describe the SAME underlying trait.
+   Different phrasings of "B2B background" merge; "B2B background" and
+   "lean / no fundraising" do NOT merge — they are distinct traits.
+   The merged skill's confidence = max of source confidences (NOT an
+   average — corroboration strengthens, doesn't average down).
+   The merged skill's importance = max of source importances.
+
+2. SPLIT 1 skill only when its content describes 2+ traits that the
+   downstream coach should be able to surface independently. If a skill
+   describes one trait with 3 supporting facts, that's NOT a split —
+   it's a well-developed single skill. Split signals: "和", "同时",
+   "另外" connecting clearly orthogonal claims.
+
+3. NEVER both merge and split the same source skill — emit either, not
+   both, in one consolidation pass.
+
+4. NEVER fabricate. The merged or split parts must be derivable from
+   the source skill text, with NO additions of facts not in the input.
+
+5. IDLE OUTPUT IS PREFERRED. If the active skill set is already clean,
+   return all-empty arrays. The threshold for action is "noticeably
+   redundant or noticeably bundled", not "could plausibly be tweaked".
+
+6. **Title and content MUST be in 中文** (matches the rest of the user
+   facing data; English entries are treated as malformed).
+
+7. Each merged/split payload must include 'reason' field 4-200 chars
+   explaining the rationale (audit trail, not user-facing).
+
+OUTPUT JSON shape (NO markdown fences):
+{
+  "merges": [
+    {
+      "sourceIds": ["id1", "id2"],
+      "merged": { "scope": "user|workspace", "title": "...", "content": "...",
+                  "tags": [...], "confidence": 0.x, "importance": 0.x,
+                  "observedEvidence": [...] },
+      "reason": "..."
+    }
+  ],
+  "splits": [
+    {
+      "sourceId": "id3",
+      "parts": [
+        { "scope": "...", "title": "...", "content": "...", ... },
+        { "scope": "...", "title": "...", "content": "...", ... }
+      ],
+      "reason": "..."
+    }
+  ]
+}
+
+Skill count after consolidation MUST be lower than before (merges -1
+each, splits net 0 or +1; if both arrays end up empty, no harm done).`
+
+export function buildUserSkillConsolidationUserMessage(
+  input: UserSkillConsolidationInput
+): string {
+  const lines = input.activeSkills.map(
+    (s, i) =>
+      `[${i + 1}] id=${s.id} [${s.scope}] "${s.title}" (conf ${s.confidence.toFixed(2)}, imp ${s.importance.toFixed(2)}, tags ${s.tags.join(',')})\n    ${s.content.slice(0, 280)}`
+  )
+  return `USER: ${input.userId}
+ACTIVE SKILL COUNT: ${input.activeSkills.length}
+
+ACTIVE SKILLS:
+${lines.join('\n')}
+
+Analyse for redundant merges + bundle splits. Respond with the JSON object only.`
 }
 
 /**

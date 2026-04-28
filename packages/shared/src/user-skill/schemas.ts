@@ -133,3 +133,69 @@ export const UserSkillExtractionInputSchema = z.object({
 })
 
 export type UserSkillExtractionInput = z.infer<typeof UserSkillExtractionInputSchema>
+
+// ===========================================================================
+// Layer-2 self-evolution: cross-skill consolidation (2026-04-28)
+// ===========================================================================
+
+/**
+ * `UserSkillConsolidator` runs periodically (when active skill count for a
+ * user exceeds a threshold, default 15) and proposes:
+ *
+ * - `merges`: 2+ existing skills that semantically overlap collapse into
+ *   one new skill ("B2B 销售经验" + "做过 enterprise SaaS" → "B2B 资深背景")
+ * - `splits`: 1 existing skill whose evidence shows it bundles 2+ orthogonal
+ *   traits gets split ("混合背景：B2B + 偏好数据驱动" → 2 separate rows)
+ *
+ * Each merge consumes its source skills (archive); each split consumes its
+ * source. The replacement payloads use the same UserSkillPayload shape as
+ * `creates` from the extractor, so downstream upsert code paths stay
+ * uniform.
+ */
+export const UserSkillConsolidationInputSchema = z.object({
+  userId: z.string(),
+  /** All active (non-archived, confidence ≥ 0.5) skills for this user. */
+  activeSkills: z
+    .array(
+      z.object({
+        id: z.string(),
+        scope: z.enum(['user', 'workspace']),
+        title: z.string(),
+        content: z.string(),
+        confidence: z.number(),
+        importance: z.number(),
+        tags: z.array(z.string())
+      })
+    )
+    .min(2)
+    .max(40)
+})
+export type UserSkillConsolidationInput = z.infer<typeof UserSkillConsolidationInputSchema>
+
+export const UserSkillConsolidationOutputSchema = z.object({
+  /** Each merge: archive `sourceIds` (≥2), create `merged` as a new skill. */
+  merges: z
+    .array(
+      z.object({
+        sourceIds: z.array(z.string()).min(2).max(5),
+        merged: UserSkillPayloadSchema,
+        reason: z.string().min(4).max(200)
+      })
+    )
+    .max(5)
+    .default([]),
+  /** Each split: archive `sourceId`, create each of `parts` as a new skill. */
+  splits: z
+    .array(
+      z.object({
+        sourceId: z.string(),
+        parts: z.array(UserSkillPayloadSchema).min(2).max(3),
+        reason: z.string().min(4).max(200)
+      })
+    )
+    .max(3)
+    .default([])
+})
+export type UserSkillConsolidationOutput = z.infer<
+  typeof UserSkillConsolidationOutputSchema
+>

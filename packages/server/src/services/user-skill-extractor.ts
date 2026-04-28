@@ -31,6 +31,7 @@ import type {
   ConversationMemoryStore,
   UpsertMemoryInput
 } from '../application/conversation-memory-store.js'
+import { UserSkillConsolidator } from './user-skill-consolidator.js'
 
 const auditLogger = createAuditLogger('packages/server:services:user-skill-extractor')
 
@@ -46,10 +47,18 @@ const EXTRACT_EVERY_N = Math.max(1, Number(process.env.USER_SKILL_EXTRACT_EVERY_
 export class UserSkillExtractor {
   private readonly llm: LLMClient
   private readonly memoryStore: ConversationMemoryStore
+  private readonly consolidator: UserSkillConsolidator
 
-  constructor(args: { memoryStore: ConversationMemoryStore; llm?: LLMClient }) {
+  constructor(args: {
+    memoryStore: ConversationMemoryStore
+    llm?: LLMClient
+    consolidator?: UserSkillConsolidator
+  }) {
     this.memoryStore = args.memoryStore
     this.llm = args.llm ?? new LLMClient()
+    this.consolidator =
+      args.consolidator ??
+      new UserSkillConsolidator({ memoryStore: this.memoryStore, llm: this.llm })
   }
 
   /**
@@ -245,7 +254,26 @@ export class UserSkillExtractor {
         }
       })
 
-      return applied
+      // Layer-2 self-evolution trigger. The consolidator's own threshold
+      // check (USER_SKILL_CONSOLIDATE_THRESHOLD, default 15) + cooldown
+      // (1h per user) gate whether real LLM work fires; calling
+      // unconditionally is cheap. Errors are swallowed inside
+      // `consolidate()` so an extractor success never gets reverted by
+      // a downstream consolidator failure.
+      const consolidated = await this.consolidator.consolidate({
+        userId: params.userId,
+        workspaceId: params.workspaceId,
+        traceId: params.traceId
+      })
+      if (consolidated > 0) {
+        auditLogger.info({
+          action: 'user-skill-extractor.consolidator-applied',
+          userId: params.userId,
+          metadata: { traceId: params.traceId, changes: consolidated }
+        })
+      }
+
+      return applied + consolidated
     } catch (error) {
       auditLogger.warn({
         action: 'user-skill-extractor.failed',

@@ -15,7 +15,9 @@ import { ZodError } from 'zod'
 import {
   UserSkillExtractionOutputSchema,
   UserSkillPayloadSchema,
-  type UserSkillExtractionOutput
+  UserSkillConsolidationOutputSchema,
+  type UserSkillExtractionOutput,
+  type UserSkillConsolidationOutput
 } from './schemas.js'
 
 export interface ParseResult {
@@ -121,4 +123,48 @@ export function parseUserSkillExtractionReply(
 ): UserSkillExtractionOutput | null {
   const result = parseUserSkillExtractionReplyDetailed(raw)
   return result.ok ? result.data ?? null : null
+}
+
+// ===========================================================================
+// Layer-2 consolidation reply parser
+// ===========================================================================
+
+/**
+ * Detailed parser for `UserSkillConsolidator` LLM reply. Same pattern as the
+ * extractor parser: strip fences, balance-match the first JSON block,
+ * Zod-validate. Per-item recovery is intentionally NOT applied here —
+ * partial consolidation output is dangerous (a half-applied merge would
+ * archive sources without creating the merged replacement). All-or-nothing.
+ */
+export function parseUserSkillConsolidationReplyDetailed(raw: string): {
+  ok: boolean
+  data?: UserSkillConsolidationOutput
+  reason?: 'no-json-block' | 'json-syntax' | 'schema-mismatch'
+  issues?: Array<{ path: string; message: string }>
+  rawPreview?: string
+} {
+  if (!raw) return { ok: false, reason: 'no-json-block', rawPreview: '' }
+  const stripped = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
+  const match = stripped.match(/\{[\s\S]*\}/)
+  if (!match) {
+    return { ok: false, reason: 'no-json-block', rawPreview: raw.slice(0, 200) }
+  }
+  let json: unknown
+  try {
+    json = JSON.parse(match[0])
+  } catch {
+    return { ok: false, reason: 'json-syntax', rawPreview: match[0].slice(0, 200) }
+  }
+  const parsed = UserSkillConsolidationOutputSchema.safeParse(json)
+  if (parsed.success) return { ok: true, data: parsed.data }
+  const err = parsed.error as ZodError
+  return {
+    ok: false,
+    reason: 'schema-mismatch',
+    issues: err.errors.slice(0, 8).map((i) => ({
+      path: i.path.join('.'),
+      message: i.message
+    })),
+    rawPreview: match[0].slice(0, 300)
+  }
 }
