@@ -61,26 +61,13 @@ export type CriticConflict = MacraNodeData & {
   relatedAgents?: string[]
 }
 
-export type CriticHumanDecision =
-  | { kind: 'accepted' }
-  | { kind: 'edit_plan'; plan: string }
-  | { kind: 'rejected' }
-  | { kind: 'none' }
-
-export function parseHumanDecision(raw: unknown): CriticHumanDecision {
-  if (typeof raw !== 'string') return { kind: 'none' }
-  if (raw.startsWith('[ACCEPTED]')) return { kind: 'accepted' }
-  if (raw.startsWith('[EDIT_PLAN]')) {
-    // Format from awaitHumanNode's interrupt payload: '[EDIT_PLAN]:<plan>'.
-    // Strip both the marker and the leading ':' (or '：' fullwidth colon)
-    // delimiter so the stored `plan` is the user's actual override text,
-    // not the protocol delimiter. Caught by smoke-hitl-langgraph.ts.
-    const tail = raw.slice('[EDIT_PLAN]'.length).trim()
-    const plan = tail.replace(/^[:：]\s*/, '')
-    return { kind: 'edit_plan', plan }
-  }
-  return { kind: 'rejected' }
-}
+// Re-exported from `./parser.js` so unit tests can import the parser
+// without triggering this module's `ready` IIFE (which awaits agent.yaml
+// loading + LLM-model construction — fine in production but hostile to
+// dist/-based test runners that don't ship the yaml alongside graph.js).
+import { parseHumanDecision, type CriticHumanDecision } from './parser.js'
+export type { CriticHumanDecision }
+export { parseHumanDecision }
 
 // ============== State ==============
 

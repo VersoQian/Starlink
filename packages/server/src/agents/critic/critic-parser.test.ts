@@ -10,7 +10,11 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseHumanDecision } from './graph.js'
+// Import from parser.js directly (NOT graph.js). graph.js triggers the
+// `ready` IIFE on import, which loads agent.yaml + builds an LLM model —
+// neither is available in the dist/-based test runner. parser.js has no
+// module-level side effects.
+import { parseHumanDecision } from './parser.js'
 
 test('parseHumanDecision: ACCEPTED → kind=accepted', () => {
   const r = parseHumanDecision('[ACCEPTED]')
