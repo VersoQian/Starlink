@@ -20,6 +20,7 @@
     "smoke:langsmith": "pnpm run build && node --env-file=.env dist/scripts/smoke-langsmith-config.js",
     "smoke:hitl-cross-instance": "pnpm run build && node --env-file=.env dist/scripts/smoke-hitl-cross-instance.js",
     "smoke:hitl-langgraph": "pnpm run build && node dist/scripts/smoke-hitl-langgraph.js",
+    "smoke:hitl-pg-cross-instance": "pnpm run build && node --env-file=.env dist/scripts/smoke-hitl-pg-cross-instance.js",
     "validate:agents": "pnpm run build && node dist/scripts/validate-agents.js",
     "benchmark:run": "pnpm run build && node --env-file=.env dist/benchmark/cli.js",
     "smoke:all": "pnpm run build && node dist/scripts/smoke-task-event-store.js && node dist/scripts/smoke-conversation-runtime-store.js && node dist/scripts/smoke-access-subscriptions.js && node dist/scripts/smoke-citation-pipeline.js"
