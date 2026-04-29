@@ -71,7 +71,13 @@ export function parseHumanDecision(raw: unknown): CriticHumanDecision {
   if (typeof raw !== 'string') return { kind: 'none' }
   if (raw.startsWith('[ACCEPTED]')) return { kind: 'accepted' }
   if (raw.startsWith('[EDIT_PLAN]')) {
-    return { kind: 'edit_plan', plan: raw.slice('[EDIT_PLAN]'.length).trim() }
+    // Format from awaitHumanNode's interrupt payload: '[EDIT_PLAN]:<plan>'.
+    // Strip both the marker and the leading ':' (or '：' fullwidth colon)
+    // delimiter so the stored `plan` is the user's actual override text,
+    // not the protocol delimiter. Caught by smoke-hitl-langgraph.ts.
+    const tail = raw.slice('[EDIT_PLAN]'.length).trim()
+    const plan = tail.replace(/^[:：]\s*/, '')
+    return { kind: 'edit_plan', plan }
   }
   return { kind: 'rejected' }
 }
