@@ -99,6 +99,30 @@ export const conversationEventSchema = z.discriminatedUnion('type', [
     type: z.literal('seminar.decision.requested'),
     conversationId: z.string(),
     payload: seminarDecisionRequestedPayloadSchema
+  }),
+  /**
+   * Sub-graph internal progress event (LangGraph subgraphs:true). Emitted
+   * from `BusinessLangGraphService.streamConversation` whenever a registered
+   * agent's ReAct subgraph yields an internal node update — e.g. ToolNode
+   * invocation inside market/product/finance generators. Lets the frontend
+   * render breadcrumbs ("market-agent is calling web-search…") between
+   * the high-level phase / graph-diff events that already exist.
+   *
+   * Payload kept narrow on purpose: full subgraph state lives only in the
+   * LangGraph checkpoint, never on the wire (see streamConversation in
+   * business-langgraph.ts:472 for the upstream emission point).
+   */
+  z.object({
+    type: z.literal('agent/subagent-progress'),
+    conversationId: z.string(),
+    payload: z.object({
+      /** LangGraph namespace path; entries are `<parentNode>:<subgraphCheckpointId>`. */
+      ns: z.array(z.string()),
+      /** Subgraph-internal node that produced the update (e.g. 'invoke-agent', 'parse'). */
+      nodeName: z.string(),
+      /** Top-level keys of the subgraph state that changed. */
+      payloadKeys: z.array(z.string())
+    })
   })
 ])
 

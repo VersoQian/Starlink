@@ -15,6 +15,15 @@ export type ConversationProgressEvent = {
     | 'seminar.turn.completed'
     | 'seminar.decision.made'
     | 'seminar.decision.requested'
+    /**
+     * Sub-graph internal progress (e.g. ToolNode invocation inside the
+     * BMC ReAct loop). Server emits this when LangGraph's `subgraphs:true`
+     * stream yields a non-empty namespace path. Payload shape:
+     *   { ns: string[], nodeName: string, payloadKeys: string[] }
+     * Frontend uses ns[0] (parent agent) + nodeName to render breadcrumbs
+     * like "market-agent is calling web-search…" between phase changes.
+     */
+    | 'agent/subagent-progress'
   conversationId: string
   status?: 'idle' | 'running' | 'failed' | 'completed'
   message?: string | null

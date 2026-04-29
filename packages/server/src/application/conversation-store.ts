@@ -893,6 +893,28 @@ export class ConversationStore {
           continue
         }
 
+        if (update.type === 'subagent-progress') {
+          // BMC subgraph internal state update (e.g. ToolNode invocation,
+          // intermediate LLM call inside market/product/finance ReAct loop).
+          // Surface to subscribers as a lightweight 'agent/subagent-progress'
+          // ConversationEvent so the frontend can render breadcrumbs like
+          // "market-agent is calling web-search…" between high-level
+          // node-completion events.
+          //
+          // Payload kept narrow on purpose: full subgraph state lives in
+          // the LangGraph checkpoint, never on the wire.
+          await publishEvent({
+            type: 'agent/subagent-progress',
+            conversationId,
+            payload: {
+              ns: update.ns,
+              nodeName: update.nodeName,
+              payloadKeys: update.payloadKeys
+            }
+          } as ConversationEvent)
+          continue
+        }
+
         if (update.type === 'interrupt') {
           if (this.hitlEnabled) {
             const userDecision = await this.waitForDecisionApproval({

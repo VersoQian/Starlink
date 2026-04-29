@@ -215,6 +215,17 @@ export function useMacraConversation(workspaceId: string) {
   const [hitlConflicts, setHitlConflicts] = useState<ConflictDetection[]>([])
   const [showHitlModal, setShowHitlModal] = useState(false)
   const [totalDuration, setTotalDuration] = useState<number>()
+  /**
+   * Latest sub-graph activity breadcrumb (LangGraph subgraphs:true stream).
+   * Frontend renders e.g. "market-agent · invoke-agent" while the BMC
+   * generator is mid-ReAct; cleared when phase changes or stream ends.
+   */
+  const [subAgentActivity, setSubAgentActivity] = useState<{
+    parentNode: string
+    nodeName: string
+    payloadKeys: string[]
+    at: number
+  } | null>(null)
 
   const stageRef = useRef<MacraStage>('input')
   const phaseRef = useRef<MacraPhase>('idle')
@@ -444,6 +455,30 @@ export function useMacraConversation(workspaceId: string) {
     if (event.type === 'status' && event.status === 'failed') {
       updateStage('output')
       updatePhase('idle')
+      setSubAgentActivity(null)
+      return
+    }
+
+    if (event.type === 'agent/subagent-progress') {
+      // Lightweight breadcrumb update — server emits these from the
+      // BMC ReAct subgraph's internal nodes (call-llm, tools, parse).
+      // We capture only the most recent so UI shows current activity
+      // without a scrolling log.
+      const payload = event.payload as
+        | { ns?: string[]; nodeName?: string; payloadKeys?: string[] }
+        | undefined
+      if (!payload || !Array.isArray(payload.ns) || typeof payload.nodeName !== 'string') {
+        return
+      }
+      // ns[0] format: "<parentNode>:<subgraphCheckpointId>". Take the
+      // parent-node prefix as the human-readable agent name.
+      const parentNode = (payload.ns[0] ?? '').split(':')[0] || '_unknown_'
+      setSubAgentActivity({
+        parentNode,
+        nodeName: payload.nodeName,
+        payloadKeys: Array.isArray(payload.payloadKeys) ? payload.payloadKeys : [],
+        at: Date.now()
+      })
     }
   }, [runCritic, syncAgentStatuses, updatePhase, updateStage])
 
@@ -463,6 +498,7 @@ export function useMacraConversation(workspaceId: string) {
     setHitlConflicts([])
     setShowHitlModal(false)
     setTotalDuration(undefined)
+    setSubAgentActivity(null)
     updateStage('input')
     updatePhase('idle')
   }, [updateConflicts, updatePhase, updateStage, workspaceId])
@@ -616,6 +652,7 @@ export function useMacraConversation(workspaceId: string) {
     hitlConflicts,
     showHitlModal,
     totalDuration,
+    subAgentActivity,
     startAnalysis,
     approveDecision,
     resolveConflict,
