@@ -64,6 +64,43 @@ function isDebateEnabled(): boolean {
   return process.env.DEBATE_ENABLED === 'true'
 }
 
+/**
+ * A2 hardening (2026-04-29): per-trace budget on debate LLM calls.
+ *
+ * `runDebate` does up to `maxRounds` × 2 turns + 1 judge call per
+ * invocation, and `maybeRunDebates` calls it once per (high-severity
+ * conflict × related agent). With 3 conflicts × 2 related agents ×
+ * (2 rounds × 2 turns + 1 judge) = 30 LLM calls per critic round.
+ * Repeated over MAX_ROUNDS supervisor cycles → cost can spike
+ * unboundedly for pathological inputs.
+ *
+ * We budget total debate-related LLM calls per trace (env
+ * `MAX_DEBATE_LLM_CALLS_PER_TRACE`, default 10). Once hit, subsequent
+ * `runDebate` invocations are skipped + emit a `budget-exceeded`
+ * handoff so operators see what was aborted. Conflicts that didn't
+ * get debated still go through the regular revision-request path —
+ * just without the deliberative back-and-forth.
+ */
+const DEBATE_BUDGET = new Map<string, { used: number; limit: number }>()
+
+function getDebateBudgetLimit(): number {
+  const raw = Number(process.env.MAX_DEBATE_LLM_CALLS_PER_TRACE ?? '10')
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 10
+}
+
+function ensureDebateBudget(traceId: string): { used: number; limit: number } {
+  let entry = DEBATE_BUDGET.get(traceId)
+  if (!entry) {
+    entry = { used: 0, limit: getDebateBudgetLimit() }
+    DEBATE_BUDGET.set(traceId, entry)
+  }
+  return entry
+}
+
+function releaseDebateBudget(traceId: string): void {
+  DEBATE_BUDGET.delete(traceId)
+}
+
 const OPPONENT_MAP: Record<string, string> = {
   'market-agent': 'market-opponent',
   'product-agent': 'product-opponent',
@@ -718,6 +755,7 @@ export class BusinessLangGraphService {
       }
       unsubscribeHandoff()
       releaseHandoffLogger(traceId)
+      releaseDebateBudget(traceId)
       businessSpanContexts.delete(traceId)
       businessSpan.end()
     }
@@ -1455,6 +1493,9 @@ ${snippets}
     const highSev = conflicts.filter((c) => c.severity === 'high')
     if (highSev.length === 0) return
 
+    const budget = ensureDebateBudget(state.traceId)
+    const handoffLogger = getHandoffLogger(state.traceId)
+
     for (const conflict of highSev) {
       const related = conflict.relatedAgents ?? []
       for (const signature of related) {
@@ -1464,6 +1505,33 @@ ${snippets}
         if (!opponentId) continue
         if (!agentRegistry.has(proponentId)) continue
         if (!advisorRegistry.has(opponentId)) continue
+
+        // A2 budget gate: each runDebate is up to (maxRounds × 2 + 1)
+        // LLM calls. We pessimistically assume the worst-case before
+        // entering, and abort if even one more debate would put us
+        // over the limit. After return we increment by ACTUAL turn
+        // count so the budget reflects real usage.
+        const worstCaseCalls = 2 * 2 + 1 // maxRounds=2 × 2 turns + judge
+        if (budget.used + worstCaseCalls > budget.limit) {
+          handoffLogger.record({
+            from: '_system',
+            to: '_canvas',
+            kind: 'budget-exceeded',
+            payload: {
+              budgetKind: 'debate-llm-calls',
+              limit: budget.limit,
+              used: budget.used,
+              context: `debate(${proponentId} vs ${opponentId}) on conflict ${conflict.id}`
+            },
+            meta: {
+              round: state.roundNumber,
+              threadId: state.traceId,
+              traceId: state.traceId
+            }
+          })
+          // Bail entire loop — once over budget, no further debates.
+          return
+        }
 
         const debateSpan = otelTracer.startSpan(
           'business.debate.run',
@@ -1479,7 +1547,7 @@ ${snippets}
           this.parentCtx(state.traceId)
         )
         try {
-          await runDebate(
+          const log = await runDebate(
             {
               proponent: proponentId,
               opponent: opponentId,
@@ -1493,7 +1561,14 @@ ${snippets}
             },
             defaultLlmDebateInvoker
           )
+          // Increment by ACTUAL LLM calls: 1 per turn + 1 judge.
+          // runDebate returns DebateLog with `.turns: DebateTurn[]`.
+          const turnCount = log?.turns?.length ?? worstCaseCalls - 1
+          budget.used += turnCount + 1
         } catch (err) {
+          // On error we still charge the worst-case so a flapping
+          // debate can't loop unboundedly past the budget.
+          budget.used += worstCaseCalls
           debateSpan.recordException(err as Error)
           debateSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
           auditLogger.warn({
@@ -1544,6 +1619,45 @@ ${snippets}
       from: agentNodeName,
       to: 'synthesizer',
       'starlink.node_count': nodes.length
+    })
+  }
+
+  /**
+   * A4 hardening (2026-04-29): make subgraph-fallback observable.
+   *
+   * Fired when a registry-mode subgraph invocation throws and the
+   * orchestrator falls through to legacy inline-LLM. The conversation
+   * keeps going (graceful degradation by design), but operators need to
+   * see the silent downgrade in the audit trail — pre-A4 it only showed
+   * up as "agent ran slightly slower than usual" which is not
+   * actionable.
+   */
+  private emitAgentDegraded(
+    state: BusinessStateType,
+    agentId: string,
+    error: unknown,
+    fallback: 'legacy-inline-llm' | 'rule-based' | 'noop'
+  ): void {
+    const message = error instanceof Error ? error.message : String(error)
+    getHandoffLogger(state.traceId).record({
+      from: agentId,
+      to: '_system',
+      kind: 'agent-degraded',
+      payload: {
+        agentId,
+        error: message,
+        fallback
+      },
+      meta: {
+        round: state.roundNumber,
+        threadId: state.traceId,
+        traceId: state.traceId
+      }
+    })
+    trace.getActiveSpan()?.addEvent('agent-degraded', {
+      'starlink.agent_id': agentId,
+      'starlink.fallback': fallback,
+      'starlink.error': message.slice(0, 200)
     })
   }
 
@@ -1688,6 +1802,7 @@ ${snippets}
           metadata: { error: String(err) },
           error: err as Error
         })
+        this.emitAgentDegraded(state, 'market-agent', err, 'legacy-inline-llm')
       }
     }
 
@@ -1835,6 +1950,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           metadata: { error: String(err) },
           error: err as Error
         })
+        this.emitAgentDegraded(state, 'product-agent', err, 'legacy-inline-llm')
       }
     }
 
@@ -1984,6 +2100,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           metadata: { error: String(err) },
           error: err as Error
         })
+        this.emitAgentDegraded(state, 'finance-agent', err, 'legacy-inline-llm')
       }
     }
 
@@ -2324,6 +2441,7 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           metadata: { error: String(err) },
           error: err as Error
         })
+        this.emitAgentDegraded(state, 'critic-agent', err, 'rule-based')
       } finally {
         criticSpan.end()
       }

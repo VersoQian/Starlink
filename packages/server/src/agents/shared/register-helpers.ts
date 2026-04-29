@@ -39,6 +39,10 @@ export function resolveLangchainToolsForAgent(
   }
   const { tools: baseTools } = resolveToolNames(profile.tools, agentToolRegistry)
   return toLangchainTools(baseTools, {
-    contextFactory: () => buildToolContextFromConfigurable({}, new AbortController().signal)
+    contextFactory: () => buildToolContextFromConfigurable({}, new AbortController().signal),
+    // B4 hardening: tag every tool wrapped here with the calling agent's
+    // id, so action-invocation / action-result handoff events show the
+    // owner without us having to thread it through LangGraph's runConfig.
+    ownerAgentId: profile.id
   })
 }

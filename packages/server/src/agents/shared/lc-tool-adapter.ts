@@ -20,6 +20,7 @@ import type {
   ToolMessage,
   ToolDefinition
 } from '@starlink/shared'
+import { getHandoffLogger } from '../../infrastructure/handoff-log/index.js'
 
 type FieldSchema = ToolDefinition['inputSchema']['properties'][string]
 
@@ -76,6 +77,20 @@ export interface AdapterOptions {
    * from config.configurable so tools get real context per call.
    */
   contextFactory: () => ToolContext
+  /**
+   * B4 hardening (2026-04-29): when set, every tool invocation emits a
+   * `action-invocation` handoff before the call and `action-result` after,
+   * tagged with this agent's id as `from`. Lets HandoffLogger downstream
+   * (benchmark metrics, paper figures) see "market-agent → web-search →
+   * result" timelines instead of just "market-agent → synthesizer". The
+   * traceId comes from the LangGraph runConfig's `configurable.thread_id`
+   * which we plumb at invokeRegisteredAgent time.
+   */
+  ownerAgentId?: string
+}
+
+interface RunConfigShape {
+  configurable?: { thread_id?: string }
 }
 
 export function toLangchainTool(
@@ -83,25 +98,85 @@ export function toLangchainTool(
   opts: AdapterOptions
 ): StructuredToolInterface {
   const def = baseTool.definition
+  const toolName = def.identity.name
+  const ownerAgentId = opts.ownerAgentId ?? '_unknown_agent'
+
   return lcTool(
-    async (input: Record<string, unknown>) => {
-      let result: unknown = null
-      let lastError: string | null = null
-      for await (const msg of baseTool.execute(input, opts.contextFactory())) {
-        const m = msg as ToolMessage
-        if (m.type === 'json') {
-          result = m.data
-        } else if (m.type === 'error') {
-          lastError = m.error
+    async (input: Record<string, unknown>, runConfig?: RunConfigShape) => {
+      const traceId = runConfig?.configurable?.thread_id
+      const startedAt = Date.now()
+      // Emit invocation BEFORE running (so the timeline shows the call
+      // even if the tool throws or hangs).
+      if (traceId) {
+        try {
+          getHandoffLogger(traceId).record({
+            from: ownerAgentId,
+            to: toolName,
+            kind: 'action-invocation',
+            payload: {
+              toolName,
+              dimension: 'unknown',
+              args: input
+            },
+            meta: { round: 0, threadId: traceId, traceId }
+          })
+        } catch {
+          // Handoff logging must never break tool execution.
         }
       }
+
+      let result: unknown = null
+      let lastError: string | null = null
+      try {
+        for await (const msg of baseTool.execute(input, opts.contextFactory())) {
+          const m = msg as ToolMessage
+          if (m.type === 'json') {
+            result = m.data
+          } else if (m.type === 'error') {
+            lastError = m.error
+          }
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err)
+      }
+
+      // Emit result AFTER. Failure path also emits — the boolean `ok`
+      // discriminates so downstream metrics can distinguish completed
+      // vs failed tool calls without parsing JSON content.
+      if (traceId) {
+        try {
+          const durationMs = Date.now() - startedAt
+          const ok = lastError === null && result !== null
+          const resultSummary = ok
+            ? typeof result === 'string'
+              ? result.slice(0, 120)
+              : JSON.stringify(result).slice(0, 120)
+            : '(failed)'
+          getHandoffLogger(traceId).record({
+            from: toolName,
+            to: ownerAgentId,
+            kind: 'action-result',
+            payload: {
+              toolName,
+              ok,
+              resultSummary,
+              error: lastError ?? undefined,
+              durationMs
+            },
+            meta: { round: 0, threadId: traceId, traceId }
+          })
+        } catch {
+          // Same as above: never let the handoff log break execution.
+        }
+      }
+
       if (lastError && result === null) {
         return JSON.stringify({ ok: false, error: lastError })
       }
       return JSON.stringify(result ?? {})
     },
     {
-      name: def.identity.name,
+      name: toolName,
       description: def.display.description,
       schema: jsonSchemaToZod(def.inputSchema)
     }
