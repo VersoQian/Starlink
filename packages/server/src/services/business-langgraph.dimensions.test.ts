@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildCompactBmcCardContext,
+  deriveBmcSummaryTags,
+  formatBmcSummaryContent,
   renderCompactBmcCardsForPrompt,
   validateNineBmcDimensions
 } from './business-langgraph.js'
@@ -107,6 +109,62 @@ test('buildCompactBmcCardContext preserves structured claims instead of fixed-pr
   assert.ok(compact.keyClaims.some((claim) => claim.includes('准备考研且愿意付费')))
   assert.ok(compact.assumptions.some((claim) => claim.includes('假设集中')))
   assert.ok(compact.risks.some((claim) => claim.includes('平台规则变化')))
+})
+
+// ============================================================================
+// Stage 1 hygiene: BMC summary tag derivation
+// ============================================================================
+
+test('deriveBmcSummaryTags: bare run with no conflicts and partial coverage', () => {
+  const tags = deriveBmcSummaryTags({ conflictCount: 0, dimsCovered: 4 })
+  assert.deepEqual(tags, ['bmc-conversation'])
+})
+
+test('deriveBmcSummaryTags: had-conflicts fires when conflictCount > 0', () => {
+  const tags = deriveBmcSummaryTags({ conflictCount: 1, dimsCovered: 4 })
+  assert.deepEqual(tags, ['bmc-conversation', 'had-conflicts'])
+})
+
+test('deriveBmcSummaryTags: full-9-dim-coverage requires 9 distinct dims, not 9 nodes', () => {
+  // Pre-fix bug: predicate was `bmcNodeCount >= 9`, so a run with 9
+  // customer-segments nodes would falsely tag full coverage. New predicate
+  // takes dimsCovered (Set size) — 8 dims is NOT full.
+  const eightDims = deriveBmcSummaryTags({ conflictCount: 0, dimsCovered: 8 })
+  assert.ok(!eightDims.includes('full-9-dim-coverage'))
+
+  const nineDims = deriveBmcSummaryTags({ conflictCount: 2, dimsCovered: 9 })
+  assert.deepEqual(nineDims, ['bmc-conversation', 'had-conflicts', 'full-9-dim-coverage'])
+})
+
+test('formatBmcSummaryContent: includes dim coverage as N/9', () => {
+  const content = formatBmcSummaryContent({
+    question: '分析考研助手 SaaS 的盈利模式',
+    bmcNodeCount: 12,
+    conflictCount: 2,
+    dimsCovered: 7,
+    durationMs: 18_500,
+    handoffCount: 24
+  })
+  assert.match(content, /产出 12 个 BMC 节点/)
+  assert.match(content, /冲突 2 条/)
+  assert.match(content, /维度 7\/9/)
+  assert.match(content, /18\.5s/)
+  assert.match(content, /握手 24 次/)
+})
+
+test('formatBmcSummaryContent: truncates question past 120 chars', () => {
+  const long = 'x'.repeat(200)
+  const content = formatBmcSummaryContent({
+    question: long,
+    bmcNodeCount: 1,
+    conflictCount: 0,
+    dimsCovered: 1,
+    durationMs: 100,
+    handoffCount: 1
+  })
+  // Question slice of 120 chars should appear; the full 200-char version must not.
+  assert.ok(content.includes('x'.repeat(120)))
+  assert.ok(!content.includes('x'.repeat(121)))
 })
 
 test('renderCompactBmcCardsForPrompt includes evidence refs from parsed citation metadata', () => {

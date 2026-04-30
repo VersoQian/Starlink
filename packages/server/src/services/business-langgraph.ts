@@ -212,6 +212,36 @@ export const MacraNodeDataSchema = z.object({
 
 export type MacraNodeData = z.infer<typeof MacraNodeDataSchema>
 
+// ============== BMC summary tagging (Stage 1 hygiene) ==============
+// Pure helpers extracted so they're testable in isolation. The tag
+// predicate intentionally checks distinct dimension coverage rather than
+// raw node count — a run with 9 customer-segments nodes is NOT 9-dim
+// coverage.
+export function deriveBmcSummaryTags(args: {
+  conflictCount: number
+  dimsCovered: number
+}): string[] {
+  const tags = ['bmc-conversation']
+  if (args.conflictCount > 0) tags.push('had-conflicts')
+  if (args.dimsCovered >= 9) tags.push('full-9-dim-coverage')
+  return tags
+}
+
+export function formatBmcSummaryContent(args: {
+  question: string
+  bmcNodeCount: number
+  conflictCount: number
+  dimsCovered: number
+  durationMs: number
+  handoffCount: number
+}): string {
+  return (
+    `问题: ${args.question.slice(0, 120)} | 产出 ${args.bmcNodeCount} 个 BMC 节点 |` +
+    ` 冲突 ${args.conflictCount} 条 | 维度 ${args.dimsCovered}/9 |` +
+    ` 耗时 ${(args.durationMs / 1000).toFixed(1)}s | 握手 ${args.handoffCount} 次`
+  )
+}
+
 // ============== Intent 分类 ==============
 const IntentSchema = z.object({
   intent: z.enum(['generate_bmc', 'analyze', 'detect_conflicts', 'general']),
@@ -478,6 +508,13 @@ export class BusinessLangGraphService {
 
     let bmcNodeCount = 0
     let conflictCount = 0
+    // Stage 1 hygiene: track distinct CC-BMC dimensions touched in this run
+    // so the `full-9-dim-coverage` tag actually means "all 9 dims have ≥1
+    // node" rather than "≥9 nodes regardless of dim distribution".
+    const dimsCovered = new Set<string>()
+    const recordDimensions = (nodes: MacraNodeData[]): void => {
+      for (const n of nodes) if (n.domain) dimsCovered.add(n.domain)
+    }
 
     try {
       const stream = await graph.stream(
@@ -593,6 +630,7 @@ export class BusinessLangGraphService {
           if (nodeName === 'generalResponder' && payload.generalNodes) {
             const nodes = payload.generalNodes as MacraNodeData[]
             bmcNodeCount += nodes.length
+            recordDimensions(nodes)
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -602,6 +640,7 @@ export class BusinessLangGraphService {
           if (nodeName === 'marketAgent' && payload.marketNodes) {
             const nodes = payload.marketNodes as MacraNodeData[]
             bmcNodeCount += nodes.length
+            recordDimensions(nodes)
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -611,6 +650,7 @@ export class BusinessLangGraphService {
           if (nodeName === 'productAgent' && payload.productNodes) {
             const nodes = payload.productNodes as MacraNodeData[]
             bmcNodeCount += nodes.length
+            recordDimensions(nodes)
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -620,6 +660,7 @@ export class BusinessLangGraphService {
           if (nodeName === 'financeAgent' && payload.financeNodes) {
             const nodes = payload.financeNodes as MacraNodeData[]
             bmcNodeCount += nodes.length
+            recordDimensions(nodes)
             for (const node of nodes) {
               yield { type: 'delta', delta: builder.addMacraNode(node) }
             }
@@ -655,7 +696,10 @@ export class BusinessLangGraphService {
           // Critic
           if (nodeName === 'critic' && payload.conflicts) {
             const conflicts = payload.conflicts as MacraNodeData[]
-            conflictCount = conflicts.length
+            // Stage 1 hygiene: accumulate across rounds — each round emits
+            // its own conflict set; using `=` would only retain the final
+            // round's count and hide critic activity in earlier rounds.
+            conflictCount += conflicts.length
             yield {
               type: 'delta',
               delta: builder.replaceNodesByMacraType('conflict-alert', conflicts)
@@ -747,6 +791,7 @@ export class BusinessLangGraphService {
           question: context.question,
           bmcNodeCount,
           conflictCount,
+          dimsCovered: dimsCovered.size,
           durationMs: Date.now() - streamStartedAt,
           handoffCount: handoffLogger.size
         })
@@ -1436,20 +1481,19 @@ ${snippets}
     question: string
     bmcNodeCount: number
     conflictCount: number
+    /** Distinct BMC dimensions covered (≥1 node). 9 means full coverage. */
+    dimsCovered: number
     durationMs: number
     handoffCount: number
   }): Promise<void> {
     if (!isMemoryWriteEnabled()) return
     try {
       const store = getWorkspaceMemoryStore()
-      const tags = ['bmc-conversation']
-      if (args.conflictCount > 0) tags.push('had-conflicts')
-      if (args.bmcNodeCount >= 9) tags.push('full-9-dim-coverage')
-
-      const content =
-        `问题: ${args.question.slice(0, 120)} | 产出 ${args.bmcNodeCount} 个 BMC 节点 |` +
-        ` 冲突 ${args.conflictCount} 条 | 耗时 ${(args.durationMs / 1000).toFixed(1)}s |` +
-        ` 握手 ${args.handoffCount} 次`
+      const tags = deriveBmcSummaryTags({
+        conflictCount: args.conflictCount,
+        dimsCovered: args.dimsCovered
+      })
+      const content = formatBmcSummaryContent(args)
 
       await store.record(args.workspaceId, {
         content,
@@ -1458,6 +1502,7 @@ ${snippets}
         metadata: {
           bmcNodeCount: args.bmcNodeCount,
           conflictCount: args.conflictCount,
+          dimsCovered: args.dimsCovered,
           durationMs: args.durationMs,
           handoffCount: args.handoffCount
         }
