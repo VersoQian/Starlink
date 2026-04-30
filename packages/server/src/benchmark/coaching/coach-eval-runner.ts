@@ -55,6 +55,28 @@ export interface ABComparison {
   response: ReflectionResponse
   /** Lexical sentinels in the response that are present (lower-case match). */
   sentinelHits: string[]
+  /** Count of persona-trait keyword occurrences in the response. */
+  personaTermHits: number
+  /** Generic-discovery sentinel hits ("你的用户是谁" / "什么背景" etc). */
+  genericDiscoveryHits: number
+}
+
+export interface ABMetrics {
+  /**
+   * (with-block persona keyword hits) − (baseline persona keyword hits).
+   * Positive = personalization is showing up in coach output that wasn't
+   * there in the baseline. Direct, slightly tautological (we reward the
+   * model for echoing the block) but the most concrete signal available
+   * without manual judging.
+   */
+  personaTermPickup: number
+  /**
+   * (baseline generic-discovery hits) − (with-block generic-discovery hits).
+   * Positive = with-block coach successfully avoided basic-discovery
+   * questions the baseline had to ask. Less tautological than
+   * personaTermPickup; harder to converge without broader sentinels.
+   */
+  genericDiscoveryAvoidance: number
 }
 
 export interface PersonaEvalResult {
@@ -81,6 +103,10 @@ export interface PersonaEvalResult {
    *  personalisation working (the coach skipped a "basic" question because
    *  the skill block already answered it). */
   sentinels: string[]
+  /** New metrics — drop-in replacement for the broken sentinel-only signal
+   *  that was 0 → 0 across every persona because the persona-specific
+   *  sentinels never appeared in either condition. */
+  abMetrics: ABMetrics | null
   errors: string[]
 }
 
@@ -161,15 +187,67 @@ function scoreBlockRender(
 
 /** Sentinels we expect the WITH-block coach to NOT have to ask, since the
  *  user-skill block already conveys the relevant info. Lower-cased lexical
- *  match against the coach `content`. */
+ *  match against the coach `content`. Kept around for backward-compatible
+ *  per-scenario reporting; the *primary* A/B signal is now ABMetrics
+ *  (personaTermPickup + genericDiscoveryAvoidance) which actually fires. */
 const COACH_SENTINELS_BY_PERSONA: Record<string, string[]> = {
   'persona-b2b-saas-pm': ['to-b', 'to-c', 'b2c', '客户类型是', '面向消费者还是', '是 b 端还是 c 端'],
   'persona-indie-hardware': ['你能做硬件吗', '有制造经验吗', '懂 3d 打印吗', '是不是工程出身']
 }
 
-function detectSentinelHits(text: string, sentinels: string[]): string[] {
+/**
+ * Generic discovery questions a "blank-slate" coach reaches for when it
+ * knows nothing about the user. The with-block coach SHOULD skip these
+ * because the skill block has already answered them. Broader than the
+ * per-persona sentinels — these are the kind of phrases a coach generates
+ * when forced to ask basic background questions.
+ */
+const GENERIC_DISCOVERY_SENTINELS: readonly string[] = [
+  '你的用户是谁',
+  '什么类型',
+  '面向谁',
+  '什么背景',
+  '是否有经验',
+  '具体是谁',
+  '是怎样的',
+  '你的客户类型',
+  '你打算面向',
+  '一类用户',
+  '常见痛点',
+  '你的目标',
+  '哪些群体'
+]
+
+function detectSentinelHits(text: string, sentinels: readonly string[]): string[] {
   const lower = lowerWord(text)
   return sentinels.filter((s) => lower.includes(lowerWord(s)))
+}
+
+function countPersonaTermHits(text: string, traits: PersonaTrait[]): number {
+  const lower = lowerWord(text)
+  let count = 0
+  for (const trait of traits) {
+    for (const kw of trait.keywords) {
+      if (lower.includes(lowerWord(kw))) count++
+    }
+  }
+  return count
+}
+
+/**
+ * Call reflectOnIdeation with one transparent retry on `source: 'error'`.
+ * Persona-2's longer skill block was timing out (12s default in
+ * ideation-coach-service.ts) and falling back to scripted output, which
+ * makes the A/B comparison uninterpretable. A single 1.5s-delayed retry
+ * recovers most timeout cases without changing production timeouts.
+ */
+async function reflectWithRetry(
+  request: ReflectionRequest
+): Promise<ReflectionResponse> {
+  const first = await reflectOnIdeation(request)
+  if (first.source !== 'error') return first
+  await new Promise((resolve) => setTimeout(resolve, 1500))
+  return reflectOnIdeation(request)
 }
 
 function buildBaselineCoachRequest(persona: BenchmarkPersona): ReflectionRequest {
@@ -280,28 +358,45 @@ export async function evaluatePersona(
   const baselineReq = buildBaselineCoachRequest(persona)
   const ab: ABComparison[] = []
   try {
-    const noSkillResp = await reflectOnIdeation(baselineReq)
+    const noSkillResp = await reflectWithRetry(baselineReq)
     ab.push({
       scenario: 'no-skill-block',
       rawRequest: baselineReq,
       response: noSkillResp,
-      sentinelHits: detectSentinelHits(noSkillResp.content, sentinels)
+      sentinelHits: detectSentinelHits(noSkillResp.content, sentinels),
+      personaTermHits: countPersonaTermHits(noSkillResp.content, persona.traits),
+      genericDiscoveryHits: detectSentinelHits(noSkillResp.content, GENERIC_DISCOVERY_SENTINELS).length
     })
   } catch (err) {
     errors.push(`coach (no-skill-block) failed: ${err instanceof Error ? err.message : String(err)}`)
   }
   try {
     const withSkillReq: ReflectionRequest = { ...baselineReq, userSkillBlock: blockText || undefined }
-    const withSkillResp = await reflectOnIdeation(withSkillReq)
+    const withSkillResp = await reflectWithRetry(withSkillReq)
     ab.push({
       scenario: 'with-skill-block',
       rawRequest: withSkillReq,
       response: withSkillResp,
-      sentinelHits: detectSentinelHits(withSkillResp.content, sentinels)
+      sentinelHits: detectSentinelHits(withSkillResp.content, sentinels),
+      personaTermHits: countPersonaTermHits(withSkillResp.content, persona.traits),
+      genericDiscoveryHits: detectSentinelHits(withSkillResp.content, GENERIC_DISCOVERY_SENTINELS).length
     })
   } catch (err) {
     errors.push(`coach (with-skill-block) failed: ${err instanceof Error ? err.message : String(err)}`)
   }
+
+  // Compute A/B metrics. Both scenarios must have completed for the
+  // delta to be meaningful — if either one errored, leave abMetrics null
+  // and let the report explain the gap rather than print a misleading 0.
+  const baseline = ab.find((c) => c.scenario === 'no-skill-block')
+  const withBlock = ab.find((c) => c.scenario === 'with-skill-block')
+  const abMetrics: ABMetrics | null =
+    baseline && withBlock
+      ? {
+          personaTermPickup: withBlock.personaTermHits - baseline.personaTermHits,
+          genericDiscoveryAvoidance: baseline.genericDiscoveryHits - withBlock.genericDiscoveryHits
+        }
+      : null
 
   return {
     persona,
@@ -312,6 +407,7 @@ export async function evaluatePersona(
     blockRender,
     abCoachComparison: ab,
     sentinels,
+    abMetrics,
     errors
   }
 }

@@ -36,19 +36,31 @@ function renderReport(results: PersonaEvalResult[]): string {
   lines.push('')
   lines.push('## TL;DR')
   lines.push('')
-  lines.push('| persona | trait recall | skill precision | block kw hits | A/B sentinel drop |')
-  lines.push('| --- | --- | --- | --- | --- |')
+  lines.push('| persona | trait recall | skill precision | block kw hits | persona pickup | discovery avoid | sentinel drop |')
+  lines.push('| --- | --- | --- | --- | --- | --- | --- |')
   for (const r of results) {
     const noSkill = r.abCoachComparison.find((c) => c.scenario === 'no-skill-block')
     const withSkill = r.abCoachComparison.find((c) => c.scenario === 'with-skill-block')
-    const drop =
+    const sentinelDrop =
       noSkill && withSkill
         ? `${noSkill.sentinelHits.length} → ${withSkill.sentinelHits.length}`
         : 'n/a'
+    const pickup = r.abMetrics
+      ? (r.abMetrics.personaTermPickup >= 0 ? '+' : '') + r.abMetrics.personaTermPickup
+      : 'n/a'
+    const avoid = r.abMetrics
+      ? (r.abMetrics.genericDiscoveryAvoidance >= 0 ? '+' : '') + r.abMetrics.genericDiscoveryAvoidance
+      : 'n/a'
     lines.push(
-      `| ${r.persona.id} | ${pct(r.recall.fraction)} (${r.recall.traits.filter((t) => t.hit).length}/${r.persona.traits.length}) | ${pct(r.precision.fraction)} (${r.precision.skills.filter((s) => s.justified).length}/${r.precision.skills.length}) | ${r.blockRender.keywordHits}/${r.blockRender.keywordTotal} | ${drop} |`
+      `| ${r.persona.id} | ${pct(r.recall.fraction)} (${r.recall.traits.filter((t) => t.hit).length}/${r.persona.traits.length}) | ${pct(r.precision.fraction)} (${r.precision.skills.filter((s) => s.justified).length}/${r.precision.skills.length}) | ${r.blockRender.keywordHits}/${r.blockRender.keywordTotal} | ${pickup} | ${avoid} | ${sentinelDrop} |`
     )
   }
+  lines.push('')
+  lines.push(
+    '> **persona pickup** = (with-block persona-keyword hits) − (baseline). Positive = personalization showed up. ' +
+      '**discovery avoid** = (baseline generic-discovery hits) − (with-block). Positive = with-block skipped basic background questions. ' +
+      '**sentinel drop** = legacy per-persona sentinel signal (kept for back-compat; rarely fires).'
+  )
   lines.push('')
 
   for (const r of results) {
@@ -148,7 +160,17 @@ function renderReport(results: PersonaEvalResult[]): string {
       lines.push('')
       lines.push('> ' + c.response.content.replace(/\n+/g, '\n> '))
       lines.push('')
-      lines.push(`Sentinel hits: ${c.sentinelHits.length === 0 ? '_(none)_' : c.sentinelHits.map((s) => '`' + s + '`').join(', ')}`)
+      lines.push(
+        `Persona-term hits: **${c.personaTermHits}** · Generic-discovery hits: **${c.genericDiscoveryHits}** · ` +
+          `Legacy sentinel hits: ${c.sentinelHits.length === 0 ? '_(none)_' : c.sentinelHits.map((s) => '`' + s + '`').join(', ')}`
+      )
+      lines.push('')
+    }
+    if (r.abMetrics) {
+      lines.push(
+        `**A/B summary**: persona-term pickup = **${r.abMetrics.personaTermPickup >= 0 ? '+' : ''}${r.abMetrics.personaTermPickup}** · ` +
+          `generic-discovery avoidance = **${r.abMetrics.genericDiscoveryAvoidance >= 0 ? '+' : ''}${r.abMetrics.genericDiscoveryAvoidance}**`
+      )
       lines.push('')
     }
 
