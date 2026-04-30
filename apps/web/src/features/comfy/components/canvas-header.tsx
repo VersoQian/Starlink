@@ -1,4 +1,7 @@
-import { Download, LayoutGrid, PanelsTopLeft, Sparkles, Zap } from 'lucide-react'
+'use client'
+
+import { useRef } from 'react'
+import { Download, LayoutGrid, PanelsTopLeft, Sparkles, Upload, Zap } from 'lucide-react'
 import { WORKFLOW_STAGE_LABELS, type WorkflowStage } from '../store/workflow-stage'
 import { TOKENS } from './canvas-design-tokens'
 
@@ -8,6 +11,8 @@ type CanvasHeaderProps = {
   viewMode?: 'freeform' | 'bmc'
   onViewModeChange?: (mode: 'freeform' | 'bmc') => void
   workflowStage: WorkflowStage
+  onExportCanvas?: () => void
+  onImportCanvas?: (file: File) => void
 }
 
 /**
@@ -29,8 +34,23 @@ export function CanvasHeader({
   onOpenTutorial,
   viewMode = 'freeform',
   onViewModeChange,
-  workflowStage
+  workflowStage,
+  onExportCanvas,
+  onImportCanvas
 }: CanvasHeaderProps) {
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleImportClick = (): void => {
+    importInputRef.current?.click()
+  }
+
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0]
+    if (file && onImportCanvas) onImportCanvas(file)
+    // Reset so picking the same file twice in a row still triggers onChange.
+    event.target.value = ''
+  }
+
   return (
     <header
       className={`relative z-20 flex items-center justify-between px-6 py-3 ${TOKENS.surface.bar} ${
@@ -91,8 +111,33 @@ export function CanvasHeader({
           </button>
         </div>
 
-        {/* Export — secondary action (ghost) */}
-        <button type="button" className={TOKENS.button.ghost}>
+        {/* Import — restore canvas from a previously exported JSON */}
+        <button
+          type="button"
+          onClick={handleImportClick}
+          disabled={!onImportCanvas}
+          className={TOKENS.button.ghost}
+          aria-label="导入画布"
+        >
+          <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+          导入
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={handleImportFile}
+        />
+
+        {/* Export — save canvas to a JSON file the user can re-import */}
+        <button
+          type="button"
+          onClick={onExportCanvas}
+          disabled={!onExportCanvas}
+          className={TOKENS.button.ghost}
+          aria-label="导出画布"
+        >
           <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
           导出
         </button>

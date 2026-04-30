@@ -273,6 +273,10 @@ interface MacraState {
   setSelectedNodeIds: (ids: string[]) => void
   deleteSelectedNodes: () => void
 
+  // JSON 导入 / 导出（用户保存当前画布到本地文件 + 还原）
+  exportCanvasJson: () => string
+  importCanvasJson: (json: string) => void
+
   // 节点数据操作（兼容旧版本）
   getNodeData: (nodeId: string) => NodeData | undefined
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void
@@ -545,6 +549,57 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     // selection) stay in lockstep with the ReactFlow array.
     const changes: NodeChange[] = selectedNodeIds.map((id) => ({ type: 'remove', id }))
     get().onNodesChange(changes)
+  },
+
+  exportCanvasJson: () => {
+    const { nodes, edges, macraNodes, workspaceId } = get()
+    // Map → array of values; each MacraNodeData carries its own `id`, so
+    // we reconstruct the Map on import without losing keys.
+    return JSON.stringify(
+      {
+        version: 1 as const,
+        exportedAt: new Date().toISOString(),
+        workspaceId,
+        nodes,
+        edges,
+        macraNodes: Array.from(macraNodes.values())
+      },
+      null,
+      2
+    )
+  },
+
+  importCanvasJson: (json) => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(json)
+    } catch (err) {
+      throw new Error(`Canvas JSON is not valid JSON: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Canvas JSON must be an object')
+    }
+    const data = parsed as Record<string, unknown>
+    if (data.version !== 1) {
+      throw new Error(`Unsupported canvas export version: ${String(data.version)} (expected 1)`)
+    }
+    const importedNodes = Array.isArray(data.nodes) ? (data.nodes as Node[]) : []
+    const importedEdges = Array.isArray(data.edges) ? (data.edges as Edge[]) : []
+    const importedMacra = Array.isArray(data.macraNodes) ? (data.macraNodes as MacraNodeData[]) : []
+
+    const macraMap = new Map<string, MacraNodeData>()
+    for (const n of importedMacra) {
+      if (n && typeof n === 'object' && typeof n.id === 'string') {
+        macraMap.set(n.id, n)
+      }
+    }
+
+    set({
+      nodes: importedNodes,
+      edges: importedEdges,
+      macraNodes: macraMap,
+      selectedNodeIds: []
+    })
   },
 
   getNodeData: (nodeId) => {

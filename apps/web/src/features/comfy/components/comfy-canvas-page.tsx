@@ -43,6 +43,35 @@ export function CanvasPage({
   const openDetailPanel = useComfyStore((state) => state.openDetailPanel)
   const workflowStage = useComfyStore((state) => state.workflowStage)
   const setWorkflowStage = useComfyStore((state) => state.setWorkflowStage)
+  const exportCanvasJson = useComfyStore((state) => state.exportCanvasJson)
+  const importCanvasJson = useComfyStore((state) => state.importCanvasJson)
+
+  const handleExportCanvas = useCallback((): void => {
+    const json = exportCanvasJson()
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    link.href = url
+    link.download = `canvas-${workspaceId}-${stamp}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [exportCanvasJson, workspaceId])
+
+  const handleImportCanvas = useCallback(
+    async (file: File): Promise<void> => {
+      try {
+        const text = await file.text()
+        importCanvasJson(text)
+      } catch (err) {
+        // Surface to the user — bad JSON / wrong version / missing fields
+        // shouldn't silently corrupt the canvas.
+        const message = err instanceof Error ? err.message : String(err)
+        if (typeof window !== 'undefined') window.alert(`画布导入失败：${message}`)
+      }
+    },
+    [importCanvasJson]
+  )
 
   const runtime = useConversationRuntime(workspaceId)
   const [viewMode, setViewMode] = useState<'freeform' | 'bmc'>('freeform')
@@ -276,6 +305,8 @@ export function CanvasPage({
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           workflowStage={workflowStage}
+          onExportCanvas={handleExportCanvas}
+          onImportCanvas={handleImportCanvas}
         />
       }
       main={
