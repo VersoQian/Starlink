@@ -1,5 +1,43 @@
 /**
  * Phase 4.1 · Real LLM DebateAgentInvoker (replaces scaffoldDebateInvoker).
+ *
+ * ## Architecture note (2026-04-30, Stage 4c)
+ *
+ * This file is the second execution path for registered agents. There are two:
+ *
+ *   1. **Subgraph route** — `invokeRegisteredAgent(agentId, state, ...)` from
+ *      business-langgraph.ts. Used for generators (market/product/finance,
+ *      critic, general-responder, synthesizer in registry mode). The agent's
+ *      `buildSubgraph()` produces a real LangGraph `StateGraph` that runs a
+ *      ReAct loop with tools and structured output.
+ *
+ *   2. **Prompt-only route** (this file) — `LlmDebateInvoker.nextTurn` and
+ *      `.judge`. Used ONLY for debate participants: market-opponent,
+ *      product-opponent, finance-opponent, moderator. We read their
+ *      `agent.yaml.system_prompt` directly and feed it into a single
+ *      LLM chat call structured around the current debate turn.
+ *
+ * ### Why the prompt-only route exists
+ *
+ * Debate turns are not ReAct loops. They are single, structured LLM calls
+ * with shape: `read priorTurns → emit one DebateTurn JSON`. There are no
+ * tools to call between turns — the entire reasoning happens in one model
+ * step, and the next turn is a fresh call (with the previous turn now in
+ * priorTurns). Wrapping that in a 1-node StateGraph subgraph would add
+ * ceremony (compile cost, state plumbing, span hierarchy) without any
+ * functional benefit — the resulting bytes-on-the-wire and LLM behavior
+ * would be identical.
+ *
+ * That's why `agents/moderator/graph.ts` and `agents/*-opponent/graph.ts`
+ * register orphan-stub subgraphs — they're never invoked through the
+ * subgraph route. Their YAML profiles ARE consumed (here), so the LLM
+ * does real work for them; the audit's "passthrough" framing is technically
+ * correct only at the StateGraph layer.
+ *
+ * If a future revision wants debate observability to flow through the same
+ * tracing / handoff machinery as generators, the migration is to wrap each
+ * DebateTurn LLM call in invokeRegisteredAgent and have the subgraph emit
+ * the turn JSON. Not done because the cost/value ratio is poor today.
  */
 
 import { dirname, join } from 'node:path'
