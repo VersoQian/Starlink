@@ -20,6 +20,36 @@ import {
 // Chat 消息类型
 type ChatMessage = { role: 'user' | 'assistant'; content: string; timestamp: string }
 
+// Undo / redo: a snapshot is a tuple of the four canvas-level slots
+// that user actions can mutate. We deliberately exclude streaming /
+// network state (workflowStage, evidenceDrawer, citations) — those are
+// derived or remote, not user-undoable.
+export interface CanvasSnapshot {
+  nodes: Node[]
+  edges: Edge[]
+  macraNodes: Map<string, MacraNodeData>
+  selectedNodeIds: string[]
+}
+
+const HISTORY_LIMIT = 30
+
+function takeSnapshot(state: {
+  nodes: Node[]
+  edges: Edge[]
+  macraNodes: Map<string, MacraNodeData>
+  selectedNodeIds: string[]
+}): CanvasSnapshot {
+  // Shallow array clones are safe — ReactFlow node objects are treated
+  // as immutable on the read path, and we always replace via setNodes
+  // rather than mutate in-place. Map copy avoids future-vs-past aliasing.
+  return {
+    nodes: [...state.nodes],
+    edges: [...state.edges],
+    macraNodes: new Map(state.macraNodes),
+    selectedNodeIds: [...state.selectedNodeIds]
+  }
+}
+
 export type ToolRunStatus = 'idle' | 'running' | 'completed' | 'failed'
 
 export type ToolRunState = {
@@ -188,6 +218,12 @@ interface MacraState {
   // 当前画布上被选中的节点 id 集合（来自 ReactFlow 的 onSelectionChange）
   selectedNodeIds: string[]
 
+  // 撤销 / 重做历史栈（仅记录用户级别的画布快照）
+  history: {
+    past: CanvasSnapshot[]
+    future: CanvasSnapshot[]
+  }
+
   // 节点数据存储（兼容旧版本）
   nodeDataMap: Map<string, NodeData>
 
@@ -277,6 +313,14 @@ interface MacraState {
   exportCanvasJson: () => string
   importCanvasJson: (json: string) => void
 
+  // Undo / redo — 仅在用户级别动作前调用 pushHistorySnapshot；AI stream
+  // 引发的 setNodes 不入栈，否则用户 cmd+z 一次会撤掉一整批 LLM 输出。
+  pushHistorySnapshot: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: () => boolean
+  canRedo: () => boolean
+
   // 节点数据操作（兼容旧版本）
   getNodeData: (nodeId: string) => NodeData | undefined
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void
@@ -318,6 +362,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeIds: [],
+  history: { past: [], future: [] },
   nodeDataMap: new Map(),
   macraNodes: new Map(),
   executingNodeId: null,
@@ -493,6 +538,19 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   onNodesChange: (changes) => {
     if (changes.length === 0) return
     const { nodes, macraNodes, edges, selectedNodeIds } = get()
+
+    // Snapshot for undo on removal changes (Backspace / Delete or bulk
+    // delete via deleteSelectedNodes). Skip drag undo — by the time the
+    // dragging:false event arrives the position has already been mutated
+    // through dozens of dragging:true ticks, so a snapshot here would
+    // capture the next-to-last drag tick rather than the pre-drag state,
+    // which is not what users expect from cmd+z. A clean drag-undo would
+    // need a separate "first drag change" tracker; left for follow-up.
+    const isRemoval = changes.some((c) => c.type === 'remove')
+    if (isRemoval) {
+      get().pushHistorySnapshot()
+    }
+
     const nextNodes = applyNodeChanges(changes, nodes)
 
     // Detect node removals (Backspace / Delete via ReactFlow's deleteKeyCode,
@@ -594,6 +652,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       }
     }
 
+    // Push current state before clobbering it so undo can restore.
+    get().pushHistorySnapshot()
     set({
       nodes: importedNodes,
       edges: importedEdges,
@@ -601,6 +661,51 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       selectedNodeIds: []
     })
   },
+
+  pushHistorySnapshot: () => {
+    const { nodes, edges, macraNodes, selectedNodeIds, history } = get()
+    const snap = takeSnapshot({ nodes, edges, macraNodes, selectedNodeIds })
+    const past = [...history.past, snap]
+    if (past.length > HISTORY_LIMIT) past.shift()
+    set({ history: { past, future: [] } })
+  },
+
+  undo: () => {
+    const { history, nodes, edges, macraNodes, selectedNodeIds } = get()
+    if (history.past.length === 0) return
+    const previous = history.past[history.past.length - 1]
+    const current = takeSnapshot({ nodes, edges, macraNodes, selectedNodeIds })
+    set({
+      nodes: previous.nodes,
+      edges: previous.edges,
+      macraNodes: previous.macraNodes,
+      selectedNodeIds: previous.selectedNodeIds,
+      history: {
+        past: history.past.slice(0, -1),
+        future: [current, ...history.future].slice(0, HISTORY_LIMIT)
+      }
+    })
+  },
+
+  redo: () => {
+    const { history, nodes, edges, macraNodes, selectedNodeIds } = get()
+    if (history.future.length === 0) return
+    const next = history.future[0]
+    const current = takeSnapshot({ nodes, edges, macraNodes, selectedNodeIds })
+    set({
+      nodes: next.nodes,
+      edges: next.edges,
+      macraNodes: next.macraNodes,
+      selectedNodeIds: next.selectedNodeIds,
+      history: {
+        past: [...history.past, current].slice(-HISTORY_LIMIT),
+        future: history.future.slice(1)
+      }
+    })
+  },
+
+  canUndo: () => get().history.past.length > 0,
+  canRedo: () => get().history.future.length > 0,
 
   getNodeData: (nodeId) => {
     return get().nodeDataMap.get(nodeId)

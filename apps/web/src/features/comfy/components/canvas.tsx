@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import ReactFlow, {
   Background,
   Controls,
@@ -33,10 +34,36 @@ export function CanvasFlow({
   isAnimating,
 }: CanvasFlowProps) {
   const setSelectedNodeIds = useComfyStore((s) => s.setSelectedNodeIds)
+  const undo = useComfyStore((s) => s.undo)
+  const redo = useComfyStore((s) => s.redo)
 
   const handleSelectionChange = (params: OnSelectionChangeParams): void => {
     setSelectedNodeIds(params.nodes.map((n) => n.id))
   }
+
+  // cmd+z / ctrl+z to undo, cmd+shift+z / ctrl+shift+z (or cmd+y) to redo.
+  // Skip when focus is in a text input/textarea so chat typing isn't hijacked.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return
+      }
+      const meta = e.metaKey || e.ctrlKey
+      if (!meta) return
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+      } else if (e.key === 'y' || e.key === 'Y') {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [undo, redo])
   return (
     <main
       className={`flex-1 relative overflow-hidden ${
