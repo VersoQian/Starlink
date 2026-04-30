@@ -1052,6 +1052,61 @@ ${this.buildWorkspaceContextPrompt(state)}
   private async runGeneralResponder(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
 
+    // Stage 4: registry mode delegates to the YAML general-responder
+    // subgraph (agents/general-responder/graph.ts). Default ORCHESTRATION_MODE
+    // is 'legacy' so production behaviour is unchanged; opting into 'registry'
+    // routes the `intent === 'general'` branch through the registered
+    // subgraph the same way market/product/finance/critic already do, which
+    // makes the audit's "8-agent" claim functionally honest in registry mode.
+    if (
+      getOrchestrationMode() === 'registry' &&
+      agentRegistry.has('general-responder')
+    ) {
+      try {
+        const projected = await this.invokeRegisteredAgent(
+          'general-responder',
+          state,
+          (s) => ({
+            traceId: s.traceId,
+            workspaceId: s.workspaceId,
+            userId: s.userId,
+            question: s.question,
+            workspaceContext: this.buildWorkspaceContextPrompt(s),
+            knowledgeEvidence: s.knowledgeEvidence
+          }),
+          (result) => ({
+            generalNodes: (result.generalNodes as MacraNodeData[]) ?? []
+          })
+        )
+        if (projected && (projected.generalNodes?.length ?? 0) > 0) {
+          this.logTrace({
+            step: 'generalResponder',
+            traceId: state.traceId,
+            workspaceId: state.workspaceId,
+            userId: state.userId,
+            status: 'completed',
+            durationMs: Date.now() - startedAt,
+            metadata: { mode: 'registry' }
+          })
+          this.emitGenerationOutput(state, 'generalResponder', projected.generalNodes ?? [])
+          return projected
+        }
+      } catch (err) {
+        // Subgraph failed; fall through to the inline LLM path below so the
+        // user still gets an answer. emitAgentDegraded surfaces the fact in
+        // the handoff log.
+        auditLogger.error({
+          action: 'business-langgraph.runGeneralResponder.subgraph-failed',
+          requestId: state.traceId,
+          workflowId: state.workspaceId,
+          userId: state.userId,
+          metadata: { error: String(err) },
+          error: err as Error
+        })
+        this.emitAgentDegraded(state, 'general-responder', err, 'legacy-inline-llm')
+      }
+    }
+
     if (!this.model) {
       const fallbackNode = createGeneralResponseNode(
         state.traceId,

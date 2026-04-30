@@ -1,22 +1,14 @@
 /**
  * General Responder (Generator) · Phase 2.5 P1.2.5 · Real LLM-driven subgraph.
  *
- * ⚠️ STATUS: ORPHAN. Same as synthesizer/graph.ts — registered but not invoked.
- * The top-level business-langgraph builds the `generalResponder` node from
- * `runGeneralResponder` (inline LLM call in business-langgraph.ts:873) which
- * already renders workspaceContext + knowledgeContext via the existing
- * builders. The legacy path is authoritative for the `intent === 'general'`
- * branch and produces a single insight-note via createGeneralResponseNode.
+ * STATUS: LIVE in registry mode (Stage 4, 2026-04-30). When
+ * ORCHESTRATION_MODE=registry, runGeneralResponder in business-langgraph.ts
+ * delegates to this subgraph via invokeRegisteredAgent. In legacy mode
+ * (default) the inline LLM call in runGeneralResponder still runs — both
+ * paths produce a single insight-note via createGeneralResponseNode.
  *
- * To make this YAML version live, the wiring is:
- *   1. Add a registry-mode branch in `runGeneralResponder` following the
- *      market/product/finance pattern.
- *   2. Decide whether to additionally pass crossContext (probably no — when
- *      intent='general', no BMC generators run, so siblings' state is empty
- *      anyway).
- *
- * Edit freely; production behaviour unaffected until the legacy path delegates
- * here.
+ * On subgraph error the supervisor falls through to the legacy inline path
+ * and emits an `agent-degraded` handoff so the failure is observable.
  *
  * Subgraph topology:
  *   START → respond → END
