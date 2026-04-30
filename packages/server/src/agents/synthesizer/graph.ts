@@ -1,22 +1,17 @@
 /**
  * Synthesizer (Generator) · Phase 2.5 P1.2.4 · Real LLM-driven subgraph.
  *
- * ⚠️ STATUS: ORPHAN. This subgraph is registered via `registerAgent()` below
- * but the top-level business-langgraph builds the `synthesizer` node from
- * `runSynthesizer` (rule-based code in business-langgraph.ts:1967), NOT from
- * `invokeRegisteredAgent('synthesizer', ...)`. The legacy rule-based path is
- * authoritative for agentAvatars / edges / crossContext / consistencyNotes.
+ * STATUS: LIVE in registry mode (Stage 4b, 2026-04-30). When
+ * ORCHESTRATION_MODE=registry, runSynthesizer in business-langgraph.ts
+ * AUGMENTS the rule-based crossContext + edges with this subgraph's
+ * LLM-driven `insights` (appended to consistencyNotes under a "## LLM
+ * 跨维度洞察" heading) and `suggestedEdges` (converted to CanvasEdge[],
+ * filtered to real BMC node ids only). In legacy mode (default) this
+ * file is dormant.
  *
- * If a future revision wants this LLM perspective live, the wiring is:
- *   1. Add a `runSynthesizerRegistry` branch in business-langgraph.ts following
- *      the market/product/finance pattern (registry-mode delegate via
- *      invokeRegisteredAgent + projectBlackboardForGenerator-equivalent).
- *   2. Decide whether the LLM `insights` augment crossContext.consistencyNotes
- *      (currently rule-based) or replace it.
- *
- * Until that wiring lands, this file is dormant — it does not contribute to
- * the eval scores reported in benchmark/reports/. Edit it freely if iterating
- * on LLM-augmented synthesis; production behaviour is unaffected.
+ * The merge is purely additive — LLM output never replaces rule-based
+ * notes/edges. On subgraph error, runSynthesizer emits an
+ * `agent-degraded` handoff and ships the legacy output unchanged.
  *
  * Subgraph topology:
  *   START → synthesize → END

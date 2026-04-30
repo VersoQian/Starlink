@@ -2348,6 +2348,17 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     // 3. 生成边（连接关系）
     const edges = this.buildBMCEdges(state)
 
+    // Stage 4b: in registry mode, augment the rule-based output with the
+    // YAML synthesizer subgraph's LLM-driven cross-dim insights and
+    // suggested edges. Default ORCHESTRATION_MODE is 'legacy' so no
+    // production behaviour change. The merge is purely additive — LLM
+    // output adds to consistencyNotes / edges, never replaces them.
+    const merged = await this.maybeAugmentSynthesisWithRegistry(
+      state,
+      crossContext,
+      edges
+    )
+
     this.logTrace({
       step: 'synthesizer',
       traceId: state.traceId,
@@ -2358,12 +2369,145 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
       metadata: {
         round: state.roundNumber,
         avatarCount: agentAvatars.length,
-        edgeCount: edges.length,
-        hasConsistencyNotes: crossContext.consistencyNotes.length > 0
+        edgeCount: merged.edges.length,
+        hasConsistencyNotes: merged.crossContext.consistencyNotes.length > 0,
+        registryAugmented: merged.augmented,
+        llmInsightCount: merged.llmInsightCount,
+        llmEdgeCount: merged.llmEdgeCount
       }
     })
 
-    return { agentAvatars, edges, crossContext }
+    return {
+      agentAvatars,
+      edges: merged.edges,
+      crossContext: merged.crossContext
+    }
+  }
+
+  /**
+   * Stage 4b: opt-in registry-mode augmentation for synthesizer.
+   *
+   * When ORCHESTRATION_MODE=registry and the YAML synthesizer is loaded,
+   * invoke its subgraph with the current BMC nodes and merge the LLM
+   * output back into the rule-based crossContext + edges:
+   *
+   *   - LLM `insights[]` are appended under a "## LLM 跨维度洞察" heading
+   *     in `consistencyNotes` (additive, doesn't disturb the rule-based
+   *     section above it).
+   *   - LLM `suggestedEdges` are converted to CanvasEdge[] only if both
+   *     endpoints exist in the actual BMC node set — we never invent
+   *     edges to phantom ids that the LLM might have hallucinated.
+   *
+   * On subgraph error: degrade gracefully (no augmentation), emit a
+   * `agent-degraded` handoff so the legacy output ships unmodified and
+   * the failure is observable.
+   */
+  private async maybeAugmentSynthesisWithRegistry(
+    state: BusinessStateType,
+    crossContext: CrossContext,
+    edges: CanvasEdge[]
+  ): Promise<{
+    crossContext: CrossContext
+    edges: CanvasEdge[]
+    augmented: boolean
+    llmInsightCount: number
+    llmEdgeCount: number
+  }> {
+    if (
+      getOrchestrationMode() !== 'registry' ||
+      !agentRegistry.has('synthesizer')
+    ) {
+      return {
+        crossContext,
+        edges,
+        augmented: false,
+        llmInsightCount: 0,
+        llmEdgeCount: 0
+      }
+    }
+
+    let llmInsights: string[] = []
+    let llmSuggestedEdges: Array<{ from: string; to: string; label: string }> = []
+    try {
+      // Closure capture: invokeRegisteredAgent's projectOutput is typed to
+      // BusinessStateType subsets and synthesizer's outputs aren't BMC
+      // state fields, so we extract via side-channel and return an empty
+      // partial. The helper still gives us tracing + thread-id wiring.
+      await this.invokeRegisteredAgent(
+        'synthesizer',
+        state,
+        (s) => ({
+          traceId: s.traceId,
+          workspaceId: s.workspaceId,
+          userId: s.userId,
+          question: s.question,
+          roundNumber: s.roundNumber,
+          marketNodes: s.marketNodes,
+          productNodes: s.productNodes,
+          financeNodes: s.financeNodes
+        }),
+        (result) => {
+          llmInsights = (result.insights as string[] | undefined) ?? []
+          llmSuggestedEdges =
+            (result.suggestedEdges as Array<{ from: string; to: string; label: string }> | undefined) ?? []
+          return {} as Partial<BusinessStateType>
+        }
+      )
+    } catch (err) {
+      auditLogger.error({
+        action: 'business-langgraph.runSynthesizer.subgraph-failed',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: { error: String(err) },
+        error: err as Error
+      })
+      this.emitAgentDegraded(state, 'synthesizer', err, 'noop')
+      return {
+        crossContext,
+        edges,
+        augmented: false,
+        llmInsightCount: 0,
+        llmEdgeCount: 0
+      }
+    }
+
+    // Merge insights into consistencyNotes (additive — preserve any
+    // rule-based notes already there).
+    let mergedNotes = crossContext.consistencyNotes
+    if (llmInsights.length > 0) {
+      const block =
+        '## LLM 跨维度洞察\n\n' +
+        llmInsights.map((s) => `- ${s}`).join('\n')
+      mergedNotes = mergedNotes ? `${mergedNotes}\n\n${block}` : block
+    }
+
+    // Convert suggestedEdges to CanvasEdge[], filtering out any edge whose
+    // endpoints don't match a real BMC node id (LLM-hallucinated id-pairs
+    // would otherwise create dangling edges in the canvas).
+    const allNodeIds = new Set([
+      ...state.marketNodes.map((n) => n.id),
+      ...state.productNodes.map((n) => n.id),
+      ...state.financeNodes.map((n) => n.id)
+    ])
+    const llmEdges: CanvasEdge[] = []
+    for (const e of llmSuggestedEdges) {
+      if (!allNodeIds.has(e.from) || !allNodeIds.has(e.to)) continue
+      const id = `llm-${e.from}->${e.to}`
+      // Don't duplicate an edge the rule-based path already created.
+      if (edges.some((existing) => existing.source === e.from && existing.target === e.to)) {
+        continue
+      }
+      llmEdges.push({ id, source: e.from, target: e.to, label: e.label })
+    }
+
+    return {
+      crossContext: { ...crossContext, consistencyNotes: mergedNotes },
+      edges: [...edges, ...llmEdges],
+      augmented: true,
+      llmInsightCount: llmInsights.length,
+      llmEdgeCount: llmEdges.length
+    }
   }
 
   private buildCrossContext(state: BusinessStateType): CrossContext {
