@@ -933,10 +933,29 @@ export class BusinessLangGraphService {
       agentsToRevise.add('financeAgent')
     }
 
+    // Stage 3: BMC coverage gate. If a dimension wasn't produced this round,
+    // bring in its owning agent for the next round even when no critic
+    // conflict mentioned the gap. Without this gate the supervisor is purely
+    // conflict-driven and a structurally incomplete BMC can ship as-is.
+    const allBmcNodes: MacraNodeData[] = [
+      ...(state.marketNodes ?? []),
+      ...(state.productNodes ?? []),
+      ...(state.financeNodes ?? []),
+      ...(state.generalNodes ?? [])
+    ]
+    const missingDims = validateNineBmcDimensions(allBmcNodes)
+    for (const dim of missingDims) {
+      const agentNode = agentNodeForBmcDomain(dim)
+      if (agentNode) agentsToRevise.add(agentNode)
+    }
+
     const activeAgents = [...agentsToRevise]
 
     // 用 LLM 生成修正指导
     let guidance = `请根据以下冲突修正你的分析：\n${conflictSummary}`
+    if (missingDims.length > 0) {
+      guidance += `\n\n[结构补全] BMC 仍缺少以下维度：${missingDims.join('、')}。负责的 Agent 必须在本轮补全。`
+    }
     if (this.model) {
       try {
         const response = await this.model.invoke([
@@ -967,7 +986,8 @@ ${conflictSummary}
         round: nextRound,
         mode: 'revision',
         activeAgents,
-        conflictCount: conflicts.length
+        conflictCount: conflicts.length,
+        missingDims
       }
     })
 
@@ -3035,6 +3055,20 @@ export function validateNineBmcDimensions(nodes: MacraNodeData[]): CCBMCDomain[]
   }
   const allDomains = Object.values(CC_BMC_DOMAINS) as CCBMCDomain[]
   return allDomains.filter((d) => !produced.has(d))
+}
+
+/**
+ * Map a BMC dimension to the LangGraph node name of the agent that owns it.
+ * Used by the supervisor's coverage gate to decide which agent to bring back
+ * for a revision round when a dimension is structurally missing — so we
+ * don't silently ship an 8-dim BMC just because no critic conflict happened
+ * to mention the gap.
+ */
+export function agentNodeForBmcDomain(domain: CCBMCDomain): string | null {
+  if ((MARKET_DOMAINS as readonly CCBMCDomain[]).includes(domain)) return 'marketAgent'
+  if ((PRODUCT_DOMAINS as readonly CCBMCDomain[]).includes(domain)) return 'productAgent'
+  if ((FINANCE_DOMAINS as readonly CCBMCDomain[]).includes(domain)) return 'financeAgent'
+  return null
 }
 
 export function buildDeterministicNodeId(agentType: AgentType, domain: CCBMCDomain) {

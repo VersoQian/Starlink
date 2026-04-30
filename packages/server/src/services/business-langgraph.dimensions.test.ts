@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  agentNodeForBmcDomain,
   buildCompactBmcCardContext,
   deriveBmcSummaryTags,
   formatBmcSummaryContent,
@@ -109,6 +110,38 @@ test('buildCompactBmcCardContext preserves structured claims instead of fixed-pr
   assert.ok(compact.keyClaims.some((claim) => claim.includes('准备考研且愿意付费')))
   assert.ok(compact.assumptions.some((claim) => claim.includes('假设集中')))
   assert.ok(compact.risks.some((claim) => claim.includes('平台规则变化')))
+})
+
+// ============================================================================
+// Stage 3 hygiene: BMC dim → agent node mapping (used by supervisor's
+// coverage gate to bring back the right agent when a dim is missing)
+// ============================================================================
+
+test('agentNodeForBmcDomain: market dims route to marketAgent', () => {
+  assert.equal(agentNodeForBmcDomain('客户细分'), 'marketAgent')
+  assert.equal(agentNodeForBmcDomain('渠道通路'), 'marketAgent')
+  assert.equal(agentNodeForBmcDomain('客户关系'), 'marketAgent')
+})
+
+test('agentNodeForBmcDomain: product dims route to productAgent', () => {
+  assert.equal(agentNodeForBmcDomain('价值主张'), 'productAgent')
+  assert.equal(agentNodeForBmcDomain('核心资源'), 'productAgent')
+  assert.equal(agentNodeForBmcDomain('关键业务'), 'productAgent')
+  assert.equal(agentNodeForBmcDomain('重要合作'), 'productAgent')
+})
+
+test('agentNodeForBmcDomain: finance dims route to financeAgent', () => {
+  assert.equal(agentNodeForBmcDomain('收入来源'), 'financeAgent')
+  assert.equal(agentNodeForBmcDomain('成本结构'), 'financeAgent')
+})
+
+test('agentNodeForBmcDomain: covers all 9 BMC dims (none returns null)', () => {
+  for (const dim of CC_BMC_DIMENSIONS) {
+    assert.ok(
+      agentNodeForBmcDomain(dim) !== null,
+      `BMC dim "${dim}" has no responsible agent — coverage gate would silently leave it unfilled`
+    )
+  }
 })
 
 // ============================================================================
