@@ -224,6 +224,11 @@ interface MacraState {
     future: CanvasSnapshot[]
   }
 
+  // 拖拽进行中标记（内部状态）—— 用于在 onNodesChange 里识别"首次拖拽 tick"，
+  // 这样我们只在拖拽开始那一刻 push 一次 history snapshot，不在每个 drag tick
+  // 都 push（否则 cmd+z 一次只能撤销 1px）。
+  _dragInProgress: boolean
+
   // 节点数据存储（兼容旧版本）
   nodeDataMap: Map<string, NodeData>
 
@@ -363,6 +368,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   edges: [],
   selectedNodeIds: [],
   history: { past: [], future: [] },
+  _dragInProgress: false,
   nodeDataMap: new Map(),
   macraNodes: new Map(),
   executingNodeId: null,
@@ -537,18 +543,37 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
   onNodesChange: (changes) => {
     if (changes.length === 0) return
-    const { nodes, macraNodes, edges, selectedNodeIds } = get()
+    const { nodes, macraNodes, edges, selectedNodeIds, _dragInProgress } = get()
 
-    // Snapshot for undo on removal changes (Backspace / Delete or bulk
-    // delete via deleteSelectedNodes). Skip drag undo — by the time the
-    // dragging:false event arrives the position has already been mutated
-    // through dozens of dragging:true ticks, so a snapshot here would
-    // capture the next-to-last drag tick rather than the pre-drag state,
-    // which is not what users expect from cmd+z. A clean drag-undo would
-    // need a separate "first drag change" tracker; left for follow-up.
+    // Snapshot triggers for undo:
+    //   - removal (Backspace / Delete or deleteSelectedNodes) — every time
+    //   - drag start (first dragging:true tick of a new drag) — once per
+    //     drag, NOT on every position tick. Without the flag a single
+    //     drag would push 30+ snapshots and cmd+z would un-drag 1px at a
+    //     time. Capturing on the first tick (before applyNodeChanges) is
+    //     critical: it preserves the pre-drag position so undo restores
+    //     the original spot, not some intermediate frame.
+    const hasDragStart = changes.some(
+      (c) => c.type === 'position' && c.dragging === true
+    )
+    const hasDragEnd = changes.some(
+      (c) => c.type === 'position' && c.dragging === false
+    )
     const isRemoval = changes.some((c) => c.type === 'remove')
-    if (isRemoval) {
+    const isFirstDragTick = hasDragStart && !_dragInProgress
+
+    if (isRemoval || isFirstDragTick) {
       get().pushHistorySnapshot()
+    }
+
+    // Maintain the drag flag: enter on first drag tick, exit on drag end
+    // (the change with dragging:false). Multiple changes per call are
+    // possible (e.g. multi-select drag) but they all share the same
+    // dragging-bool, so a single check suffices.
+    if (isFirstDragTick) {
+      set({ _dragInProgress: true })
+    } else if (hasDragEnd) {
+      set({ _dragInProgress: false })
     }
 
     const nextNodes = applyNodeChanges(changes, nodes)
