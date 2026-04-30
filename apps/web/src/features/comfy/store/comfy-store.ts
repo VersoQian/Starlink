@@ -185,6 +185,9 @@ interface MacraState {
   nodes: Node[]
   edges: Edge[]
 
+  // 当前画布上被选中的节点 id 集合（来自 ReactFlow 的 onSelectionChange）
+  selectedNodeIds: string[]
+
   // 节点数据存储（兼容旧版本）
   nodeDataMap: Map<string, NodeData>
 
@@ -266,6 +269,10 @@ interface MacraState {
   onEdgesChange: (changes: EdgeChange[]) => void
   onConnect: (connection: Connection) => void
 
+  // 多选 / 批量删除
+  setSelectedNodeIds: (ids: string[]) => void
+  deleteSelectedNodes: () => void
+
   // 节点数据操作（兼容旧版本）
   getNodeData: (nodeId: string) => NodeData | undefined
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void
@@ -306,6 +313,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   workspaceId: 'canvas-default',
   nodes: [],
   edges: [],
+  selectedNodeIds: [],
   nodeDataMap: new Map(),
   macraNodes: new Map(),
   executingNodeId: null,
@@ -480,8 +488,37 @@ export const useComfyStore = create<MacraState>((set, get) => ({
 
   onNodesChange: (changes) => {
     if (changes.length === 0) return
-    const { nodes } = get()
-    set({ nodes: applyNodeChanges(changes, nodes) })
+    const { nodes, macraNodes, edges, selectedNodeIds } = get()
+    const nextNodes = applyNodeChanges(changes, nodes)
+
+    // Detect node removals (Backspace / Delete via ReactFlow's deleteKeyCode,
+    // or programmatic remove changes). When nodes are removed we must also:
+    //   1. drop their entries from `macraNodes` (Map state, not auto-synced
+    //      with the ReactFlow nodes array)
+    //   2. drop edges whose endpoints reference any removed node
+    //   3. clear them from `selectedNodeIds` if they were selected
+    // This keeps multi-select bulk-delete consistent — without it, a deleted
+    // node leaves a zombie entry in `macraNodes` and dangling edges.
+    const removeIds = changes
+      .filter((c): c is NodeChange & { type: 'remove'; id: string } => c.type === 'remove')
+      .map((c) => c.id)
+
+    if (removeIds.length === 0) {
+      set({ nodes: nextNodes })
+      return
+    }
+
+    const removeSet = new Set(removeIds)
+    const nextMacraMap = new Map(macraNodes)
+    for (const id of removeIds) nextMacraMap.delete(id)
+    const nextEdges = edges.filter((e) => !removeSet.has(e.source) && !removeSet.has(e.target))
+    const nextSelected = selectedNodeIds.filter((id) => !removeSet.has(id))
+    set({
+      nodes: nextNodes,
+      edges: nextEdges,
+      macraNodes: nextMacraMap,
+      selectedNodeIds: nextSelected
+    })
   },
 
   onEdgesChange: (changes) => {
@@ -493,6 +530,21 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   onConnect: (connection) => {
     const { edges } = get()
     set({ edges: addEdge(connection, edges) })
+  },
+
+  setSelectedNodeIds: (ids) => {
+    const current = get().selectedNodeIds
+    if (current.length === ids.length && current.every((id, i) => id === ids[i])) return
+    set({ selectedNodeIds: ids })
+  },
+
+  deleteSelectedNodes: () => {
+    const { selectedNodeIds } = get()
+    if (selectedNodeIds.length === 0) return
+    // Route through onNodesChange so removal cascades (macraNodes, edges,
+    // selection) stay in lockstep with the ReactFlow array.
+    const changes: NodeChange[] = selectedNodeIds.map((id) => ({ type: 'remove', id }))
+    get().onNodesChange(changes)
   },
 
   getNodeData: (nodeId) => {

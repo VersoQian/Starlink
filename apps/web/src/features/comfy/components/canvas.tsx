@@ -5,6 +5,7 @@ import ReactFlow, {
   Controls,
   MiniMap,
   BackgroundVariant,
+  type OnSelectionChangeParams
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { CanvasRegions } from './canvas-regions'
@@ -12,6 +13,7 @@ import { comfyNodeTypes } from './canvas-config'
 import type { Edge, Node } from 'reactflow'
 import type { NodeChange, EdgeChange, Connection } from 'reactflow'
 import { Lightbulb } from 'lucide-react'
+import { useComfyStore } from '../store/comfy-store'
 
 type CanvasFlowProps = {
   nodes: Node[]
@@ -30,6 +32,11 @@ export function CanvasFlow({
   onConnect,
   isAnimating,
 }: CanvasFlowProps) {
+  const setSelectedNodeIds = useComfyStore((s) => s.setSelectedNodeIds)
+
+  const handleSelectionChange = (params: OnSelectionChangeParams): void => {
+    setSelectedNodeIds(params.nodes.map((n) => n.id))
+  }
   return (
     <main
       className={`flex-1 relative overflow-hidden ${
@@ -43,10 +50,16 @@ export function CanvasFlow({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onSelectionChange={handleSelectionChange}
         nodeTypes={comfyNodeTypes}
         nodesDraggable
         nodesConnectable
         elementsSelectable
+        // Multi-select: shift-click for additive selection, drag-rectangle
+        // for box select. Backspace/Delete fire `remove` changes through
+        // onNodesChange — the store cascades to macraNodes + edges.
+        multiSelectionKeyCode={['Shift', 'Meta']}
+        deleteKeyCode={['Backspace', 'Delete']}
         defaultEdgeOptions={{
           type: 'smoothstep',
           animated: true,
