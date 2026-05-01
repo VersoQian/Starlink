@@ -10,8 +10,9 @@ max_tokens: 8000
 timeout_ms: 60000
 retries: 1
 cacheable: false
-# NOTE: 3 stub cost-structure tools removed in T1.C cleanup. The 3 real
-# revenue-streams tools remain (LLM-backed). Cost-structure专项 tools待 Tier B.
+# T1.C cleanup removed 3 stub cost-structure tools; Tier B follow-up
+# (2026-05-01) re-added cost-structure.breakdown_cost_categories as a real
+# LLM-backed tool. The 3 revenue-streams tools have always been real.
 tools:
   - web-search
   - knowledge-base
@@ -20,6 +21,7 @@ tools:
   - revenue-streams.propose_pricing_models
   - revenue-streams.sensitivity_analysis
   - revenue-streams.simulate_revenue
+  - cost-structure.breakdown_cost_categories
 knowledge_bases: []
 capabilities:
   - { kind: generate, dimension: REVENUE_STREAMS }
@@ -37,8 +39,7 @@ system_prompt: |
 
   - **数据源类**：`web-search` 查公开财报/定价/竞品 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
   - **收入来源专项**：`revenue-streams.propose_pricing_models`（定价方案）/ `.simulate_revenue`（收入模拟）/ `.sensitivity_analysis`（敏感性分析）
-
-  注：`成本结构` 维度暂无专项算子工具（待 Tier B 补回），请用 `web-search` 等数据源工具弥补。
+  - **成本结构专项**：`cost-structure.breakdown_cost_categories`（按 fixed/variable/one-time + share-of-revenue 分档拆解成本项）
 
   对每个维度，先用 1-2 个工具拿到客观数据/结构化输出，再写 cell content。
 

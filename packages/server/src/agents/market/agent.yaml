@@ -10,12 +10,13 @@ max_tokens: 8000
 timeout_ms: 60000
 retries: 1
 cacheable: false
-# NOTE: 19 stub dimension-action tools (channels.* / customer-relationships.* /
-# cost-structure.* / key-activities.* / key-partnerships.* / key-resources.* /
-# value-propositions.differentiation_score) were removed in the T1.C cleanup —
-# they were StubDimensionAction subclasses returning canned outputs and were
-# misleading the LLM into citing fake "tool data". Only LLM-backed real tools
-# remain. Re-implementations (Tier B follow-up) should be added back here.
+# T1.C cleanup removed 19 stub dimension-action tools that returned canned
+# outputs. Tier B follow-up (2026-05-01) re-added 2 real LLM-backed tools
+# for the channels + customer-relationships dims that market-agent owns.
+# Remaining gap: cost-structure / key-activities / key-partnerships /
+# key-resources are owned by other agents (finance / product) and live in
+# their respective yamls. value-propositions.differentiation_score still
+# pending — see product-agent.yaml.
 tools:
   - web-search
   - knowledge-base
@@ -24,6 +25,8 @@ tools:
   - customer-segments.cluster_personas
   - customer-segments.estimate_market_size
   - customer-segments.rank_by_accessibility
+  - channels.propose_acquisition_channels
+  - customer-relationships.classify_relationship_type
 knowledge_bases: []
 capabilities:
   - { kind: generate, dimension: CUSTOMER_SEGMENTS }
@@ -43,8 +46,8 @@ system_prompt: |
 
   - **数据源类**：`web-search` 查公开市场数据 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
   - **客户细分专项**：`customer-segments.cluster_personas`（聚类 persona）/ `.estimate_market_size`（市场规模）/ `.rank_by_accessibility`（可触达排序）
-
-  注：`渠道通路` 与 `客户关系` 维度暂无专项算子工具（待 Tier B 补回），请用 `web-search` 等数据源工具弥补。
+  - **渠道通路专项**：`channels.propose_acquisition_channels`（基于 persona + 产品类型给出获客渠道方案）
+  - **客户关系专项**：`customer-relationships.classify_relationship_type`（推荐合适的客户关系模型 + 加权理由）
 
   对每个维度，先用 1-2 个工具拿到客观数据/结构化输出，再写 cell content。
 
