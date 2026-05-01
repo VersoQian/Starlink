@@ -27,16 +27,79 @@ import { kbProxyRouter } from './routes/kb-proxy.js'
 import { depthLimitPlugin } from './middleware/depth-limit-plugin.js'
 import { rateLimitPlugin } from './middleware/rate-limit-plugin.js'
 import { telemetryPlugin } from './middleware/telemetry-plugin.js'
+import { pool } from './infrastructure/db/pool.js'
+import { describeEmbeddingConfig } from './services/embedding-service.js'
+import { assertProductionConfig, isProduction } from './infrastructure/config-validate.js'
 
 const PORT = Number(process.env.PORT ?? 4000)
+const STARTED_AT = Date.now()
 
 async function start() {
+  // Boot-time production config gate. Fails fast (and crashes the
+  // process) in production when any required secret is missing or
+  // matches a known placeholder. In dev / test the issues are logged
+  // as warnings but boot continues.
+  const configIssues = assertProductionConfig()
+  if (!isProduction() && configIssues.length > 0) {
+    console.warn(
+      `[boot] non-production; ${configIssues.length} config issue(s) would fail in production:`
+    )
+    for (const issue of configIssues) {
+      console.warn(`  · ${issue.variable}: ${issue.detail}`)
+    }
+  }
+
+  // Boot-time embedding sanity log. Operators need to know at boot whether
+  // RAG / memory will use a real embedding endpoint or fall back to the
+  // local hash (which yields near-random retrieval quality).
+  const embeddingConfig = describeEmbeddingConfig()
+  if (embeddingConfig.mode === 'remote') {
+    console.log(
+      `[boot] embedding=remote · model=${embeddingConfig.model} · base=${embeddingConfig.baseUrl}`
+    )
+  } else {
+    console.warn(`[boot] embedding=LOCAL-HASH (poor quality) · ${embeddingConfig.warning}`)
+  }
+
   const app = express()
   const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((o) => o.trim())
   app.use(cors({ origin: corsOrigins, credentials: false }))
   app.use(helmet())
   app.use(express.json())
   app.use(morgan('dev'))
+
+  // Health endpoints — registered BEFORE GraphQL / auth so load-balancers
+  // and orchestrators (Docker / K8s / Fly health checks) can probe without
+  // hitting rate limits or auth gates.
+  //   /health  — cheap liveness: process is up + event loop responsive.
+  //              Always 200 unless the process is dead.
+  //   /ready   — readiness: PG reachable. Returns 503 when the DB pool
+  //              can't answer SELECT 1 within 2s. Use this for "send
+  //              traffic only when DB is ready" gating.
+  app.get('/health', (_req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      uptimeSeconds: Math.floor((Date.now() - STARTED_AT) / 1000),
+      timestamp: new Date().toISOString()
+    })
+  })
+  app.get('/ready', async (_req, res) => {
+    try {
+      const probe = pool.query('SELECT 1 AS ok')
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('db-probe-timeout')), 2000)
+      )
+      await Promise.race([probe, timeout])
+      res.status(200).json({ status: 'ready', db: 'ok' })
+    } catch (err) {
+      res.status(503).json({
+        status: 'not-ready',
+        db: 'fail',
+        error: err instanceof Error ? err.message : String(err)
+      })
+    }
+  })
+
   app.use('/internal', internalRouter)
   app.use('/kb', kbProxyRouter)
 
