@@ -84,5 +84,35 @@ export const ycAirbnbCase: YcCompanyCase = {
   annotator_id: 'sheng-internal',
   annotation_quality: 'draft',
   notes:
-    'Reference for marketplace-pattern BMCs. Watch for the "must_not_cover: inventory cost" — common BMC mistake is treating Airbnb like a hotel chain.'
+    'Reference for marketplace-pattern BMCs. Watch for the "must_not_cover: inventory cost" — common BMC mistake is treating Airbnb like a hotel chain.',
+
+  // Stage 6: KB seed for the citation eval. Public/paraphrased Airbnb
+  // disclosures + general marketplace economics. Each doc carries one
+  // concrete claim agents can plausibly cite.
+  workspace_knowledge: [
+    {
+      doc_id: 'airbnb-fees-2024',
+      title: 'Airbnb Service Fee Breakdown (2024)',
+      content:
+        'Airbnb operates a split-fee model: guests pay a service fee of approximately 13–14% on top of the host\'s nightly rate, plus applicable taxes. Hosts under the split-fee plan pay 3% of the booking subtotal. Hosts can opt into a "host-only" plan (common for hotels and large operators) where they absorb a 14–16% fee and the guest sees no separate service charge. The exact percentage varies by region, listing type, and length of stay.'
+    },
+    {
+      doc_id: 'two-sided-marketplace-economics-2022',
+      title: 'Network Effects in Two-Sided Marketplaces',
+      content:
+        'Two-sided marketplaces face a "cold-start" problem: guests won\'t come without listings, hosts won\'t list without guests. Airbnb famously bootstrapped the supply side first by scraping Craigslist listings (later legally enjoined) and offering professional photography to early hosts. Once liquidity passes a per-city threshold (often >2,000 active listings), organic search demand sustains both sides and CAC drops 40–60%. This is why Airbnb prioritises city-level launch density over global breadth.'
+    },
+    {
+      doc_id: 'airbnb-trust-safety-2023',
+      title: 'Airbnb Host Protection Insurance and Trust & Safety',
+      content:
+        'Airbnb\'s "AirCover for Hosts" provides up to $3M in primary damage protection and $1M in liability coverage per booking, underwritten through partnerships with major insurance carriers. The trust-and-safety operation employs over 2,000 staff handling reviews, identity verification, and dispute mediation. Host and guest ratings (1-5 stars on multiple dimensions) are the primary reputation signal — listings below 4.7 average rating face suppressed search ranking.'
+    },
+    {
+      doc_id: 'airbnb-regulatory-friction-2023',
+      title: 'Short-Term Rental Regulation Across Cities',
+      content:
+        'Cities including New York, Paris, Barcelona, and Amsterdam have passed strict short-term rental rules requiring host registration, primary-residence-only restrictions, or 30/60/90-day annual caps. NYC\'s Local Law 18 (effective 2023) requires hosts to register and removed an estimated 80% of unregistered Airbnb listings overnight. Airbnb\'s public-policy team engages with city governments and lobbies for proportionate rules; failed engagement can shrink supply by 40–60% in a market within a quarter.'
+    }
+  ]
 }

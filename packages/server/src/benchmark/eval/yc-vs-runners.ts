@@ -31,10 +31,16 @@
  *   # Prompt-richness ablation: strip the detailed description from
  *   # the question, keeping only one_liner + sector. Both runners are
  *   # affected equally; useful for measuring how much the prompt
- *   # context was contributing. This is NOT a RAG ablation —
- *   # workspace_knowledge is always [] in this eval (real RAG via
- *   # KB / pgvector is a separate path not exercised here).
+ *   # context was contributing. Orthogonal to --with-kb-only.
  *   ... yc-vs-runners.js --minimal-context
+ *
+ *   # Citation eval: filter to YC cases that have non-empty
+ *   # `workspace_knowledge` seeded. Activates the RAG / citation
+ *   # pipeline (agents emit [[ref:doc#chunk]] tokens parsed by
+ *   # citation-parser into node metadata.citations). Currently seeded:
+ *   # yc-stripe, yc-airbnb. Add more via the workspace_knowledge field
+ *   # on YcCompanyCase.
+ *   ... yc-vs-runners.js --with-kb-only
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -102,10 +108,13 @@ ${yc.description}
     },
     input: {
       question: options.minimalContext ? minimalQuestion : fullQuestion,
-      // NOTE: workspace_knowledge is intentionally empty — these YC cases
-      // do not exercise the RAG / vector-retrieval path. Real RAG testing
-      // requires a populated KB (kb-task-service) and is a separate eval.
-      workspace_knowledge: [],
+      // YC cases now optionally carry seed `workspace_knowledge` (Stage 6,
+      // 2026-05-01). When non-empty the runner passes it as knowledgeEvidence
+      // and the citation pipeline activates ([[ref:docId#snippetId]] in
+      // agent output → parsed by citation-parser → grounding-rate / refs
+      // attached to node metadata). When omitted or empty the run is the
+      // legacy "no RAG" path — same behaviour as before.
+      workspace_knowledge: yc.workspace_knowledge ?? [],
       constraints: []
     },
     expected_output: {
@@ -181,6 +190,9 @@ interface ResultRow {
   run: BenchmarkRun
   evaluation: CaseEvaluation
   candidateLengthChars: number
+  /** Number of `workspace_knowledge` docs the case carried into the runner.
+   *  >0 means the citation pipeline was active for this row. */
+  kbDocCount: number
 }
 
 type RunnerName = 'starlink' | 'gpt-solo' | 'gpt-solo-forced'
@@ -205,7 +217,8 @@ async function evalOneRunner(
     runner: runnerName,
     run,
     evaluation,
-    candidateLengthChars
+    candidateLengthChars,
+    kbDocCount: yc.workspace_knowledge?.length ?? 0
   }
 }
 
@@ -227,17 +240,31 @@ function renderReport(rows: ResultRow[], options: { minimalContext?: boolean } =
   if (options.minimalContext) {
     lines.push(`Context: **minimal** (one_liner + sector only — detailed description stripped). Prompt-richness ablation; not a RAG ablation.`)
   } else {
-    lines.push(`Context: full (one_liner + detailed description + sector). workspace_knowledge=[] (RAG path not exercised).`)
+    lines.push(`Context: full (one_liner + detailed description + sector).`)
+  }
+  // Stage 6: surface RAG status in the report header so readers don't have
+  // to grep individual case files to know whether the citation pipeline
+  // was active.
+  const ragCases = rows.filter((r) => r.kbDocCount > 0).map((r) => r.case_id)
+  const uniqueRagCases = [...new Set(ragCases)]
+  if (uniqueRagCases.length > 0) {
+    lines.push(
+      `RAG: **active** for ${uniqueRagCases.length}/${cases.length} case(s) — ${uniqueRagCases.join(', ')}. Citation pipeline emits [[ref:doc#chunk]] tokens parsed into node metadata.`
+    )
+  } else {
+    lines.push(`RAG: **not exercised** (workspace_knowledge=[] across all cases). Use \`--with-kb-only\` to filter to RAG-seeded cases once any are populated.`)
   }
   lines.push('')
   lines.push('## TL;DR — total scores per case × runner')
   lines.push('')
-  lines.push(`| case | company | ${runners.map((r) => `${r} total`).join(' | ')} | winner |`)
-  lines.push(`| --- | --- | ${runners.map(() => '---').join(' | ')} | --- |`)
+  lines.push(`| case | company | KB | ${runners.map((r) => `${r} total`).join(' | ')} | winner |`)
+  lines.push(`| --- | --- | --- | ${runners.map(() => '---').join(' | ')} | --- |`)
 
   for (const caseId of cases) {
     const sub = rows.filter((r) => r.case_id === caseId)
     const company = sub[0]?.company_name ?? '?'
+    const kbCount = sub[0]?.kbDocCount ?? 0
+    const kbCell = kbCount > 0 ? `${kbCount} docs` : '—'
     const cells = runners.map((r) => {
       const row = sub.find((s) => s.runner === r)
       return row ? `${row.evaluation.total}/27 (${row.evaluation.average.toFixed(2)})` : '-'
@@ -246,7 +273,7 @@ function renderReport(rows: ResultRow[], options: { minimalContext?: boolean } =
     const winner = totals.length > 0
       ? totals.reduce((a, b) => (a.total >= b.total ? a : b)).runner
       : '-'
-    lines.push(`| ${caseId} | ${company} | ${cells.join(' | ')} | **${winner}** |`)
+    lines.push(`| ${caseId} | ${company} | ${kbCell} | ${cells.join(' | ')} | **${winner}** |`)
   }
 
   // Aggregate
@@ -320,15 +347,27 @@ async function main() {
   const caseIdArg = args.find((a) => a.startsWith('--case='))?.split('=')[1]
   const runnersArg = args.find((a) => a.startsWith('--runners='))?.split('=')[1]
   const minimalContext = args.includes('--minimal-context')
+  // Stage 6: filter to cases that have non-empty workspace_knowledge so the
+  // citation pipeline isn't diluted by empty-KB runs in the same report.
+  const withKbOnly = args.includes('--with-kb-only')
 
   const allCases = loadAllYcCases()
-  const cases = caseIdArg
+  const filteredByCaseId = caseIdArg
     ? allCases.filter((c) => c.case_id === caseIdArg)
     : allCases
+  const cases = withKbOnly
+    ? filteredByCaseId.filter((c) => (c.workspace_knowledge?.length ?? 0) > 0)
+    : filteredByCaseId
 
   if (cases.length === 0) {
-    console.error('No matching cases. Available case_ids:')
-    for (const c of allCases) console.error(`  - ${c.case_id}`)
+    if (withKbOnly) {
+      console.error(
+        'No cases with workspace_knowledge populated. Add `workspace_knowledge` to a YC case file to enable citation eval.'
+      )
+    } else {
+      console.error('No matching cases. Available case_ids:')
+      for (const c of allCases) console.error(`  - ${c.case_id}`)
+    }
     process.exit(1)
   }
 
@@ -354,7 +393,15 @@ async function main() {
   )
   if (minimalContext) {
     console.error(
-      `[yc-vs-runners] --minimal-context: stripping detailed description, keeping only one_liner + sector. NOTE: this is a prompt-richness ablation, NOT a RAG ablation (workspace_knowledge is always [] in YC eval).`
+      `[yc-vs-runners] --minimal-context: stripping detailed description, keeping only one_liner + sector. NOTE: this is a prompt-richness ablation; orthogonal to --with-kb-only which controls the RAG path.`
+    )
+  }
+  if (withKbOnly) {
+    const kbCounts = cases
+      .map((c) => `${c.case_id} (${c.workspace_knowledge?.length ?? 0} docs)`)
+      .join(', ')
+    console.error(
+      `[yc-vs-runners] --with-kb-only: ${cases.length} case(s) with seeded knowledge — ${kbCounts}. Citation pipeline activates: agents emit [[ref:doc#chunk]] tokens, parser attaches grounding-rate to node metadata.`
     )
   }
   console.error('')

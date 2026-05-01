@@ -110,7 +110,24 @@ export const YcCompanyCaseSchema = z.object({
   // Annotator metadata -------------------------------------------------------
   annotator_id: z.string(), // e.g. 'sheng-internal' or 'prolific-A1B2C3'
   annotation_quality: z.enum(['draft', 'reviewed', 'expert-validated']).default('draft'),
-  notes: z.string().optional() // free-text caveats for evaluator
+  notes: z.string().optional(), // free-text caveats for evaluator
+
+  // Optional KB seed for the citation eval (master IMPLEMENTATION_PLAN.md §5).
+  // When non-empty, the yc-vs-runners adapter passes these into the runner's
+  // `knowledgeEvidence` channel; the agent prompts already include the
+  // `[[ref:docId#snippetId]]` citation rule (see business-langgraph.ts §1223),
+  // so the run produces grounding-rate / hallucination-rate signals against
+  // a real evidence set rather than the unseeded "workspace_knowledge=[]"
+  // path. Leave undefined or [] for cases that don't exercise RAG.
+  workspace_knowledge: z
+    .array(
+      z.object({
+        doc_id: z.string(),
+        title: z.string(),
+        content: z.string()
+      })
+    )
+    .optional()
 })
 
 export type YcCompanyCase = z.input<typeof YcCompanyCaseSchema>
