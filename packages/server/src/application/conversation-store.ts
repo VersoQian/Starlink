@@ -39,6 +39,12 @@ import { WorkspaceGraphStore } from './workspace-graph-store.js'
 import { WorkspaceAssetStore } from './workspace-asset-store.js'
 import { RuntimeEventStore } from './runtime-event-store.js'
 import { ConversationMemoryStore, type AppendMessageInput, type UpsertMemoryInput } from './conversation-memory-store.js'
+// Re-export for back-compat: external callers (resolvers, tests) can
+// keep importing { WorkspaceLockError } from this module. The class
+// itself lives in its own file so test runners can import it without
+// pulling in the PG pool's module-load-time DATABASE_URL check.
+export { WorkspaceLockError } from './workspace-lock-error.js'
+import { WorkspaceLockError } from './workspace-lock-error.js'
 import { HitlApprovalStore } from './hitl-approval-store.js'
 import { WorkspaceContextBuilder } from './workspace-context-builder.js'
 import { applyGraphDelta } from './graph-delta.js'
@@ -150,6 +156,18 @@ export class ConversationStore {
     kbId?: string
   ): Promise<ConversationRecord> {
     await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
+
+    // DEC-5 soft-lock: refuse to start a second conversation while another
+    // is still running in this workspace. Without this, the two graphs
+    // race on memory_items inserts (sourceId conflicts → archived rows) +
+    // canvas writes (last-writer-wins for graph snapshot). Frontend should
+    // catch WORKSPACE_HAS_ACTIVE_CONVERSATION and offer "open the active
+    // one" or "cancel and start fresh" rather than retry blindly.
+    const active = await this.memoryStore.findActiveSession(workspaceId)
+    if (active) {
+      throw new WorkspaceLockError(workspaceId, active.id)
+    }
+
     const existingGraph = await this.getGraph(workspaceId)
     const id = nanoid()
     const contextSnapshot = await this.contextBuilder.build({

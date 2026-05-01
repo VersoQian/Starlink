@@ -843,6 +843,22 @@ function toGraphQLError(error: unknown): GraphQLError {
       })
     }
 
+    // DEC-5 soft-lock: surface the active conversation id so the frontend
+    // can offer the user "open the active one" instead of just bouncing.
+    if (error.name === 'WorkspaceLockError') {
+      const lock = error as Error & { workspaceId?: string; activeConversationId?: string }
+      return new GraphQLError(
+        'This workspace already has an active conversation. Cancel or finish it before starting a new one.',
+        {
+          extensions: {
+            code: 'WORKSPACE_HAS_ACTIVE_CONVERSATION',
+            workspaceId: lock.workspaceId,
+            activeConversationId: lock.activeConversationId
+          }
+        }
+      )
+    }
+
     return new GraphQLError(error.message)
   }
 

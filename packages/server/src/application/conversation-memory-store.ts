@@ -247,6 +247,31 @@ export class ConversationMemoryStore {
     return result.rows.map(rowToSession)
   }
 
+  /**
+   * Find a single in-flight conversation in the given workspace, if any.
+   *
+   * Used by the workspace soft-lock (DEC-5) at conversation-store.startConversation
+   * to prevent two concurrent business graphs writing into the same workspace
+   * (which races on memory_items writes + canvas mutations).
+   *
+   * Returns the most recently updated 'running' session, or null when the
+   * workspace is idle. Stale 'running' rows from crashed processes still
+   * count as active here — operator must manually mark them failed:
+   *   UPDATE conversation_sessions SET status='failed' WHERE id='...';
+   * Auto-staleness recovery is intentionally deferred (separate decision).
+   */
+  async findActiveSession(workspaceId: string): Promise<ConversationSession | null> {
+    await this.ensureTables()
+    const result = await pool.query(
+      `SELECT * FROM conversation_sessions
+       WHERE workspace_id = $1 AND status = 'running'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [workspaceId]
+    )
+    return result.rowCount ? rowToSession(result.rows[0]) : null
+  }
+
   async appendMessage(input: AppendMessageInput): Promise<ConversationMessage> {
     await this.ensureTables()
     const result = await pool.query(
