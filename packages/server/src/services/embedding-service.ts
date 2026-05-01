@@ -8,6 +8,51 @@ export type EmbeddingResult = {
   dimensions: number
 }
 
+// Throttle the per-call fallback warning. Without this, every KB chunk
+// upsert / search logs a line in production when no embedding key is
+// set — fills disk and hides real issues. We log on the first fall-
+// through and then summarise every Nth occurrence.
+let fallbackCount = 0
+const FALLBACK_LOG_EVERY = 100
+
+/**
+ * Boot-time embedding configuration check. Call once during server start
+ * so operators see "embedding=remote/local-hash" loud and clear in the
+ * startup log instead of discovering it 30 minutes later via degraded
+ * KB search quality. Returns the configured mode for callers that want
+ * to surface it elsewhere (e.g. /health response).
+ */
+export function describeEmbeddingConfig(): {
+  mode: 'remote' | 'local-hash'
+  baseUrl: string | null
+  model: string | null
+  warning: string | null
+} {
+  const apiKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY
+  if (!apiKey) {
+    return {
+      mode: 'local-hash',
+      baseUrl: null,
+      model: null,
+      warning:
+        'No embedding API key configured. KB / memory vector search will use a deterministic local hash (poor quality). ' +
+        'Set EMBEDDING_API_KEY (or OPENAI_API_KEY / LLM_API_KEY) for production-grade retrieval.'
+    }
+  }
+  const baseUrl = stripTrailingSlash(
+    process.env.EMBEDDING_BASE_URL ??
+      process.env.OPENAI_BASE_URL ??
+      process.env.LLM_BASE_URL ??
+      'https://api.openai.com/v1'
+  )
+  return {
+    mode: 'remote',
+    baseUrl,
+    model: process.env.EMBEDDING_MODEL ?? 'text-embedding-3-small',
+    warning: null
+  }
+}
+
 export async function embedText(text: string): Promise<EmbeddingResult> {
   const normalizedText = normalizeWhitespace(text).slice(0, MAX_EMBEDDING_TEXT_LENGTH)
   const dimensions = getEmbeddingDimensions()
@@ -17,9 +62,15 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
     try {
       return await embedRemote(normalizedText, apiKey, dimensions)
     } catch (error) {
-      console.warn('[embedding-service] remote embedding failed, falling back to local embedding', {
-        error: String(error)
-      })
+      // Throttled: log every 1st + every 100th failure. Production with
+      // a misconfigured embedding endpoint would otherwise drown the log.
+      fallbackCount += 1
+      if (fallbackCount === 1 || fallbackCount % FALLBACK_LOG_EVERY === 0) {
+        console.warn('[embedding-service] remote embedding failed, falling back to local embedding', {
+          error: String(error),
+          fallbackCount
+        })
+      }
     }
   }
 
