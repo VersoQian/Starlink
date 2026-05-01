@@ -18,6 +18,18 @@ import { LayoutGrid, PanelsTopLeft } from 'lucide-react'
 
 type CanvasPageProps = {
   workspaceId?: string
+  /**
+   * When true, render the canvas full-viewport WITHOUT WorkspaceShell's
+   * left/right panel rails. The CanvasHeader still sits on top and the
+   * canvas occupies all remaining space. Used by the (standalone)
+   * /canvas/[workspaceId] route — gives the user a chromeless work
+   * surface for demos / focused editing without the input panel,
+   * node library, knowledge sidebar etc.
+   *
+   * Defaults to false so /workspace/[id]/canvas (the existing route
+   * inside the (app) shell) keeps its current full UI.
+   */
+  standalone?: boolean
 }
 
 const CANVAS_TUTORIAL_STORAGE_KEY = 'canvas_tutorial_seen'
@@ -25,6 +37,7 @@ const LEGACY_TUTORIAL_STORAGE_KEY = 'comfy_tutorial_seen'
 
 export function CanvasPage({
   workspaceId = 'canvas-default',
+  standalone = false,
 }: CanvasPageProps) {
   const nodes = useComfyStore((state) => state.nodes)
   const edges = useComfyStore((state) => state.edges)
@@ -294,6 +307,44 @@ export function CanvasPage({
     handleApproveCustomDecision,
     handleAcceptCurrentDecision
   ])
+
+  // Standalone mode: bypass WorkspaceShell + panel rails entirely.
+  // Renders just the CanvasHeader on top + CanvasFlow taking the
+  // rest of the viewport. Detail drawer + tutorial dialog still
+  // available as overlays. Only honoured for freeform mode (BMC
+  // grid view requires the shell's persistent panels).
+  if (standalone && viewMode === 'freeform') {
+    return (
+      <div className="h-screen w-screen flex flex-col bg-ink overflow-hidden">
+        <CanvasHeader
+          isAnimating={isAnimating}
+          onOpenTutorial={() => setShowTutorial(true)}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          workflowStage={workflowStage}
+          onExportCanvas={handleExportCanvas}
+          onImportCanvas={handleImportCanvas}
+        />
+        <div className="flex-1 relative">
+          <CanvasFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            isAnimating={isAnimating}
+          />
+        </div>
+        <CanvasTutorialDialog
+          open={showTutorial}
+          tutorialStep={tutorialStep}
+          onClose={handleCloseTutorial}
+          onNext={handleNextStep}
+        />
+        <CCBMCDetailDrawer />
+      </div>
+    )
+  }
 
   return (
     <WorkspaceShell
