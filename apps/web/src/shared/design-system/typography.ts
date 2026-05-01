@@ -22,49 +22,42 @@
  * into v2, those imports go.
  */
 
-import { Fraunces, JetBrains_Mono } from 'next/font/google'
 import { GeistSans } from 'geist/font/sans'
 
 // ============================================================================
-// next/font configurations
+// Font configurations
 // ============================================================================
+//
+// Geist is loaded via the Vercel-published `geist` npm package (which
+// ships its own font files — no network fetch at build time).
+//
+// Fraunces + JetBrains Mono are loaded via plain CSS `@import` in
+// globals.css (browser-side fetch, deferred). Why not next/font/google
+// for those? The build-time fetch from fonts.googleapis.com blocks
+// compile when the dev environment has flaky upstream connectivity
+// (observed 2026-05-01 in this env: Next dev server hangs >2 min on
+// the first compile of a v2 route waiting on the font fetch retries).
+// Browser-side @import lets the page render even when fonts haven't
+// loaded yet — the user just sees the system fallback briefly.
+//
+// Both routes still use OFL-licensed Google Fonts; only the loader
+// differs.
 
 /**
- * Fraunces — display serif. Variable axes:
- *   - opsz (optical size 9-144) — automatic per font-size
- *   - wght (weight 100-900) — we use 400 / 600 / 700 / 900
- *   - SOFT (softness 0-100) — kept default for newsprint feel
- */
-export const fraunces = Fraunces({
-  subsets: ['latin'],
-  weight: ['400', '600', '700', '900'],
-  display: 'swap',
-  variable: '--font-fraunces',
-  // Disable preload for the heavy variable file — we load on demand from
-  // surfaces that actually use display type.
-  preload: false,
-})
-
-/**
- * Geist Sans — body sans. Imported from the Vercel-published `geist`
- * package (NOT next/font/google — Geist isn't on the Google CDN as of
- * Next.js 14.2). The package self-publishes the variable as
- * `--font-geist-sans`; we re-export under our own var name below for
- * uniformity with fraunces / jetbrainsMono.
+ * Geist Sans — body sans. Bundled with the package, no network needed.
+ * Self-publishes the variable as `--font-geist-sans`.
  */
 export const geist = GeistSans
 
 /**
- * JetBrains Mono — technical readouts. Already loaded in v1, this is
- * just the v2-namespaced re-export so future v2-only surfaces have a
- * clean import path.
+ * Fraunces and JetBrains Mono CSS variables. The actual font CSS is
+ * @imported in globals.css; these are the variable names that Tailwind
+ * `font-display` / `font-instr` classes resolve to.
  */
-export const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  display: 'swap',
-  variable: '--font-jetbrains-mono',
-})
+export const cssFontVars = {
+  fraunces:      '--font-fraunces',
+  jetbrainsMono: '--font-jetbrains-mono',
+} as const
 
 // ============================================================================
 // Font role classes — apply directly via className
@@ -101,8 +94,8 @@ export const scale = {
 // All-in-one helper for layout root
 // ============================================================================
 //
-// Add to layout.tsx <html> tag so all 3 CSS variables become available
-// project-wide. Surfaces then opt-in via the variable, e.g.
-//   <h1 className="font-[var(--font-fraunces)]">
+// Add to layout.tsx <html> tag so the Geist CSS variable is available
+// project-wide. Fraunces + JetBrains Mono variables are set via the
+// :root selector in globals.css (no JS-side coupling needed).
 
-export const fontVariables = `${fraunces.variable} ${geist.variable} ${jetbrainsMono.variable}`
+export const fontVariables = geist.variable
