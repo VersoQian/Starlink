@@ -99,6 +99,12 @@ export function toLangchainTool(
 ): StructuredToolInterface {
   const def = baseTool.definition
   const toolName = def.identity.name
+  // OpenAI / DeepSeek tool-name validation: `^[a-zA-Z0-9_-]+$`. Our tool
+  // identifiers use dot-namespacing (e.g. `revenue-streams.propose_pricing_models`),
+  // which the API rejects with HTTP 400 before any inference runs. Sanitize
+  // for the wire only — keep the original name in handoff logs so the
+  // observability story stays unchanged.
+  const apiToolName = toolName.replace(/\./g, '_')
   const ownerAgentId = opts.ownerAgentId ?? '_unknown_agent'
 
   return lcTool(
@@ -176,7 +182,7 @@ export function toLangchainTool(
       return JSON.stringify(result ?? {})
     },
     {
-      name: toolName,
+      name: apiToolName,
       description: def.display.description,
       schema: jsonSchemaToZod(def.inputSchema)
     }
