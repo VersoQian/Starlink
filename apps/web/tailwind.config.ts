@@ -5,7 +5,11 @@ const config: Config = {
   content: [
     './app/**/*.{js,ts,jsx,tsx}',
     './components/**/*.{js,ts,jsx,tsx}',
-    './lib/**/*.{js,ts,jsx,tsx}'
+    './lib/**/*.{js,ts,jsx,tsx}',
+    // Editorial Boardroom v2 (P1, 2026-05-01): scan src/ so v2 tokens
+    // and the new design-system/ utilities are picked up. Without this
+    // the v2 classes get tree-shaken out of the production CSS.
+    './src/**/*.{js,ts,jsx,tsx}'
   ],
   theme: {
     container: {
@@ -75,7 +79,56 @@ const config: Config = {
           wire: '#4ade80',
           wireActive: '#22c55e',
           wireHover: '#86efac',
-        }
+        },
+        // ============================================================
+        // Editorial Boardroom v2 (P1, 2026-05-01)
+        // ============================================================
+        // Source of truth: src/shared/design-system/tokens-v2.ts.
+        // Old palettes above are kept for back-compat during P2/P3
+        // migration; P4 deletes any of those that are unused.
+        ink: {
+          DEFAULT: '#0A0A0A',
+          ash1: '#161514',
+          ash2: '#2A2826',
+          ash3: '#4A4744',
+          ash4: '#8A8784',
+        },
+        paper: {
+          DEFAULT: '#F4F0E8',
+          ash1: '#ECEAE4',
+          ash2: '#D8D5CE',
+          ash3: '#6E6B66',
+        },
+        press: {
+          DEFAULT: '#B33028',
+          active: '#8F2620',
+          wash:    '#F2D6D2',
+        },
+        // Per-agent byline accents (used as kicker tints, NOT
+        // for fills). All muted on purpose — these are reading aids,
+        // not decoration. Press-red is reserved separately.
+        byline: {
+          market:      '#9B8E70',
+          product:     '#7A8B7E',
+          finance:     '#6E7A8C',
+          critic:      '#8C6E6E',
+          synthesizer: '#6B6B7C',
+        },
+      },
+      fontFamily: {
+        // v2 font roles. Use via `font-display` / `font-body` /
+        // `font-instr` (instrument). The CSS variables come from
+        // next/font configs in src/shared/design-system/typography.ts
+        // and are bound on <html> in app/layout.tsx.
+        display: ['var(--font-fraunces)',       'ui-serif', 'Georgia', 'serif'],
+        body:    ['var(--font-geist)',          'ui-sans-serif', 'system-ui', 'sans-serif'],
+        instr:   ['var(--font-jetbrains-mono)', 'ui-monospace', 'monospace'],
+      },
+      backgroundImage: {
+        // Paper grain texture. Apply via `bg-grain-paper` on a relative
+        // container — uses the SVG filter at /editorial-grain.svg. Use
+        // sparingly; one grain layer per visible region is plenty.
+        'grain-paper': "url('/editorial-grain.svg')",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -102,11 +155,36 @@ const config: Config = {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        // Editorial Boardroom v2 — only 2 CSS keyframes are allowed
+        // (the third, pageFold, is Framer Motion only). See
+        // src/shared/design-system/motion.ts for the canonical spec.
+        'editorial-publish': {
+          from: { opacity: '0', transform: 'translateY(8px)' },
+          to:   { opacity: '1', transform: 'translateY(0)' },
+        },
+        'editorial-swap': {
+          from: { opacity: '0' },
+          to:   { opacity: '1' },
+        },
       },
       animation: {
         'rotate-y-180': 'rotate-y-180 0.6s ease-in-out',
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        // v2 — durations match motion.ts
+        'editorial-publish': 'editorial-publish 80ms cubic-bezier(0.25,0.1,0.25,1)',
+        'editorial-swap':    'editorial-swap 120ms linear',
+      },
+      letterSpacing: {
+        // Newspaper kicker convention — UPPERCASE 10px tracking 0.18em
+        kicker: '0.18em',
+      },
+      maxWidth: {
+        // Reading measure caps from tokens-v2.ts (newspaper typography
+        // research: 60-75ch optimal). Use as `max-w-measure-body`.
+        'measure-body':    '64ch',
+        'measure-cell':    '52ch',
+        'measure-display': '32ch',
       }
     }
   },

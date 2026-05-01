@@ -392,3 +392,87 @@ body {
   100% { left: 100%; }
 }
 .starlink-pulse { animation: starlinkPulseFade 1.6s ease-in-out infinite; }
+
+/* ============================================================================
+   Editorial Boardroom v2 — globals (P1, 2026-05-01)
+   ============================================================================
+   Source of truth: src/shared/design-system/tokens-v2.ts.
+   These vars are ADDITIVE — old --canvas-*, --stratum-*, --accent-* stay
+   valid for v1 surfaces. Once a surface migrates to v2 it imports from
+   tokens-v2.ts and uses the editorial-* CSS vars below.
+   P4 (final phase) deletes the old vars after all surfaces have moved.
+   ============================================================================ */
+
+:root {
+  /* Color — ink-on-paper inversion */
+  --editorial-ink:        #0A0A0A;
+  --editorial-ink-ash1:   #161514;
+  --editorial-ink-ash2:   #2A2826;
+  --editorial-ink-ash3:   #4A4744;
+  --editorial-ink-ash4:   #8A8784;
+
+  --editorial-paper:      #F4F0E8;
+  --editorial-paper-ash1: #ECEAE4;
+  --editorial-paper-ash2: #D8D5CE;
+  --editorial-paper-ash3: #6E6B66;
+
+  /* Sole accent — newsroom red. Use SPARINGLY (one per screen). */
+  --editorial-press:        #B33028;
+  --editorial-press-active: #8F2620;
+  --editorial-press-wash:   #F2D6D2;
+
+  /* Three rule weights (newspaper convention) */
+  --editorial-rule-strong: 1.5px solid rgba(22, 21, 20, 0.8);
+  --editorial-rule-mid:    1px   solid rgba(42, 40, 38, 0.4);
+  --editorial-rule-hair:   0.5px solid rgba(74, 71, 68, 0.16);
+
+  /* Reading-measure caps */
+  --editorial-measure-body:    64ch;
+  --editorial-measure-cell:    52ch;
+  --editorial-measure-display: 32ch;
+
+  /* Motion — durations match motion.ts spec; do NOT exceed 200ms */
+  --editorial-motion-publish:  80ms;
+  --editorial-motion-swap:    120ms;
+  --editorial-motion-fold:    200ms;
+}
+
+/* Paper grain texture — apply to a relative-positioned container.
+   The grain layer is absolute-pinned, multiply-blended for paper, and
+   completely pointer-events: none. Single-layer per visible region. */
+.bg-grain-paper {
+  position: relative;
+}
+.bg-grain-paper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url('/editorial-grain.svg');
+  background-repeat: repeat;
+  opacity: 0.04;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  z-index: 0;
+}
+.bg-grain-ink {
+  position: relative;
+}
+.bg-grain-ink::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url('/editorial-grain.svg');
+  background-repeat: repeat;
+  opacity: 0.06;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  z-index: 0;
+}
+
+/* Reduced motion — disable v2 animations entirely. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-editorial-publish,
+  .animate-editorial-swap {
+    animation: none !important;
+  }
+}
