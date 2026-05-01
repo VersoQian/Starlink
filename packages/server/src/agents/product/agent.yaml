@@ -11,9 +11,10 @@ timeout_ms: 60000
 retries: 1
 cacheable: false
 # T1.C cleanup removed stub tools; Tier B follow-up (2026-05-01) re-added
-# 3 real LLM-backed tools covering the 3 product-owned non-VP dims
-# (key-resources, key-activities, key-partnerships). Still pending:
-# value-propositions.differentiation_score (queued, not yet re-implemented).
+# 7 real LLM-backed tools — 6 in Stage D (commit 4a4ec96, the 6 missing
+# dim coverage) + value-propositions.differentiation_score (this commit).
+# All 7 use band labels (high/mid/low, stronger/parity/weaker) instead
+# of fabricated numbers — no canned outputs, no hallucinated tool data.
 tools:
   - web-search
   - knowledge-base
@@ -21,6 +22,7 @@ tools:
   - url-fetch
   - value-propositions.extract_jtbd
   - value-propositions.map_pain_to_gain
+  - value-propositions.differentiation_score
   - key-resources.classify_resources
   - key-activities.identify_critical_activities
   - key-partnerships.propose_partner_categories
