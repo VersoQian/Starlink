@@ -27,7 +27,9 @@
     "eval:yc-kb": "pnpm run build && node --env-file=.env dist/benchmark/eval/yc-vs-runners.js --with-kb-only",
     "eval:judge-smoke": "pnpm run build && node --env-file=.env dist/benchmark/eval/yc-judge-smoke.js",
     "eval:coaching": "pnpm run build && node --env-file=.env dist/benchmark/coaching/run-coach-eval.js",
-    "smoke:all": "pnpm run build && node dist/scripts/smoke-task-event-store.js && node dist/scripts/smoke-conversation-runtime-store.js && node dist/scripts/smoke-access-subscriptions.js && node dist/scripts/smoke-citation-pipeline.js"
+    "smoke:all": "pnpm run build && node dist/scripts/smoke-task-event-store.js && node dist/scripts/smoke-conversation-runtime-store.js && node dist/scripts/smoke-access-subscriptions.js && node dist/scripts/smoke-citation-pipeline.js",
+    "ci": "pnpm run lint && pnpm run validate:agents && pnpm run test && pnpm run smoke:all",
+    "eval:all": "pnpm run eval:judge-smoke && pnpm run eval:yc && pnpm run eval:coaching"
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",
