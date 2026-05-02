@@ -1,9 +1,32 @@
 'use client'
 
+/**
+ * CanvasHeader — Editorial Boardroom v2 mast (2026-05-02).
+ *
+ * Replaces the v1 cyan-glass header (Sparkles icon + h1/kicker text +
+ * gradient stage chip + glass segmented control). New visual:
+ *
+ *   ◇  无限画布 · CANVAS                STAGE · 待机    [自由 | 九宫格]   导入  导出  快速入门
+ *      MACRA · BUSINESS INTELLIGENCE
+ *
+ *   - Brand: Fraunces 字号 18px serif title + mono kicker rail; no
+ *     gradient logo block
+ *   - Stage: mono UPPERCASE kicker + paper-tinted current value, not
+ *     a chip
+ *   - Segmented: brutalist 1px paper border, ink-ash1 idle, paper
+ *     active (no glass)
+ *   - Buttons: Import / Export = ghost (paper-ash3 text + 0.5px
+ *     border); 快速入门 = primary paper-on-ink press style
+ *   - Bottom rule: 1.5 px paper-tinted divider replaces the v1
+ *     "shadow-2xl" raise effect
+ *
+ * Functional surface unchanged — same prop shape, same handler
+ * contract.
+ */
+
 import { useRef } from 'react'
-import { Download, LayoutGrid, PanelsTopLeft, Sparkles, Upload, Zap } from 'lucide-react'
+import { Download, LayoutGrid, PanelsTopLeft, Upload, Zap } from 'lucide-react'
 import { WORKFLOW_STAGE_LABELS, type WorkflowStage } from '../store/workflow-stage'
-import { TOKENS } from './canvas-design-tokens'
 
 type CanvasHeaderProps = {
   isAnimating: boolean
@@ -15,20 +38,17 @@ type CanvasHeaderProps = {
   onImportCanvas?: (file: File) => void
 }
 
-/**
- * Canvas header (refresh-2026-04).
- *
- * Refreshed surfaces vs. previous version:
- *  - dropped amber accent + cyan accent dual-gradient → single cyan-300 accent
- *  - 12 px logo (was 48 px), monochrome icon (was gradient block)
- *  - workflow stage rail visible at md+ (was hidden until xl)
- *  - 1 px ring instead of glow shadow on active state
- *  - export button is now ghost-style; only "快速入门" remains as the CTA
- *
- * Cross-cutting tokens come from `canvas-design-tokens.ts` so the rest of the
- * canvas can be migrated component-by-component without breaking visual
- * consistency mid-rollout.
- */
+const SEG_BASE =
+  'inline-flex items-center gap-1.5 px-2.5 py-1 font-instr text-[10px] uppercase tracking-kicker transition-colors'
+const SEG_ACTIVE = 'bg-paper text-ink'
+const SEG_IDLE   = 'bg-transparent text-paper-ash3 hover:text-paper'
+
+const BTN_GHOST =
+  'inline-flex items-center gap-1.5 border-[0.5px] border-ink-ash3/40 px-2.5 py-1 font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 hover:border-paper/40 hover:text-paper transition-colors disabled:opacity-30 disabled:cursor-not-allowed'
+
+const BTN_PRIMARY =
+  'inline-flex items-center gap-1.5 bg-paper text-ink px-3 py-1 font-instr text-[10px] uppercase tracking-kicker hover:bg-paper-ash2 transition-colors'
+
 export function CanvasHeader({
   isAnimating,
   onOpenTutorial,
@@ -53,73 +73,80 @@ export function CanvasHeader({
 
   return (
     <header
-      className={`relative z-20 flex items-center justify-between px-6 py-3 ${TOKENS.surface.bar} ${
+      className={`relative z-20 flex items-center justify-between gap-4 px-6 py-3 bg-ink border-b-[1.5px] border-paper/30 ${
         isAnimating ? 'opacity-0' : 'animate-fade-in-up'
       }`}
       style={{ animationDelay: '0.1s' }}
     >
-      {/* Brand cluster */}
-      <div className="flex items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03]">
-          <Sparkles className="h-4 w-4 text-cyan-300" strokeWidth={1.75} />
-        </div>
-        <div className="flex flex-col leading-tight">
-          <h1 className={TOKENS.text.h1}>智绘 · 无限画布</h1>
-          <p className={TOKENS.text.kicker}>MACRA Business Intelligence</p>
+      {/* Brand — Fraunces title + mono kicker, no gradient block */}
+      <div className="flex items-baseline gap-3 min-w-0">
+        <span
+          aria-hidden="true"
+          className="font-display font-[700] text-paper text-[18px] leading-none shrink-0"
+        >
+          ◇
+        </span>
+        <div className="flex flex-col leading-tight min-w-0">
+          <h1 className="font-display font-[700] text-paper text-[16px] tracking-[0.02em] leading-tight truncate">
+            无限画布 · CANVAS
+          </h1>
+          <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 truncate">
+            MACRA · BUSINESS INTELLIGENCE
+          </p>
         </div>
       </div>
 
+      {/* Vertical rule */}
+      <span aria-hidden="true" className="h-8 w-px bg-paper/20 shrink-0" />
+
       {/* Right cluster */}
-      <div className="flex items-center gap-2">
-        {/* Compact stage badge — single source of truth for the workflow stage.
-            Replaced the 5-pill rail to reduce visual noise; the user already
-            sees per-stage progress in the bottom command tray. */}
-        <div className="flex items-center gap-2 whitespace-nowrap rounded-lg border border-white/[0.06] bg-slate-950/50 px-2.5 py-1.5">
-          <span className={TOKENS.text.kickerAccent}>STAGE</span>
-          <span className="text-[11px] font-medium text-white">
+      <div className="flex items-center gap-3 shrink-0">
+        {/* STAGE — mono kicker + paper-tinted value */}
+        <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+          <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+            STAGE
+          </span>
+          <span className="font-instr text-[10px] uppercase tracking-kicker text-paper">
             {WORKFLOW_STAGE_LABELS[workflowStage]}
           </span>
         </div>
 
-        {/* View-mode segmented control */}
+        {/* View-mode segmented control — brutalist 1px paper border */}
         <div
-          className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-slate-950/50 p-1"
+          className="flex items-stretch border-[1px] border-paper/30"
           role="group"
           aria-label="Canvas view"
         >
           <button
             type="button"
             onClick={() => onViewModeChange?.('freeform')}
-            className={
-              viewMode === 'freeform' ? TOKENS.button.segmentActive : TOKENS.button.segmentIdle
-            }
+            className={`${SEG_BASE} ${viewMode === 'freeform' ? SEG_ACTIVE : SEG_IDLE}`}
             aria-pressed={viewMode === 'freeform'}
           >
-            <PanelsTopLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
-            自由画布
+            <PanelsTopLeft className="h-3 w-3" strokeWidth={1.5} />
+            自由
           </button>
+          <span aria-hidden="true" className="w-px bg-paper/20" />
           <button
             type="button"
             onClick={() => onViewModeChange?.('bmc')}
-            className={
-              viewMode === 'bmc' ? TOKENS.button.segmentActive : TOKENS.button.segmentIdle
-            }
+            className={`${SEG_BASE} ${viewMode === 'bmc' ? SEG_ACTIVE : SEG_IDLE}`}
             aria-pressed={viewMode === 'bmc'}
           >
-            <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.75} />
-            BMC 九宫格
+            <LayoutGrid className="h-3 w-3" strokeWidth={1.5} />
+            九宫格
           </button>
         </div>
 
-        {/* Import — restore canvas from a previously exported JSON */}
+        {/* Import — ghost */}
         <button
           type="button"
           onClick={handleImportClick}
           disabled={!onImportCanvas}
-          className={TOKENS.button.ghost}
+          className={BTN_GHOST}
           aria-label="导入画布"
         >
-          <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <Upload className="h-3 w-3" strokeWidth={1.5} />
           导入
         </button>
         <input
@@ -130,21 +157,25 @@ export function CanvasHeader({
           onChange={handleImportFile}
         />
 
-        {/* Export — save canvas to a JSON file the user can re-import */}
+        {/* Export — ghost */}
         <button
           type="button"
           onClick={onExportCanvas}
           disabled={!onExportCanvas}
-          className={TOKENS.button.ghost}
+          className={BTN_GHOST}
           aria-label="导出画布"
         >
-          <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <Download className="h-3 w-3" strokeWidth={1.5} />
           导出
         </button>
 
-        {/* Primary CTA */}
-        <button type="button" onClick={onOpenTutorial} className={TOKENS.button.primary}>
-          <Zap className="h-3.5 w-3.5" strokeWidth={2} />
+        {/* Primary CTA — paper-on-ink press style */}
+        <button
+          type="button"
+          onClick={onOpenTutorial}
+          className={BTN_PRIMARY}
+        >
+          <Zap className="h-3 w-3" strokeWidth={2} />
           快速入门
         </button>
       </div>
