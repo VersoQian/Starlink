@@ -1,128 +1,124 @@
 'use client'
 
+/**
+ * DataSourceNode — Editorial Boardroom v2 (2026-05-02).
+ *
+ * KB documents / external references that agents cite. Visual marker
+ * is a small Database icon (NOT cyan-tinted) and a "SOURCE" mono
+ * kicker — reads as "footnote on a page", not as a glowing data
+ * widget.
+ */
+
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
-import { Database, Link2, ShieldCheck, Sparkles } from 'lucide-react'
+import { Database, Link2, ShieldCheck } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
-const CONFIDENCE_STYLES = {
-  high: { label: '高可靠', width: '100%' },
-  medium: { label: '中可靠', width: '66%' },
-  low: { label: '低可靠', width: '33%' }
+const HANDLE_BASE =
+  'h-2 w-2 !border-[0.5px] !border-paper/40 !bg-ink-ash2'
+
+const CONFIDENCE_BAND: Record<'high' | 'medium' | 'low', { label: string; width: string }> = {
+  high:   { label: 'HIGH', width: '100%' },
+  medium: { label: 'MID',  width: '66%'  },
+  low:    { label: 'LOW',  width: '33%'  },
 }
 
 export const DataSourceNode = memo(function DataSourceNode({ id, data }: NodeProps) {
   const macraNode = useComfyStore((state) => state.macraNodes.get(id))
   const nodeData = macraNode || (data as MacraNodeData)
 
-  const confidence = nodeData?.metadata?.confidence
-  const confidenceStyle = confidence ? CONFIDENCE_STYLES[confidence] : null
+  const confidence = nodeData?.metadata?.confidence as 'high' | 'medium' | 'low' | undefined
+  const confidenceStyle = confidence ? CONFIDENCE_BAND[confidence] : null
   const tags = nodeData?.metadata?.tags ?? []
 
   return (
     <>
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{
-          width: 10,
-          height: 10,
-          background: '#22d3ee',
-          border: '2px solid rgb(2 6 23)'
-        }}
-      />
+      <Handle type="target" position={Position.Left} className={HANDLE_BASE} />
 
-      <div
-        className="group relative w-[340px] overflow-hidden rounded-xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl transition-colors hover:border-white/[0.16]"
-        style={{ boxShadow: 'inset 3px 0 0 0 #22d3ee' }}
-      >
-        <div className="relative border-b border-white/[0.06] bg-cyan-400/[0.06] px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-cyan-400/15 text-cyan-300">
-                <Database className="h-4 w-4" strokeWidth={1.75} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] font-semibold text-white">
-                  {nodeData?.label || '数据源节点'}
-                </h3>
-                <p className="mt-0.5 text-[11px] text-cyan-300/80">可信资料与研究输入</p>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {nodeData?.metadata?.agent_signature && (
-                <span className="rounded bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-medium text-cyan-200">
-                  {nodeData.metadata.agent_signature}
-                </span>
-              )}
-              <Sparkles className="h-3 w-3 text-cyan-300" strokeWidth={1.75} />
-            </div>
-          </div>
+      <article className="relative w-[340px] bg-ink-ash1 border-[1px] border-ink-ash3/30 hover:border-ink-ash2/60 transition-colors">
+        {/* Header — kicker SOURCE + Database icon + agent badge */}
+        <header className="flex items-baseline gap-3 px-4 pt-3 pb-2 border-b-[0.5px] border-ink-ash3/30">
+          <Database className="h-3.5 w-3.5 text-paper-ash3 shrink-0 self-center" strokeWidth={1.5} />
+          <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+            SOURCE
+          </span>
+          {nodeData?.metadata?.agent_signature ? (
+            <span className="ml-auto font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 truncate">
+              via {nodeData.metadata.agent_signature}
+            </span>
+          ) : null}
+        </header>
+
+        {/* Title — Fraunces */}
+        <div className="px-4 pt-3 pb-2">
+          <h3
+            className="font-display font-[700] text-[15px] tracking-[0.02em] leading-tight text-paper truncate"
+            title={nodeData?.label || ''}
+          >
+            {nodeData?.label || '数据源节点'}
+          </h3>
+          <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 mt-1">
+            可信资料与研究输入
+          </p>
         </div>
 
-        <div className="space-y-3 p-4">
-          <div className="prose prose-sm prose-invert max-h-52 max-w-none overflow-y-auto rounded-md border border-white/[0.06] bg-slate-950/40 p-3 text-slate-200">
+        {/* Body */}
+        <div className="px-4 pb-3 space-y-3 border-t-[1px] border-ink-ash2/40 pt-3">
+          <div className="prose prose-sm prose-invert font-body text-[13px] leading-[1.55] text-paper/85 max-h-52 max-w-measure-cell overflow-y-auto">
             <ReactMarkdown>{nodeData?.content || '*等待数据源描述*'}</ReactMarkdown>
           </div>
 
-          {nodeData?.metadata?.source && (
-            <div className="flex items-center gap-2 rounded-md border border-white/[0.06] bg-cyan-400/[0.06] px-3 py-2 text-[11px] text-cyan-100">
-              <Link2 className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+          {/* Source URL/path — single hairline left border, mono */}
+          {nodeData?.metadata?.source ? (
+            <div className="flex items-baseline gap-2 font-instr text-[11px] text-paper border-l-[1.5px] border-ink-ash3/40 pl-2 py-1">
+              <Link2 className="h-3 w-3 shrink-0 text-ink-ash4 self-center" strokeWidth={1.5} />
               <span className="truncate">{nodeData.metadata.source}</span>
             </div>
-          )}
+          ) : null}
 
-          {confidenceStyle && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-400">可信度</span>
-                <span className="rounded bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-cyan-200">
-                  {confidenceStyle.label}
-                </span>
+          {/* Confidence */}
+          {confidenceStyle ? (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between font-instr text-[10px] uppercase tracking-kicker">
+                <span className="text-paper-ash3">可信度</span>
+                <span className="text-paper">{confidenceStyle.label}</span>
               </div>
-              <div className="h-1 overflow-hidden rounded-full bg-white/[0.04]">
+              <div className="h-1 bg-ink-ash2/40 overflow-hidden">
                 <div
-                  className="h-full bg-cyan-400 transition-all"
+                  className="h-full bg-paper-ash3 transition-all"
                   style={{ width: confidenceStyle.width }}
                 />
               </div>
             </div>
-          )}
+          ) : null}
 
-          {tags.length > 0 && (
+          {/* Tags */}
+          {tags.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
               {tags.map((tag, index) => (
                 <span
                   key={index}
-                  className="rounded border border-cyan-400/25 bg-cyan-400/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-cyan-200"
+                  className="border-[0.5px] border-ink-ash3/40 px-1.5 py-0.5 font-instr text-[10px] uppercase tracking-kicker text-paper-ash3"
                 >
                   {tag}
                 </span>
               ))}
             </div>
-          )}
+          ) : null}
 
-          {nodeData?.metadata?.source && (
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-              <ShieldCheck className="h-3 w-3 text-cyan-300" strokeWidth={1.75} />
+          {/* Verified marker — single quiet line */}
+          {nodeData?.metadata?.source ? (
+            <div className="flex items-center gap-1.5 font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
+              <ShieldCheck className="h-3 w-3 text-paper-ash3" strokeWidth={1.5} />
               <span>已验证数据来源</span>
             </div>
-          )}
+          ) : null}
         </div>
-      </div>
+      </article>
 
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{
-          width: 10,
-          height: 10,
-          background: '#22d3ee',
-          border: '2px solid rgb(2 6 23)'
-        }}
-      />
+      <Handle type="source" position={Position.Right} className={HANDLE_BASE} />
     </>
   )
 })
