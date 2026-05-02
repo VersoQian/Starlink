@@ -313,7 +313,101 @@ export function CanvasPage({
   // rest of the viewport. Detail drawer + tutorial dialog still
   // available as overlays. Only honoured for freeform mode (BMC
   // grid view requires the shell's persistent panels).
-  if (standalone && viewMode === 'freeform') {
+  // Shared BMC grid view content — used by BOTH standalone and full
+  // (WorkspaceShell-wrapped) renders so the visual treatment is the
+  // same regardless of route. v2 editorial: ash-bordered hairlines,
+  // mono kicker stats, no cyan/amber blur orbs, no glass cards.
+  const bmcGridContent = (
+    <main
+      className={`relative flex-1 overflow-hidden bg-ink ${
+        isAnimating ? 'opacity-0' : 'animate-fade-in-up'
+      }`}
+      style={{ animationDelay: '0.3s' }}
+    >
+      {/* Paper grain overlay so the empty BMC view doesn't look like a void */}
+      <div aria-hidden="true" className="absolute inset-0 z-0 pointer-events-none bg-grain-ink" />
+
+      <div className="relative z-[1] flex h-full flex-col px-6 pb-6 pt-5">
+        {/* Mast — section kicker + stats readouts */}
+        <header className="mb-4 flex items-baseline justify-between gap-6 border-b-[1.5px] border-paper/30 pb-3">
+          <div className="flex flex-col gap-1 min-w-0">
+            <div className="flex items-baseline gap-2">
+              <LayoutGrid className="h-3.5 w-3.5 text-paper-ash3 self-center" strokeWidth={1.5} />
+              <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+                STRUCTURED BUSINESS MODEL · 九宫格
+              </span>
+            </div>
+            <h2 className="font-display font-[700] text-[20px] tracking-[0.02em] text-paper truncate">
+              CC-BMC 结构化输出视图
+            </h2>
+            <p className="font-body text-[12px] leading-[1.55] text-paper/70 max-w-measure-body">
+              用于答辩演示、结构化审阅和维度冲突检查。自由画布负责推演，九宫格负责归档表达。
+            </p>
+          </div>
+          <div className="flex items-stretch gap-0 shrink-0 border-[1px] border-paper/30">
+            <div className="flex flex-col items-center justify-center px-4 py-2 border-r-[1px] border-paper/20 min-w-[80px]">
+              <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+                BMC NODES
+              </span>
+              <span className="font-display font-[700] text-[20px] tabular-nums text-paper leading-none mt-1">
+                {String(structuredNodes.length).padStart(2, '0')}
+              </span>
+            </div>
+            <div className="flex flex-col items-center justify-center px-4 py-2 min-w-[80px]">
+              <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+                CONFLICTS
+              </span>
+              <span
+                className={`font-display font-[700] text-[20px] tabular-nums leading-none mt-1 ${
+                  conflictAlertCount > 0 ? 'text-press' : 'text-paper'
+                }`}
+              >
+                {String(conflictAlertCount).padStart(2, '0')}
+              </span>
+            </div>
+          </div>
+        </header>
+
+        {/* Grid surface */}
+        <div className="relative min-h-0 flex-1 border-[1px] border-ink-ash3/30 bg-ink-ash1">
+          {structuredNodes.length > 0 ? (
+            <BmcGrid
+              nodes={structuredNodes}
+              conflicts={[]}
+              onNodeClick={(node) => openDetailPanel(node.id)}
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-6">
+              <PanelsTopLeft className="h-8 w-8 text-paper-ash3" strokeWidth={1.25} />
+              <div className="space-y-2">
+                <h3 className="font-display font-[700] text-[15px] tracking-[0.02em] text-paper">
+                  还没有可展示的 BMC 结构节点
+                </h3>
+                <p className="font-body text-[12px] leading-[1.55] text-paper/70 max-w-measure-cell">
+                  先在自由画布中运行多智能体分析或补充业务节点，系统会把带有商业维度的结果自动归入九宫格视图。
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  )
+
+  const freeformContent = (
+    <CanvasFlow
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      onConnect={onConnect}
+      isAnimating={isAnimating}
+    />
+  )
+
+  // Standalone (chromeless) — honour for BOTH viewModes so flipping the
+  // header segmented control doesn't suddenly summon WorkspaceShell.
+  if (standalone) {
     return (
       <div className="h-screen w-screen flex flex-col bg-ink overflow-hidden">
         <CanvasHeader
@@ -326,14 +420,7 @@ export function CanvasPage({
           onImportCanvas={handleImportCanvas}
         />
         <div className="flex-1 relative">
-          <CanvasFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            isAnimating={isAnimating}
-          />
+          {viewMode === 'freeform' ? freeformContent : bmcGridContent}
         </div>
         <CanvasTutorialDialog
           open={showTutorial}
@@ -360,77 +447,7 @@ export function CanvasPage({
           onImportCanvas={handleImportCanvas}
         />
       }
-      main={
-        viewMode === 'freeform' ? (
-          <CanvasFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            isAnimating={isAnimating}
-          />
-        ) : (
-          <main
-            className={`relative flex-1 overflow-hidden ${
-              isAnimating ? 'opacity-0' : 'animate-fade-in-up'
-            }`}
-            style={{ animationDelay: '0.3s' }}
-          >
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.12),transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]" />
-            <div className="absolute inset-0 overflow-hidden">
-              <div className="absolute left-12 top-12 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
-              <div className="absolute bottom-10 right-16 h-64 w-64 rounded-full bg-sky-500/10 blur-3xl" />
-            </div>
-            <div className="relative flex h-full flex-col px-6 pb-6 pt-5">
-              <div className="mb-4 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur-xl">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-cyan-300">
-                    <LayoutGrid className="h-4 w-4" />
-                    <span className="text-xs font-bold uppercase tracking-[0.24em]">Structured Business Model</span>
-                  </div>
-                  <h2 className="text-lg font-black text-white title-font">CC-BMC 结构化输出视图</h2>
-                  <p className="text-xs text-slate-400">
-                    用于答辩演示、结构化审阅和维度冲突检查。自由画布负责推演，九宫格负责归档表达。
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-center">
-                    <div className="text-xl font-black text-white">{structuredNodes.length}</div>
-                    <div className="text-[10px] uppercase tracking-[0.24em] text-cyan-200">BMC Nodes</div>
-                  </div>
-                  <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-center">
-                    <div className="text-xl font-black text-white">{conflictAlertCount}</div>
-                    <div className="text-[10px] uppercase tracking-[0.24em] text-amber-200">Conflict Alerts</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative min-h-0 flex-1 rounded-[28px] border border-white/10 bg-slate-950/70 backdrop-blur-xl">
-                {structuredNodes.length > 0 ? (
-                  <BmcGrid
-                    nodes={structuredNodes}
-                    conflicts={[]}
-                    onNodeClick={(node) => openDetailPanel(node.id)}
-                  />
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-white/10 bg-white/5">
-                      <PanelsTopLeft className="h-7 w-7 text-cyan-300" />
-                    </div>
-                    <div className="space-y-2">
-                      <h3 className="text-base font-bold text-white">还没有可展示的 BMC 结构节点</h3>
-                      <p className="max-w-md text-sm text-slate-400">
-                        先在自由画布中运行多智能体分析或补充业务节点，系统会把带有商业维度的结果自动归入九宫格视图。
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </main>
-        )
-      }
+      main={viewMode === 'freeform' ? freeformContent : bmcGridContent}
       persistentOverlay={
         <>
           <CanvasTutorialDialog
