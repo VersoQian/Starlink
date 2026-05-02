@@ -1,12 +1,45 @@
 'use client'
 
+/**
+ * CCBMCDetailDrawer — Editorial Boardroom v2 (2026-05-02).
+ *
+ * Right-side drawer that opens when the user clicks "详情" on a BMC
+ * card node. v1 was glass + amber gradients + Sparkles icon + amber
+ * shadow glow; v2 is brutalist 1.5px paper border on ink-ash1 with
+ * mono kicker section heads and Fraunces titles.
+ *
+ * Functional surface unchanged: 4 tabs (overview / quiz / edit /
+ * resources), Quiz API integration with mock fallback, store-bound
+ * open/close. Only visual chrome was rewritten.
+ */
+
 import { useState } from 'react'
 import { useComfyStore } from '../store'
-import { X, FileText, MessageSquare, Edit3, Link2, Sparkles } from 'lucide-react'
+import { X, FileText, MessageSquare, Edit3, Link2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { QuizPanel, type QuizQuestion } from './quiz-panel'
 
 type TabType = 'overview' | 'quiz' | 'edit' | 'resources'
+
+// 9 BMC domains → 3 owner bylines (mirrors business-langgraph
+// agentNodeForBmcDomain). Used to tint the kicker glyph in the
+// drawer header.
+const BYLINE_BY_DOMAIN: Record<string, { glyph: string; tint: string }> = {
+  '客户细分':       { glyph: 'M', tint: 'text-byline-market' },
+  '客户关系':       { glyph: 'M', tint: 'text-byline-market' },
+  '渠道通路':       { glyph: 'M', tint: 'text-byline-market' },
+  '价值主张':       { glyph: 'P', tint: 'text-byline-product' },
+  '核心资源':       { glyph: 'P', tint: 'text-byline-product' },
+  '关键业务':       { glyph: 'P', tint: 'text-byline-product' },
+  '重要合作':       { glyph: 'P', tint: 'text-byline-product' },
+  '收入来源':       { glyph: 'F', tint: 'text-byline-finance' },
+  '成本结构':       { glyph: 'F', tint: 'text-byline-finance' },
+}
+
+const TAB_BASE =
+  'inline-flex items-center gap-1.5 px-3 py-1.5 font-instr text-[10px] uppercase tracking-kicker transition-colors'
+const TAB_ACTIVE = 'bg-paper text-ink'
+const TAB_IDLE   = 'bg-transparent text-paper-ash3 hover:text-paper'
 
 export function CCBMCDetailDrawer() {
   const detailPanel = useComfyStore((state) => state.detailPanel)
@@ -29,15 +62,14 @@ export function CCBMCDetailDrawer() {
 
   const fullContent = nodeWithDetails?.fullContent || nodeData.content || ''
   const summary = nodeWithDetails?.summary || nodeData.content || ''
+  const byline = nodeData.domain ? BYLINE_BY_DOMAIN[nodeData.domain] : undefined
 
   // Quiz 生成处理函数 - 调用真实的 AI API
   const handleGenerateQuiz = async (): Promise<QuizQuestion[]> => {
     try {
       const response = await fetch('/api/quiz', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nodeLabel: nodeData.label,
           nodeDomain: nodeData.domain || '',
@@ -51,11 +83,9 @@ export function CCBMCDetailDrawer() {
       }
 
       const questions = await response.json()
-
       if (!Array.isArray(questions) || questions.length === 0) {
         throw new Error('Invalid quiz response format')
       }
-
       return questions
     } catch (error) {
       console.error('生成 Quiz 失败:', error)
@@ -77,12 +107,7 @@ export function CCBMCDetailDrawer() {
         {
           id: '2',
           question: `在 ${nodeData.domain} 的实施过程中，最关键的风险因素是什么？`,
-          options: [
-            '市场需求不确定性',
-            '技术实现复杂度',
-            '资源投入不足',
-            '竞争对手模仿'
-          ],
+          options: ['市场需求不确定性', '技术实现复杂度', '资源投入不足', '竞争对手模仿'],
           correctAnswer: 0,
           explanation: '市场需求的不确定性是该维度最需要关注的风险因素，需要通过持续的市场验证和快速迭代来降低风险。',
           difficulty: 'hard'
@@ -105,127 +130,135 @@ export function CCBMCDetailDrawer() {
   }
 
   const tabs: Array<{ id: TabType; label: string; icon: React.ReactNode }> = [
-    { id: 'overview', label: '概览', icon: <FileText className="w-4 h-4" /> },
-    { id: 'quiz', label: 'Quiz', icon: <MessageSquare className="w-4 h-4" /> },
-    { id: 'edit', label: '编辑', icon: <Edit3 className="w-4 h-4" /> },
-    { id: 'resources', label: '资源', icon: <Link2 className="w-4 h-4" /> }
+    { id: 'overview',  label: '概览',     icon: <FileText className="w-3 h-3" strokeWidth={1.5} /> },
+    { id: 'quiz',      label: 'QUIZ',     icon: <MessageSquare className="w-3 h-3" strokeWidth={1.5} /> },
+    { id: 'edit',      label: '编辑',     icon: <Edit3 className="w-3 h-3" strokeWidth={1.5} /> },
+    { id: 'resources', label: '资源',     icon: <Link2 className="w-3 h-3" strokeWidth={1.5} /> }
   ]
 
   return (
     <>
-      {/* 遮罩层 */}
+      {/* 遮罩层 — ink at 70% */}
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 animate-fade-in"
+        className="fixed inset-0 bg-ink/70 z-40 animate-editorial-swap"
         onClick={closeDetailPanel}
       />
 
-      {/* 抽屉主体 */}
-      <div
-        className="fixed right-0 top-0 bottom-0 w-[500px] glass-effect border-l border-white/20 z-50 flex flex-col animate-slide-in-right shadow-2xl"
-        style={{
-          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.95))'
-        }}
+      {/* 抽屉主体 — brutalist 1.5px 边，无阴影无圆角 */}
+      <aside
+        className="fixed right-0 top-0 bottom-0 w-[500px] max-w-[100vw] bg-ink-ash1 border-l-[1.5px] border-paper/30 z-50 flex flex-col animate-editorial-publish"
+        role="dialog"
+        aria-modal="true"
       >
-        {/* 头部 */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-gradient-to-r from-amber-500/10 to-transparent">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white title-font">{nodeData.label}</h2>
-              <p className="text-xs text-slate-400 mono-font">{nodeData.domain}</p>
+        {/* 头部 — byline glyph + Fraunces 标题 + mono 维度 kicker */}
+        <header className="flex items-start justify-between gap-3 px-6 py-4 border-b-[1.5px] border-paper/30 shrink-0">
+          <div className="flex items-baseline gap-3 min-w-0">
+            {byline ? (
+              <span
+                aria-hidden="true"
+                className={`shrink-0 font-display font-[700] text-[28px] leading-none ${byline.tint}`}
+              >
+                {byline.glyph}
+              </span>
+            ) : null}
+            <div className="min-w-0">
+              <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+                {nodeData.domain || 'BMC CELL'}
+              </p>
+              <h2
+                className="font-display font-[700] text-[20px] tracking-[0.02em] text-paper truncate mt-0.5"
+                title={nodeData.label}
+              >
+                {nodeData.label}
+              </h2>
             </div>
           </div>
           <button
             onClick={closeDetailPanel}
-            className="p-2 rounded-xl glass-effect border border-white/10 hover:bg-white/10 transition-all text-slate-400 hover:text-white"
+            className="shrink-0 p-1.5 border-[0.5px] border-ink-ash3/40 text-paper-ash3 hover:border-paper/40 hover:text-paper transition-colors"
+            aria-label="关闭"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" strokeWidth={1.5} />
           </button>
-        </div>
+        </header>
 
-        {/* 标签栏 */}
-        <div className="flex items-center gap-2 px-6 py-4 border-b border-white/10 overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                activeTab === tab.id
-                  ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-white shadow-lg shadow-amber-500/30'
-                  : 'glass-effect border border-white/10 text-slate-400 hover:text-white hover:bg-white/10'
-              }`}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-            </button>
-          ))}
+        {/* 标签栏 — brutalist 1px paper 边的 segmented */}
+        <div className="px-6 py-3 border-b-[0.5px] border-ink-ash3/30 shrink-0">
+          <div className="flex items-stretch border-[1px] border-paper/30 w-fit">
+            {tabs.map((tab, idx) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={[
+                  TAB_BASE,
+                  activeTab === tab.id ? TAB_ACTIVE : TAB_IDLE,
+                  idx > 0 ? 'border-l-[1px] border-paper/20' : '',
+                ].join(' ')}
+                aria-pressed={activeTab === tab.id}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* 内容区 */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {activeTab === 'overview' && (
-            <div className="space-y-6">
+            <>
               {/* 摘要 */}
-              <div>
-                <h3 className="text-sm font-bold text-amber-400 uppercase tracking-widest mb-3 title-font">核心摘要</h3>
-                <div className="glass-effect border border-white/10 rounded-2xl p-5">
-                  <div className="prose prose-sm prose-invert max-w-none text-slate-300">
-                    <ReactMarkdown>{summary}</ReactMarkdown>
-                  </div>
+              <Section label="核心摘要" sublabel="SUMMARY">
+                <div className="prose prose-sm prose-invert max-w-measure-body font-body text-[13px] leading-[1.55] text-paper/85">
+                  <ReactMarkdown>{summary}</ReactMarkdown>
                 </div>
-              </div>
+              </Section>
 
               {/* 完整内容 */}
-              <div>
-                <h3 className="text-sm font-bold text-amber-400 uppercase tracking-widest mb-3 title-font">详细分析</h3>
-                <div className="glass-effect border border-white/10 rounded-2xl p-5">
-                  <div className="prose prose-sm prose-invert max-w-none text-slate-300 leading-relaxed">
-                    <ReactMarkdown>{fullContent}</ReactMarkdown>
-                  </div>
+              <Section label="详细分析" sublabel="DETAILED ANALYSIS">
+                <div className="prose prose-sm prose-invert max-w-measure-body font-body text-[13px] leading-[1.6] text-paper/85">
+                  <ReactMarkdown>{fullContent}</ReactMarkdown>
                 </div>
-              </div>
+              </Section>
 
               {/* 元数据 */}
               {nodeData.metadata && (
-                <div>
-                  <h3 className="text-sm font-bold text-amber-400 uppercase tracking-widest mb-3 title-font">元信息</h3>
-                  <div className="glass-effect border border-white/10 rounded-2xl p-5 space-y-3">
+                <Section label="元信息" sublabel="METADATA">
+                  <dl className="space-y-2.5 font-instr text-[11px] uppercase tracking-kicker">
                     {nodeData.metadata.agent_signature && (
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-slate-400 font-semibold">创建者:</span>
-                        <span className="text-amber-400 font-bold mono-font">{nodeData.metadata.agent_signature}</span>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <dt className="text-paper-ash3">CREATED BY</dt>
+                        <dd className={byline?.tint ?? 'text-paper'}>
+                          {nodeData.metadata.agent_signature}
+                        </dd>
                       </div>
                     )}
                     {nodeData.metadata.confidence && (
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-slate-400 font-semibold">置信度:</span>
-                        <span className="px-3 py-1 rounded-lg bg-amber-400/20 text-amber-400 font-bold text-xs uppercase border border-amber-400/30">
-                          {nodeData.metadata.confidence}
-                        </span>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <dt className="text-paper-ash3">CONF</dt>
+                        <dd className="text-paper">{nodeData.metadata.confidence}</dd>
                       </div>
                     )}
                     {nodeData.metadata.source && (
-                      <div className="flex flex-col gap-2 text-sm">
-                        <span className="text-slate-400 font-semibold">数据来源:</span>
-                        <span className="text-slate-300 mono-font text-xs bg-white/5 p-3 rounded-xl border border-white/10">
+                      <div className="space-y-1.5">
+                        <dt className="text-paper-ash3">SOURCE</dt>
+                        <dd className="font-instr text-[11px] tabular-nums text-paper border-l-[1.5px] border-ink-ash3/40 px-2 py-1 normal-case tracking-normal">
                           {nodeData.metadata.source}
-                        </span>
+                        </dd>
                       </div>
                     )}
                     {nodeData.metadata.cultural_context && (
-                      <div className="flex flex-col gap-2 text-sm">
-                        <span className="text-slate-400 font-semibold">跨文化适配:</span>
-                        <span className="text-slate-300 mono-font text-xs bg-white/5 p-3 rounded-xl border border-white/10">
+                      <div className="space-y-1.5">
+                        <dt className="text-paper-ash3">CULTURAL CONTEXT</dt>
+                        <dd className="font-instr text-[11px] text-paper border-l-[1.5px] border-ink-ash3/40 px-2 py-1 normal-case tracking-normal">
                           {nodeData.metadata.cultural_context}
-                        </span>
+                        </dd>
                       </div>
                     )}
-                  </div>
-                </div>
+                  </dl>
+                </Section>
               )}
-            </div>
+            </>
           )}
 
           {activeTab === 'quiz' && (
@@ -238,54 +271,68 @@ export function CCBMCDetailDrawer() {
           )}
 
           {activeTab === 'edit' && (
-            <div className="space-y-4">
-              <div className="glass-effect border border-white/20 rounded-2xl p-6 text-center">
-                <Edit3 className="w-12 h-12 text-emerald-400 mx-auto mb-4" />
-                <p className="text-slate-300 text-sm">编辑功能即将推出...</p>
-                <p className="text-slate-500 text-xs mt-2">您将能够直接修改节点内容和属性</p>
-              </div>
-            </div>
+            <Placeholder
+              icon={<Edit3 className="w-6 h-6 text-paper-ash3" strokeWidth={1.25} />}
+              title="编辑功能即将推出"
+              detail="您将能够直接修改节点内容和属性"
+            />
           )}
 
           {activeTab === 'resources' && (
-            <div className="space-y-4">
-              <div className="glass-effect border border-white/20 rounded-2xl p-6 text-center">
-                <Link2 className="w-12 h-12 text-blue-400 mx-auto mb-4" />
-                <p className="text-slate-300 text-sm">资源链接功能即将推出...</p>
-                <p className="text-slate-500 text-xs mt-2">相关研究资料和参考链接将显示在此处</p>
-              </div>
-            </div>
+            <Placeholder
+              icon={<Link2 className="w-6 h-6 text-paper-ash3" strokeWidth={1.25} />}
+              title="资源链接功能即将推出"
+              detail="相关研究资料和参考链接将显示在此处"
+            />
           )}
         </div>
-      </div>
-
-      <style jsx global>{`
-        @keyframes fade-in {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-
-        @keyframes slide-in-right {
-          from {
-            transform: translateX(100%);
-          }
-          to {
-            transform: translateX(0);
-          }
-        }
-
-        .animate-fade-in {
-          animation: fade-in 0.2s ease-out;
-        }
-
-        .animate-slide-in-right {
-          animation: slide-in-right 0.3s ease-out;
-        }
-      `}</style>
+      </aside>
     </>
+  )
+}
+
+function Section({
+  label,
+  sublabel,
+  children,
+}: {
+  label: string
+  sublabel: string
+  children: React.ReactNode
+}) {
+  return (
+    <section>
+      <header className="flex items-baseline justify-between mb-2.5 pb-1.5 border-b-[0.5px] border-ink-ash3/30">
+        <h3 className="font-display font-[700] text-[13px] tracking-[0.04em] uppercase text-paper">
+          {label}
+        </h3>
+        <span className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
+          {sublabel}
+        </span>
+      </header>
+      <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-3">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+function Placeholder({
+  icon,
+  title,
+  detail,
+}: {
+  icon: React.ReactNode
+  title: string
+  detail: string
+}) {
+  return (
+    <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-8 text-center">
+      <div className="flex justify-center mb-3">{icon}</div>
+      <p className="font-display font-[700] text-[14px] text-paper">{title}</p>
+      <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 mt-2">
+        {detail}
+      </p>
+    </div>
   )
 }

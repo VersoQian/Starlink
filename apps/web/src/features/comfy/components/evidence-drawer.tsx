@@ -1,5 +1,21 @@
 'use client'
 
+/**
+ * EvidenceDrawer — Editorial Boardroom v2 (2026-05-02).
+ *
+ * Right-side drawer that opens when the user clicks a citation badge
+ * `[N]` on a BMC card. Shows the original snippet text + reverse
+ * lookup (which OTHER cards reference this same evidence).
+ *
+ * v1 was sky-blue glass: rounded-28px container, sky-300 borders,
+ * backdrop-blur-xl, blue-tinted gradient CTA with rgba(56,189,248,0.25)
+ * shadow halo. v2 is brutalist 1.5px paper border on ink-ash1, mono
+ * kicker labels, paper-on-ink primary CTA. No glass, no glow.
+ *
+ * Functional surface unchanged: useQuery cardsReferencingEvidence,
+ * highlightCards, clearHighlight — all wiring preserved.
+ */
+
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
@@ -18,15 +34,6 @@ type EvidenceDrawerProps = {
   className?: string
 }
 
-/**
- * Right-side drawer that shows the original evidence text the user clicked
- * through a citation badge, plus reverse lookup: which BMC cards reference
- * this same evidence.
- *
- * Controlled entirely by the comfy-store `evidenceDrawer` state.
- * When rendered without a `conversationId` prop (e.g., registered as an
- * overlay panel via panel-registry), falls back to `store.currentConversationId`.
- */
 export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProps = {}) {
   const drawer = useComfyStore((state) => state.evidenceDrawer)
   const storeConversationId = useComfyStore((state) => state.currentConversationId)
@@ -72,6 +79,7 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
   const metadata = (evidence as { metadata?: Record<string, unknown> } | null)?.metadata
   const title = (metadata?.title as string | undefined) ?? docId
   const snippetId = (metadata?.snippetId as string | undefined) ?? ''
+  const referenceCount = referencingCardIds?.length ?? 0
 
   const handleLocateCards = () => {
     if (referencingCardIds && referencingCardIds.length > 0) {
@@ -80,74 +88,118 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
   }
 
   return (
-    <div
+    <aside
       className={cn(
-        'fixed right-4 top-20 bottom-8 z-40 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-[28px] border border-sky-300/20 bg-[linear-gradient(180deg,rgba(8,11,20,0.96)_0%,rgba(12,17,28,0.98)_100%)] shadow-[0_40px_100px_rgba(0,0,0,0.5)] backdrop-blur-xl',
+        'fixed right-4 top-20 bottom-8 z-40 w-[min(420px,calc(100vw-2rem))]',
+        'bg-ink-ash1 border-[1.5px] border-paper/30',
+        'flex flex-col overflow-hidden animate-editorial-publish',
         className
       )}
+      role="dialog"
+      aria-modal="false"
+      aria-label="Evidence detail"
     >
-      <div className="flex h-full flex-col">
-        <header className="flex items-start justify-between border-b border-white/10 px-5 py-4">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-400/15 text-sky-200">
-              <FileText className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-sky-300">Evidence 证据来源</p>
-              <h3 className="mt-1 truncate text-sm font-semibold text-slate-100">{title}</h3>
-              <p className="mt-0.5 text-[10px] text-slate-500">
-                docId: {docId}
-                {snippetId ? ` · snippetId: ${snippetId}` : ''}
-                {typeof score === 'number' ? ` · 相关度 ${score.toFixed(2)}` : ''}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              clearHighlight()
-              closeDrawer()
-            }}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/5 hover:text-slate-100"
-            aria-label="关闭"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </header>
-
-        <section className="flex-1 overflow-y-auto px-5 py-4">
-          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">原文片段</p>
-          <div className="mt-3 rounded-2xl border border-white/10 bg-white/3 px-4 py-3 text-sm leading-7 text-slate-200">
-            {snippetText || '（该 evidence 原文在当前会话中不可见）'}
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-sky-300/10 bg-sky-400/5 px-4 py-3">
-            <p className="text-[10px] uppercase tracking-[0.22em] text-sky-200">
-              反向查询：引用此 Evidence 的 BMC 卡片
+      {/* Header — kicker EVIDENCE + Fraunces 标题 + close */}
+      <header className="flex items-start justify-between border-b-[1px] border-ink-ash3/30 px-5 py-4 shrink-0">
+        <div className="flex items-baseline gap-3 min-w-0">
+          <FileText className="h-3.5 w-3.5 text-paper-ash3 shrink-0 self-center" strokeWidth={1.5} />
+          <div className="min-w-0">
+            <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+              EVIDENCE · 证据来源
             </p>
-            <div className="mt-2 text-xs text-slate-300">
-              {isLoading
-                ? '查询中...'
-                : referencingCardIds && referencingCardIds.length > 0
-                  ? `${referencingCardIds.length} 张卡片引用了此证据`
-                  : '尚未发现引用此证据的卡片'}
-            </div>
+            <h3
+              className="mt-1 font-display font-[700] text-[15px] tracking-[0.02em] text-paper truncate"
+              title={title}
+            >
+              {title}
+            </h3>
+            <p className="mt-1 font-instr text-[10px] tabular-nums text-ink-ash4">
+              <span className="text-paper-ash3">DOC</span> {docId}
+              {snippetId ? (
+                <>
+                  {' · '}
+                  <span className="text-paper-ash3">CHUNK</span> {snippetId}
+                </>
+              ) : null}
+              {typeof score === 'number' ? (
+                <>
+                  {' · '}
+                  <span className="text-paper-ash3">REL</span> {score.toFixed(2)}
+                </>
+              ) : null}
+            </p>
           </div>
-        </section>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            clearHighlight()
+            closeDrawer()
+          }}
+          className="shrink-0 p-1.5 border-[0.5px] border-ink-ash3/40 text-paper-ash3 hover:border-paper/40 hover:text-paper transition-colors"
+          aria-label="关闭"
+        >
+          <X className="h-3.5 w-3.5" strokeWidth={1.5} />
+        </button>
+      </header>
 
-        <footer className="border-t border-white/10 px-5 py-4">
-          <button
-            type="button"
-            onClick={handleLocateCards}
-            disabled={!referencingCardIds || referencingCardIds.length === 0}
-            className="flex w-full items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,rgba(224,242,254,0.96)_0%,rgba(186,230,253,0.92)_100%)] px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_16px_34px_rgba(56,189,248,0.25)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Target className="h-4 w-4" />
-            定位相关卡片
-            {drawer.highlightedCardIds.length > 0 ? ' · 已高亮' : ''}
-          </button>
-        </footer>
-      </div>
-    </div>
+      {/* Body */}
+      <section className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+        {/* Snippet */}
+        <div>
+          <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 mb-2">
+            原文片段 · ORIGINAL SNIPPET
+          </p>
+          <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-3 font-body text-[13px] leading-[1.6] text-paper/85 max-w-measure-body">
+            {snippetText || (
+              <span className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
+                — 该 evidence 原文在当前会话中不可见 —
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Reverse lookup — which BMC cards reference this evidence */}
+        <div>
+          <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 mb-2">
+            反向查询 · CARDS CITING THIS
+          </p>
+          <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-3 font-instr text-[11px] uppercase tracking-kicker">
+            {isLoading ? (
+              <span className="text-ink-ash4">查询中...</span>
+            ) : referenceCount > 0 ? (
+              <span className="text-paper">
+                <span className="tabular-nums text-press">{referenceCount}</span>{' '}
+                <span className="text-paper-ash3">张卡片引用此证据</span>
+              </span>
+            ) : (
+              <span className="text-ink-ash4">尚未发现引用此证据的卡片</span>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Footer — primary CTA paper-on-ink */}
+      <footer className="border-t-[1px] border-ink-ash3/30 px-5 py-4 shrink-0">
+        <button
+          type="button"
+          onClick={handleLocateCards}
+          disabled={!referencingCardIds || referencingCardIds.length === 0}
+          className={cn(
+            'flex w-full items-center justify-center gap-2',
+            'bg-paper text-ink px-4 py-2',
+            'font-instr text-[10px] uppercase tracking-kicker',
+            'hover:bg-paper-ash2 transition-colors',
+            'disabled:opacity-30 disabled:cursor-not-allowed disabled:bg-ink-ash2/40 disabled:text-ink-ash4'
+          )}
+        >
+          <Target className="h-3.5 w-3.5" strokeWidth={1.75} />
+          定位相关卡片
+          {drawer.highlightedCardIds.length > 0 ? (
+            <span className="text-press tabular-nums">· 已高亮</span>
+          ) : null}
+        </button>
+      </footer>
+    </aside>
   )
 }
