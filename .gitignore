@@ -76,3 +76,15 @@ prisma/dev.db-journal
 # Backup files
 *_backup_*
 *.backup
+
+# Local PostgreSQL data directory (when running PG locally for dev)
+/data/
+
+# Environment-specific local configs (may contain credentials)
+.env.pg-local
+.env.supabase
+.env.*.local
+
+# Benchmark report artifacts (regenerated; not source)
+packages/server/benchmark/reports/
+
