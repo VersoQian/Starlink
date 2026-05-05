@@ -66,6 +66,46 @@ export function checkProductionConfig(): ConfigIssue[] {
     }
   }
 
+  // Embedding provider — local-hash gives recall ≈ 0; production must use
+  // a real provider so RAG / memory vector search are functional.
+  const embeddingProvider = process.env.EMBEDDING_PROVIDER?.toLowerCase()
+  if (embeddingProvider === 'local-hash') {
+    issues.push({
+      variable: 'EMBEDDING_PROVIDER',
+      detail: 'set to "local-hash" — semantic recall is ~0. Production must set EMBEDDING_PROVIDER=remote (or omit) and provide EMBEDDING_API_KEY/BASE_URL.'
+    })
+  }
+  const embeddingKey = process.env.EMBEDDING_API_KEY
+                    ?? process.env.OPENAI_API_KEY
+                    ?? process.env.LLM_API_KEY
+  if (!embeddingKey || PLACEHOLDER_VALUES.has(embeddingKey)) {
+    issues.push({
+      variable: 'EMBEDDING_API_KEY',
+      detail: 'unset or placeholder. Set EMBEDDING_API_KEY (or OPENAI_API_KEY / LLM_API_KEY as fallback) so the embedding service can call a real provider.'
+    })
+  }
+
+  // user-skill envelope encryption — without a master key, sensitive
+  // user-inferred traits (domain expertise, blind spots) sit unencrypted
+  // in PostgreSQL. Production must opt-in.
+  const userSkillKey = process.env.USER_SKILL_ENCRYPTION_KEY ?? ''
+  if (PLACEHOLDER_VALUES.has(userSkillKey) || userSkillKey.length < 32) {
+    issues.push({
+      variable: 'USER_SKILL_ENCRYPTION_KEY',
+      detail: `unset, placeholder, or shorter than 32 chars (got ${userSkillKey.length}). user-skill rows + their embeddings will be stored in plaintext. Generate with \`openssl rand -base64 32\`.`
+    })
+  }
+
+  // Database SSL — cloud PG (Aliyun / Supabase / Neon) requires SSL.
+  // Disabling SSL in production likely indicates a misconfiguration.
+  const pgSsl = process.env.PG_SSL?.toLowerCase()
+  if (pgSsl === 'disable' || pgSsl === 'false' || pgSsl === 'off') {
+    issues.push({
+      variable: 'PG_SSL',
+      detail: `explicitly disabled. Production PG connections should use SSL — set PG_SSL=require or unset (defaults to require in production).`
+    })
+  }
+
   return issues
 }
 

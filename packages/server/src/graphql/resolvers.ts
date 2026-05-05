@@ -32,6 +32,7 @@ import {
 } from '../services/ideation-coach-service.js'
 import { buildUserSkillPrompt } from '../services/user-skill-prompt.js'
 import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
+import { parseHitlDecision } from '../application/hitl-resume.js'
 
 // Lazy module-level singleton: constructed on first use, shares the same
 // `pool` (infrastructure/db/pool.ts) all other store consumers use, so no
@@ -343,42 +344,47 @@ export const resolvers = {
       ))
     },
     /**
-     * Phase 2.5 F5 · HITL resume scaffold.
-     * decision must begin with [ACCEPTED] or [EDIT_PLAN]:...
-     * Full resume (graph.invoke(Command(resume))) is Phase 2.6.
+     * Phase 2.6 · HITL resume.
+     *
+     * Validates the decision string ([ACCEPTED] / [EDIT_PLAN][<dim>]:<body> /
+     * [REJECTED]) and routes through `conversationStore.approveDecision`,
+     * which (a) resolves the in-memory awaiter so the streaming `for await`
+     * loop continues and (b) dual-writes to the PG HITL store for cross-
+     * instance / post-restart visibility.
+     *
+     * The parsed directive is also picked up by the conversation-store's
+     * stream loop (after `waitForDecisionApproval` returns) and forwarded to
+     * `BusinessLangGraphService.setHitlResumeDirective`, where the supervisor
+     * consumes it on the next revision round to either halt the critic loop
+     * or scope revision to a single BMC dimension's owning agent.
      */
     resumeConversation: async (
       _: unknown,
       args: { conversationId: string; decision: string },
-      _ctx: GraphQLContext
+      ctx: GraphQLContext
     ): Promise<{ ok: boolean; decisionKind: string; message?: string }> => {
-      const raw = args.decision
-      if (typeof raw !== 'string' || raw.length === 0) {
-        return { ok: false, decisionKind: 'invalid', message: 'decision must be non-empty string' }
+      const directive = parseHitlDecision(args.decision)
+      if (directive.kind === 'invalid') {
+        return { ok: false, decisionKind: 'invalid', message: directive.reason }
       }
-      if (raw.startsWith('[ACCEPTED]')) {
+      const found = await ctx.conversationStore.approveDecision(
+        args.conversationId,
+        ctx.userId,
+        directive.raw
+      )
+      if (!found) {
         return {
-          ok: true,
-          decisionKind: 'accepted',
-          message: `Phase 2.5 scaffold: conversation ${args.conversationId} accepted (full resume in Phase 2.6)`
+          ok: false,
+          decisionKind: directive.kind,
+          message: 'no pending HITL approval for this conversation'
         }
       }
-      if (raw.startsWith('[EDIT_PLAN]')) {
-        const plan = raw.slice('[EDIT_PLAN]'.length).replace(/^:\s*/, '').trim()
-        if (plan.length === 0) {
-          return { ok: false, decisionKind: 'invalid', message: '[EDIT_PLAN] body is empty' }
-        }
-        return {
-          ok: true,
-          decisionKind: 'edit_plan',
-          message: `Phase 2.5 scaffold: edit plan captured (${plan.length} chars) — full supervisor re-entry in Phase 2.6`
-        }
-      }
-      return {
-        ok: true,
-        decisionKind: 'rejected',
-        message: `Phase 2.5 scaffold: decision not recognised; critic revision loop halted`
-      }
+      const message = directive.kind === 'edit_plan' && directive.dimension
+        ? `revision scoped to ${directive.dimension}`
+        : directive.kind === 'edit_plan'
+          ? 'full revision round will run'
+          : 'critic loop halted'
+      return { ok: true, decisionKind: directive.kind, message }
     },
     appendConversationMessage: async (
       _: unknown,
@@ -765,6 +771,71 @@ export const resolvers = {
           : ''
       const req = { ...baseReq, userSkillBlock }
       return await processIdeationWizardStep(req)
+    },
+    /**
+     * Cancel a stale 'running' session. Authorization: caller must own
+     * the session (userId match) — we don't allow one user to cancel
+     * another user's session even within the same workspace.
+     *
+     * The session is marked 'failed' with the supplied reason (or a
+     * default user-cancellation message). Heartbeat-driven reaper would
+     * eventually do this for us when the gateway crashed, but exposing
+     * the explicit mutation lets the UI offer "clear stuck session"
+     * without waiting for the next reaper tick.
+     */
+    cancelStaleSession: async (
+      _: unknown,
+      args: { sessionId: string; reason?: string | null },
+      ctx: GraphQLContext
+    ) => {
+      const session = await defaultConversationMemoryStore.getSession(args.sessionId)
+      if (!session) return null
+      if (ctx.userId && session.userId !== ctx.userId) {
+        throw new GraphQLError('cancelStaleSession: forbidden — session belongs to another user', {
+          extensions: { code: 'FORBIDDEN' }
+        })
+      }
+      if (session.status !== 'running') {
+        // Already done — return current state for idempotency.
+        return session
+      }
+      const reason = args.reason?.trim() || 'user-cancelled'
+      await defaultConversationMemoryStore.failSession(session.id, reason)
+      return await defaultConversationMemoryStore.getSession(args.sessionId)
+    },
+    // @-mention agent (2026-05-04). Routes via ConversationStore.mentionAgent
+    // which checks workspace.write, reads current canvas snapshot, and
+    // persists any appended nodes via MentionRouter.
+    mentionAgent: async (
+      _: unknown,
+      args: {
+        input: {
+          workspaceId: string
+          conversationId?: string | null
+          agentId: string
+          message: string
+        }
+      },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        const trimmedMessage = args.input.message?.trim() ?? ''
+        if (!trimmedMessage) {
+          throw new GraphQLError('mentionAgent: message cannot be empty', {
+            extensions: { code: 'BAD_USER_INPUT' }
+          })
+        }
+        const result = await ctx.conversationStore.mentionAgent(
+          args.input.workspaceId,
+          ctx.userId,
+          {
+            agentId: args.input.agentId,
+            message: trimmedMessage,
+            conversationId: args.input.conversationId ?? undefined
+          }
+        )
+        return result
+      })
     }
   },
   // ── Flow / Tool resolvers ────────────────────────────────

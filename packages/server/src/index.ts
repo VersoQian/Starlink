@@ -27,7 +27,7 @@ import { kbProxyRouter } from './routes/kb-proxy.js'
 import { depthLimitPlugin } from './middleware/depth-limit-plugin.js'
 import { rateLimitPlugin } from './middleware/rate-limit-plugin.js'
 import { telemetryPlugin } from './middleware/telemetry-plugin.js'
-import { pool } from './infrastructure/db/pool.js'
+import { pool, ensureExtensions, probeDatabaseHealth } from './infrastructure/db/pool.js'
 import { describeEmbeddingConfig } from './services/embedding-service.js'
 import { assertProductionConfig, isProduction } from './infrastructure/config-validate.js'
 
@@ -48,6 +48,31 @@ async function start() {
       console.warn(`  · ${issue.variable}: ${issue.detail}`)
     }
   }
+
+  // Boot-time PG extension install. pgvector + pgcrypto are required
+  // for memory vector search and user-skill encryption. Self-healing
+  // CREATE EXTENSION IF NOT EXISTS — fresh databases come up clean.
+  // Failure is fatal: if extensions can't be installed, memory + KB
+  // will silently fail at query time, which is worse than a boot crash.
+  try {
+    await ensureExtensions()
+    console.log('[boot] PG extensions ready (vector / pgcrypto / uuid-ossp)')
+  } catch (err) {
+    console.error('[boot] FATAL · ensureExtensions failed:', err)
+    throw err
+  }
+
+  // Boot-time DB health snapshot — lets operators verify in one log line
+  // that SSL is on (in production), pgvector is installed, and the
+  // connection actually works.
+  const dbHealth = await probeDatabaseHealth()
+  if (!dbHealth.connected) {
+    console.error('[boot] FATAL · database probe failed:', dbHealth.error)
+    throw new Error(`database not reachable: ${dbHealth.error ?? 'unknown'}`)
+  }
+  console.log(
+    `[boot] database connected · ssl=${dbHealth.ssl} · ext={vector:${dbHealth.extensions.vector}, pgcrypto:${dbHealth.extensions.pgcrypto}}`,
+  )
 
   // Boot-time embedding sanity log. Operators need to know at boot whether
   // RAG / memory will use a real embedding endpoint or fall back to the
@@ -98,6 +123,29 @@ async function start() {
         error: err instanceof Error ? err.message : String(err)
       })
     }
+  })
+
+  // /health/embedding — exposes whether KB / memory vector search is
+  // running on a real embedding provider or the deterministic local-hash
+  // fallback. Frontend can fetch this on canvas mount and surface a
+  // discreet "⚠ 检索质量下降" chip when mode === 'local-hash' so users
+  // know their RAG queries aren't returning semantically-relevant chunks.
+  app.get('/health/embedding', (_req, res) => {
+    const cfg = describeEmbeddingConfig()
+    res.status(200).json({
+      mode: cfg.mode,
+      baseUrl: cfg.baseUrl,
+      model: cfg.model,
+      warning: cfg.warning,
+    })
+  })
+
+  // /health/database — exposes connection status, SSL mode, and which
+  // PG extensions are installed. Returns 503 if not connected so it
+  // can also be used for orchestration probes (k8s readiness etc).
+  app.get('/health/database', async (_req, res) => {
+    const probe = await probeDatabaseHealth()
+    res.status(probe.connected ? 200 : 503).json(probe)
   })
 
   app.use('/internal', internalRouter)

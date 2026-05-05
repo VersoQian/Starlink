@@ -81,12 +81,37 @@ export const typeDefs = gql`
     workspaceId: ID!
     userId: ID!
     title: String!
+    """
+    Session lifecycle status:
+      - running: stream actively producing output (heartbeat fresh)
+      - completed: stream finished normally
+      - failed: stream errored or was reaped (see failureReason)
+      - archived: user removed from active list
+    """
     status: String!
     latestQuestion: String
     contextSnapshot: JSON!
     createdAt: String!
     updatedAt: String!
     completedAt: String
+    """
+    Last time the gateway running this session updated its heartbeat.
+    NULL on freshly created sessions until the first 30s tick fires.
+    Used by clients to surface "⚠ may have lost connection" when
+    status='running' but heartbeat is stale.
+    """
+    heartbeatAt: String
+    """
+    PID of the gateway that owns this session. Useful for debugging
+    cross-process crashes — when set but heartbeatAt is stale, the
+    owning process likely died.
+    """
+    ownerPid: String
+    """
+    Populated by the reaper when status was forced to 'failed'.
+    Examples: "heartbeat-lost (last 92s ago)", "no-heartbeat (created 75s ago)".
+    """
+    failureReason: String
   }
 
   type ConversationMessage {
@@ -351,6 +376,23 @@ export const typeDefs = gql`
     message: String
   }
 
+  # ── Agent Mention System (2026-05-04) ─────────────────────────────────
+  input MentionAgentInput {
+    workspaceId: ID!
+    conversationId: ID
+    agentId: String!
+    message: String!
+  }
+
+  type MentionAgentPayload {
+    agentId: String!
+    reply: String!
+    refused: Boolean!
+    refusalReason: String
+    appendedNodes: [CanvasNode!]!
+    appendedEdges: [CanvasEdge!]!
+  }
+
   type Mutation {
     startConversation(workspaceId: ID!, question: String!, kbId: ID): StartConversationPayload!
     approveDecision(conversationId: ID!, decision: String): Boolean!
@@ -368,6 +410,9 @@ export const typeDefs = gql`
     saveCommunityPost(input: CommunityPostInput!): WorkspaceAsset!
     savePracticeSession(input: SavePracticeSessionInput!): WorkspaceAsset!
     updateWorkspaceMetadata(input: UpdateWorkspaceMetadataInput!): WorkspaceDirectoryItem!
+    # @-mention: invoke a specific agent for a single-shot response.
+    # Routes via callability class to BMC generators / advisors / debate path.
+    mentionAgent(input: MentionAgentInput!): MentionAgentPayload!
   }
 
   # ── Flow / Tool Registry Types ──────────────────────────
@@ -587,5 +632,17 @@ export const typeDefs = gql`
     processIdeationWizardStep(
       input: ProcessIdeationWizardStepInput!
     ): IdeationWizardStepResult!
+
+    """
+    Cancel a stale 'running' conversation session. Used by the frontend
+    when a user sees a session marked as stale (heartbeat lost) and
+    wants to clear it from the active list so they can start a new one
+    in the same workspace. The session's status is set to 'failed'
+    with a user-supplied or default reason.
+
+    Authorization: caller must own the session (userId match enforced).
+    Returns the updated session, or null if not found / not owned.
+    """
+    cancelStaleSession(sessionId: ID!, reason: String): ConversationSession
   }
 `

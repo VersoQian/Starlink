@@ -1,17 +1,13 @@
 import { nanoid } from 'nanoid'
 import { z } from 'zod'
-import { ChatOpenAI } from '@langchain/openai'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
-import { Annotation, StateGraph, START, END } from '@langchain/langgraph'
+import { StateGraph, START, END } from '@langchain/langgraph'
 import {
   createAuditLogger,
   deriveSnippetId,
   type CanvasEdge,
   type CanvasGraph,
-  type CanvasNode,
-  type BmcCompactCardContext,
-  type KnowledgeEvidence,
-  type SeminarPhase
+  type KnowledgeEvidence
 } from '@starlink/shared'
 import { computeGroundingRate, parseCitations } from './citation/index.js'
 import type { Evidence } from '@starlink/shared'
@@ -35,6 +31,10 @@ import {
   isMemoryWriteEnabled
 } from '../infrastructure/memory/workspace-memory-store.js'
 import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
+import {
+  type HitlResumeDirective,
+  shouldHaltCriticLoop
+} from '../application/hitl-resume.js'
 import { UserSkillExtractor } from './user-skill-extractor.js'
 import { buildUserSkillPrompt as buildUserSkillPromptShared } from './user-skill-prompt.js'
 import { getCheckpointer } from '../infrastructure/langgraph/checkpointer.js'
@@ -42,6 +42,102 @@ import { runDebate } from '../agents/shared/debate-orchestrator.js'
 import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
 import { trace, context as otelContext, SpanStatusCode, type Context as OtelContext } from '@opentelemetry/api'
 import { getTracer } from '../infrastructure/telemetry/otel-init.js'
+
+// ============== Stage 4d module split (2026-05-04) ==============
+// Constants, state schema, parsing helpers, debate budget machinery and
+// the canvas builder were extracted into ./business-langgraph/*.ts. The
+// orchestrator class and its streaming/graph-wiring stay here. Public API
+// (everything external imports relied on) is re-exported below so no
+// downstream caller needs to change its import path.
+import {
+  AGENT_SIGNATURE_TO_ID,
+  AGENT_TO_NODE,
+  AGENT_TYPES,
+  FINANCE_DOMAINS,
+  MARKET_DOMAINS,
+  MAX_ROUNDS,
+  OPPONENT_MAP,
+  PRODUCT_DOMAINS,
+  REGISTRY_ID_TO_NODE,
+  type BusinessModel
+} from './business-langgraph/constants.js'
+import {
+  BusinessState,
+  EMPTY_CROSS_CONTEXT,
+  EMPTY_SEEDED_STATE,
+  IntentSchema,
+  type BusinessStateType,
+  type BusinessStreamUpdate,
+  type CriticConflict,
+  type CrossContext,
+  type Intent,
+  type MacraNodeData,
+  type SupervisorDirective
+} from './business-langgraph/state.js'
+import {
+  ensureDebateBudget,
+  getOrchestrationMode,
+  isDebateEnabled,
+  releaseDebateBudget
+} from './business-langgraph/debate-budget.js'
+import { BusinessCanvasBuilder } from './business-langgraph/canvas-builder.js'
+import {
+  agentNodeForBmcDomain,
+  createBlankState,
+  createGeneralResponseNode,
+  createLLMModel,
+  deriveBmcSummaryTags,
+  extractAndParseJSON,
+  extractSeededStateFromGraph,
+  extractUsageMetadata,
+  formatBmcSummaryContent,
+  hasSeededDomainNodes,
+  hasUsableWorkspaceGraph,
+  makeDeepResearchPair,
+  normalizeDomainNodes,
+  readModelText,
+  renderCompactBmcCardsForPrompt,
+  shouldReuseWorkspaceGraph,
+  splitDeepResearchSections,
+  validateNineBmcDimensions,
+  buildConsistencySummary
+} from './business-langgraph/parsing.js'
+
+// ============== Public re-exports (backward-compat) ==============
+// External importers from `services/business-langgraph.js` continue to find
+// these symbols here; the orchestrator file is the single backwards-stable
+// entry point. New code may import directly from the sub-modules instead.
+export {
+  AGENT_TYPES,
+  FINANCE_DOMAINS,
+  MARKET_DOMAINS,
+  PRODUCT_DOMAINS,
+  type AgentType,
+  type BusinessModel,
+  type CCBMCDomain
+} from './business-langgraph/constants.js'
+export {
+  BusinessState,
+  MacraNodeDataSchema,
+  type BusinessStateType,
+  type BusinessStreamUpdate,
+  type GraphDelta,
+  type MacraNodeData
+} from './business-langgraph/state.js'
+export {
+  agentNodeForBmcDomain,
+  buildCompactBmcCardContext,
+  buildDeterministicNodeId,
+  createLLMModel,
+  deriveBmcSummaryTags,
+  extractAndParseJSON,
+  formatBmcSummaryContent,
+  normalizeDomainNodes,
+  readModelText,
+  renderCompactBmcCardsForPrompt,
+  splitDeepResearchSections,
+  validateNineBmcDimensions
+} from './business-langgraph/parsing.js'
 
 const otelTracer = getTracer('starlink/business-langgraph')
 
@@ -52,319 +148,21 @@ const businessSpanContexts = new Map<string, OtelContext>()
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
-// ============== Phase C / 4.1 / 4.4 helpers ==============
-
-type OrchestrationMode = 'legacy' | 'registry'
-
-function getOrchestrationMode(): OrchestrationMode {
-  return process.env.ORCHESTRATION_MODE === 'registry' ? 'registry' : 'legacy'
-}
-
-function isDebateEnabled(): boolean {
-  return process.env.DEBATE_ENABLED === 'true'
-}
-
-/**
- * A2 hardening (2026-04-29): per-trace budget on debate LLM calls.
- *
- * `runDebate` does up to `maxRounds` × 2 turns + 1 judge call per
- * invocation, and `maybeRunDebates` calls it once per (high-severity
- * conflict × related agent). With 3 conflicts × 2 related agents ×
- * (2 rounds × 2 turns + 1 judge) = 30 LLM calls per critic round.
- * Repeated over MAX_ROUNDS supervisor cycles → cost can spike
- * unboundedly for pathological inputs.
- *
- * We budget total debate-related LLM calls per trace (env
- * `MAX_DEBATE_LLM_CALLS_PER_TRACE`, default 10). Once hit, subsequent
- * `runDebate` invocations are skipped + emit a `budget-exceeded`
- * handoff so operators see what was aborted. Conflicts that didn't
- * get debated still go through the regular revision-request path —
- * just without the deliberative back-and-forth.
- */
-const DEBATE_BUDGET = new Map<string, { used: number; limit: number }>()
-
-function getDebateBudgetLimit(): number {
-  const raw = Number(process.env.MAX_DEBATE_LLM_CALLS_PER_TRACE ?? '10')
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 10
-}
-
-function ensureDebateBudget(traceId: string): { used: number; limit: number } {
-  let entry = DEBATE_BUDGET.get(traceId)
-  if (!entry) {
-    entry = { used: 0, limit: getDebateBudgetLimit() }
-    DEBATE_BUDGET.set(traceId, entry)
-  }
-  return entry
-}
-
-function releaseDebateBudget(traceId: string): void {
-  DEBATE_BUDGET.delete(traceId)
-}
-
-const OPPONENT_MAP: Record<string, string> = {
-  'market-agent': 'market-opponent',
-  'product-agent': 'product-opponent',
-  'finance-agent': 'finance-opponent'
-}
-
-const AGENT_SIGNATURE_TO_ID: Record<string, string> = {
-  Market_Agent: 'market-agent',
-  Product_Agent: 'product-agent',
-  Finance_Agent: 'finance-agent'
-}
-
-const MAX_ROUNDS = 3
-const MAX_CONTEXT_CLAIMS_PER_CARD = 4
-
-// ============== CC-BMC 九大维度（与前端保持一致） ==============
-const CC_BMC_DOMAINS = {
-  CUSTOMER_SEGMENTS: '客户细分',
-  CUSTOMER_RELATIONSHIPS: '客户关系',
-  CHANNELS: '渠道通路',
-  VALUE_PROPOSITIONS: '价值主张',
-  REVENUE_STREAMS: '收入来源',
-  KEY_ACTIVITIES: '关键业务',
-  KEY_RESOURCES: '核心资源',
-  KEY_PARTNERSHIPS: '重要合作',
-  COST_STRUCTURE: '成本结构'
-} as const
-
-export type CCBMCDomain = (typeof CC_BMC_DOMAINS)[keyof typeof CC_BMC_DOMAINS]
-export const MARKET_DOMAINS = [
-  CC_BMC_DOMAINS.CUSTOMER_SEGMENTS,
-  CC_BMC_DOMAINS.CHANNELS,
-  CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS
-] as const
-export const PRODUCT_DOMAINS = [
-  CC_BMC_DOMAINS.VALUE_PROPOSITIONS,
-  CC_BMC_DOMAINS.KEY_RESOURCES,
-  CC_BMC_DOMAINS.KEY_ACTIVITIES,
-  CC_BMC_DOMAINS.KEY_PARTNERSHIPS
-] as const
-export const FINANCE_DOMAINS = [
-  CC_BMC_DOMAINS.REVENUE_STREAMS,
-  CC_BMC_DOMAINS.COST_STRUCTURE
-] as const
-
-// ============== Agent 类型 ==============
-export const AGENT_TYPES = {
-  MARKET: 'Market_Agent',
-  PRODUCT: 'Product_Agent',
-  FINANCE: 'Finance_Agent',
-  COMPLIANCE: 'Compliance_Agent',
-  ORCHESTRATOR: 'Orchestrator',
-  CRITIC: 'Adversarial_Critic'
-} as const
-
-export type AgentType = (typeof AGENT_TYPES)[keyof typeof AGENT_TYPES]
-
-export type BusinessModel = {
-  invoke: (messages: Array<SystemMessage | HumanMessage>) => Promise<unknown>
-  withStructuredOutput: <T>(
-    schema: z.ZodType<T>,
-    options: {
-      name: string
-      strict?: boolean
-      // langchain-openai withStructuredOutput accepts a `method` discriminator
-      // — 'jsonSchema' is the default strict mode (OpenAI/Azure only),
-      // 'functionCalling' uses tool-call routing (DeepSeek-compatible),
-      // 'jsonMode' uses `response_format: { type: 'json_object' }`.
-      method?: 'functionCalling' | 'jsonMode' | 'jsonSchema'
-    }
-  ) => {
-    invoke: (messages: Array<SystemMessage | HumanMessage>) => Promise<T>
-  }
-}
-
-// Agent 名称到 LangGraph 节点名称的映射
-const AGENT_TO_NODE: Record<string, string> = {
-  [AGENT_TYPES.MARKET]: 'marketAgent',
-  [AGENT_TYPES.PRODUCT]: 'productAgent',
-  [AGENT_TYPES.FINANCE]: 'financeAgent'
-}
-
-/** Phase C bridge: registry kebab id → legacy camelCase node name. */
-const REGISTRY_ID_TO_NODE: Record<string, string> = {
-  'market-agent': 'marketAgent',
-  'product-agent': 'productAgent',
-  'finance-agent': 'financeAgent'
-}
-
-// ============== MacraNodeData Schema（用于验证 LLM 输出） ==============
-export const MacraNodeDataSchema = z.object({
-  id: z.string(),
-  type: z.enum(['cc-bmc-card', 'agent-avatar', 'insight-note', 'conflict-alert', 'data-source']),
-  label: z.string().max(50),
-  content: z.string(),
-  domain: z.enum(Object.values(CC_BMC_DOMAINS) as [string, ...string[]]).optional(),
-  metadata: z.object({
-    agent_signature: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
-    confidence: z.enum(['high', 'medium', 'low']).optional(),
-    source: z.string().optional(),
-    tags: z.array(z.string()).optional(),
-    stage: z.enum(['planning', 'execution', 'review', 'decision']).optional()
-  }).passthrough(),
-  agentType: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),
-  isInteractive: z.boolean().optional(),
-  severity: z.enum(['high', 'medium', 'low']).optional(),
-  conflictType: z.enum(['resource-goal', 'compliance-business', 'channel-product', 'other']).optional()
-})
-
-export type MacraNodeData = z.infer<typeof MacraNodeDataSchema>
-
-// ============== BMC summary tagging (Stage 1 hygiene) ==============
-// Pure helpers extracted so they're testable in isolation. The tag
-// predicate intentionally checks distinct dimension coverage rather than
-// raw node count — a run with 9 customer-segments nodes is NOT 9-dim
-// coverage.
-export function deriveBmcSummaryTags(args: {
-  conflictCount: number
-  dimsCovered: number
-}): string[] {
-  const tags = ['bmc-conversation']
-  if (args.conflictCount > 0) tags.push('had-conflicts')
-  if (args.dimsCovered >= 9) tags.push('full-9-dim-coverage')
-  return tags
-}
-
-export function formatBmcSummaryContent(args: {
-  question: string
-  bmcNodeCount: number
-  conflictCount: number
-  dimsCovered: number
-  durationMs: number
-  handoffCount: number
-}): string {
-  return (
-    `问题: ${args.question.slice(0, 120)} | 产出 ${args.bmcNodeCount} 个 BMC 节点 |` +
-    ` 冲突 ${args.conflictCount} 条 | 维度 ${args.dimsCovered}/9 |` +
-    ` 耗时 ${(args.durationMs / 1000).toFixed(1)}s | 握手 ${args.handoffCount} 次`
-  )
-}
-
-// ============== Intent 分类 ==============
-const IntentSchema = z.object({
-  intent: z.enum(['generate_bmc', 'analyze', 'detect_conflicts', 'general']),
-  reasoning: z.string()
-})
-
-type Intent = z.infer<typeof IntentSchema>
-
-// ============== Supervisor Directive ==============
-type SupervisorDirective = {
-  activeAgents: string[]       // 本轮需要执行的 Agent 节点名称（legacy 格式）
-  guidance: string             // 给 Agent 的修正指导
-  conflictSummary: string      // 上一轮的冲突摘要
-  /** Phase C+: structured routing decisions from runSupervisorRegistry. */
-  decisions?: RoutingDecision[]
-}
-
-// ============== Cross Context（Agent 间共享上下文） ==============
-type CrossContext = {
-  marketSummary: string
-  productSummary: string
-  financeSummary: string
-  consistencyNotes: string     // Synthesizer 的一致性报告
-}
-
-type SeededBusinessState = {
-  marketNodes: MacraNodeData[]
-  productNodes: MacraNodeData[]
-  financeNodes: MacraNodeData[]
-  agentAvatars: MacraNodeData[]
-  conflicts: CriticConflict[]
-  edges: CanvasEdge[]
-}
-
-const EMPTY_CROSS_CONTEXT: CrossContext = {
-  marketSummary: '',
-  productSummary: '',
-  financeSummary: '',
-  consistencyNotes: ''
-}
-
-const EMPTY_SEEDED_STATE: SeededBusinessState = {
-  marketNodes: [],
-  productNodes: [],
-  financeNodes: [],
-  agentAvatars: [],
-  conflicts: [],
-  edges: []
-}
-
-// ============== Conflict with related agents ==============
-type CriticConflict = MacraNodeData & {
-  relatedAgents?: string[]     // 需要修正的 Agent 类型
-}
-
-// ============== LangGraph State ==============
-export const BusinessState = Annotation.Root({
-  traceId: Annotation<string>(),
-  workspaceId: Annotation<string>(),
-  userId: Annotation<string>(),
-  question: Annotation<string>(),
-  contextPrompt: Annotation<string>(),
-  intent: Annotation<Intent | null>(),
-  roundNumber: Annotation<number>(),
-  supervisorDirective: Annotation<SupervisorDirective | null>(),
-  crossContext: Annotation<CrossContext>(),
-  knowledgeEvidence: Annotation<KnowledgeEvidence[]>(),
-  generalNodes: Annotation<MacraNodeData[]>(),
-  marketNodes: Annotation<MacraNodeData[]>(),
-  productNodes: Annotation<MacraNodeData[]>(),
-  financeNodes: Annotation<MacraNodeData[]>(),
-  agentAvatars: Annotation<MacraNodeData[]>(),
-  conflicts: Annotation<CriticConflict[]>(),
-  edges: Annotation<CanvasEdge[]>()
-})
-
-export type BusinessStateType = typeof BusinessState.State
-
-// ============== Stream Update 类型 ==============
-export type GraphDelta = {
-  nodes?: CanvasNode[]
-  edges?: CanvasEdge[]
-  removedNodeIds?: string[]
-  removedEdgeIds?: string[]
-}
-
-export type BusinessStreamUpdate =
-  | { type: 'init'; graph: CanvasGraph; knowledgeEvidence?: KnowledgeEvidence[] }
-  | { type: 'delta'; delta: GraphDelta }
-  | { type: 'status'; status: 'completed' | 'failed'; message?: string }
-  | { type: 'interrupt'; decision: string; conflicts: MacraNodeData[] }
-  | { type: 'handoff'; handoff: Handoff }
-  /**
-   * Subgraph progress event — emitted when a registered agent subgraph
-   * yields an internal state update (ToolNode invocation, intermediate
-   * LLM call, etc) BEFORE the subgraph's final output reaches the parent
-   * graph as a node-level update. Only fires when `subgraphs: true` is
-   * passed to graph.stream() (Fix #2 of LangGraph hygiene pass).
-   *
-   * - `ns` is the LangGraph namespace path: each entry is
-   *   `<parentNode>:<subgraphCheckpointId>`.
-   * - `nodeName` is the subgraph-internal node that produced the update
-   *   (e.g. 'call-llm', 'tools', 'parse' for the BMC ReAct subgraph).
-   * - `payloadKeys` lists which top-level keys of the subgraph state
-   *   were updated; the values themselves are NOT forwarded to keep
-   *   the stream payload bounded (full state lives in the subgraph
-   *   checkpoint anyway).
-   *
-   * Frontend can render "market-agent is calling web-search…" by reading
-   * `ns[0]` (parent node = 'marketAgent') + `nodeName` ('tools').
-   */
-  | {
-      type: 'subagent-progress'
-      ns: string[]
-      nodeName: string
-      payloadKeys: string[]
-    }
-
 // ============== Main Service ==============
 export class BusinessLangGraphService {
   private readonly model: BusinessModel | null
   private readonly conversationMemoryStore: ConversationMemoryStore
   private readonly userSkillExtractor: UserSkillExtractor
+  /**
+   * Phase 2.6 · per-trace HITL resume directive set by the
+   * conversation-store runtime after a `resumeConversation` /
+   * `approveDecision` mutation. Consumed by `runSupervisor` at the start of
+   * each revision round to decide whether to halt the critic loop entirely
+   * (`accepted` / `rejected`) or scope revision to one BMC dimension
+   * (`edit_plan` with `dimension`). Map entry is cleared on consume so a
+   * later revision round falls back to auto-revision.
+   */
+  private readonly hitlResumeDirectives = new Map<string, HitlResumeDirective>()
 
   constructor(
     model: BusinessModel | null = createLLMModel(),
@@ -379,6 +177,25 @@ export class BusinessLangGraphService {
     this.userSkillExtractor =
       options.userSkillExtractor ??
       new UserSkillExtractor({ memoryStore: this.conversationMemoryStore })
+  }
+
+  /** Phase 2.6 · publish a HITL resume directive for the given trace. */
+  setHitlResumeDirective(traceId: string, directive: HitlResumeDirective): void {
+    if (!traceId) return
+    this.hitlResumeDirectives.set(traceId, directive)
+  }
+
+  /**
+   * Phase 2.6 · consume the HITL resume directive for this trace, removing
+   * it so the next revision round (if any) won't re-apply the same human
+   * input. Returns null when no directive is pending.
+   */
+  consumeHitlResumeDirective(traceId: string): HitlResumeDirective | null {
+    if (!traceId) return null
+    const d = this.hitlResumeDirectives.get(traceId)
+    if (!d) return null
+    this.hitlResumeDirectives.delete(traceId)
+    return d
   }
 
   private logTrace(params: {
@@ -493,6 +310,30 @@ export class BusinessLangGraphService {
 
     const graph = await this.createGraph()
 
+    // P1: heartbeat-driven session lifecycle — every 30s, touch the
+    // session's heartbeat_at column. The reaper script (run via cron)
+    // looks for 'running' rows with stale heartbeats and marks them
+    // 'failed' with reason='heartbeat-lost'. This unblocks the workspace
+    // soft-lock when a gateway crashes mid-stream without manual SQL.
+    const ownerPid = `gateway-${process.pid}-${nanoid(6)}`
+    const heartbeatTimer = setInterval(() => {
+      void this.conversationMemoryStore
+        .touchHeartbeat(traceId, ownerPid)
+        .catch((err) => {
+          auditLogger.warn({
+            action: 'business-langgraph.heartbeat.failed',
+            requestId: traceId,
+            workflowId: context.workspaceId,
+            userId: context.userId,
+            metadata: { error: err instanceof Error ? err.message : String(err) }
+          })
+        })
+    }, 30_000)
+    // Fire one heartbeat immediately so the row's heartbeat_at column
+    // is non-NULL before the first interval fires (avoids treating a
+    // brand-new session as already stale during the grace window).
+    void this.conversationMemoryStore.touchHeartbeat(traceId, ownerPid).catch(() => {})
+
     // Phase 3.1 · subscribe to handoff logger so we can stream events to client.
     const handoffLogger = getHandoffLogger(traceId)
     const handoffQueue: Handoff[] = []
@@ -540,7 +381,12 @@ export class BusinessLangGraphService {
         {
           streamMode: 'updates',
           // Day-1b: thread_id propagation for LangSmith grouping.
-          configurable: { thread_id: traceId },
+          // P1: namespace by user — `business-{userId}-{traceId}` —
+          // so PostgresSaver checkpoints + LangSmith traces are scoped
+          // per-user. Resume/inspection always knows which user owned
+          // a given execution. critic subgraph uses its own prefix
+          // (see runCritic).
+          configurable: { thread_id: `business-${context.userId}-${traceId}` },
           // LangGraph hygiene fix #2: surface subgraph internal updates
           // (ToolNode invocations, ReAct intermediate states) so the
           // frontend can render "market-agent is calling web-search…"
@@ -636,6 +482,16 @@ export class BusinessLangGraphService {
             }
           }
 
+          // Deep Research (Phase 2.6) — same emit shape as generalResponder
+          if (nodeName === 'deepResearchAgent' && payload.generalNodes) {
+            const nodes = payload.generalNodes as MacraNodeData[]
+            bmcNodeCount += nodes.length
+            recordDimensions(nodes)
+            for (const node of nodes) {
+              yield { type: 'delta', delta: builder.addMacraNode(node) }
+            }
+          }
+
           // Market Agent
           if (nodeName === 'marketAgent' && payload.marketNodes) {
             const nodes = payload.marketNodes as MacraNodeData[]
@@ -680,11 +536,24 @@ export class BusinessLangGraphService {
             }
             if (payload.crossContext) {
               const ctx = payload.crossContext as CrossContext
+              // Phase 2.6 · TL;DR card first (核心结论, 短) — placed before
+              // the detail card so the canvas reads top-down: TL;DR → BMC ×
+              // 9 → 详细分析.
+              if (ctx.consistencySummary) {
+                yield {
+                  type: 'delta',
+                  delta: builder.addInsightNode(
+                    '核心结论',
+                    ctx.consistencySummary,
+                    'review'
+                  )
+                }
+              }
               if (ctx.consistencyNotes) {
                 yield {
                   type: 'delta',
                   delta: builder.addInsightNode(
-                    '一致性报告',
+                    '详细分析',
                     ctx.consistencyNotes,
                     'review'
                   )
@@ -798,6 +667,10 @@ export class BusinessLangGraphService {
       } catch {
         // writeConversationSummary already swallows; redundant guard.
       }
+      // Stop heartbeat timer — session is no longer active. The status
+      // update below ('completed' / 'failed') is the canonical signal
+      // for the reaper that this row is no longer eligible for recovery.
+      clearInterval(heartbeatTimer)
       unsubscribeHandoff()
       releaseHandoffLogger(traceId)
       releaseDebateBudget(traceId)
@@ -836,6 +709,7 @@ export class BusinessLangGraphService {
           : this.runSupervisor(state)
       )
       .addNode('generalResponder', async (state) => this.runGeneralResponder(state))
+      .addNode('deepResearchAgent', async (state) => this.runDeepResearchAgent(state))
       .addNode('marketAgent', async (state) => this.runMarketAgent(state))
       .addNode('productAgent', async (state) => this.runProductAgent(state))
       .addNode('financeAgent', async (state) => this.runFinanceAgent(state))
@@ -850,6 +724,9 @@ export class BusinessLangGraphService {
         if (intent === 'general') {
           return ['generalResponder']
         }
+        if (intent === 'deep_research') {
+          return ['deepResearchAgent']
+        }
         // 根据 Supervisor 指令决定哪些 Agent 需要执行
         const directive = state.supervisorDirective
         if (directive && directive.activeAgents.length > 0) {
@@ -858,6 +735,7 @@ export class BusinessLangGraphService {
         return ['marketAgent', 'productAgent', 'financeAgent']
       })
       .addEdge('generalResponder', END)
+      .addEdge('deepResearchAgent', END)
       .addEdge('marketAgent', 'synthesizer')
       .addEdge('productAgent', 'synthesizer')
       .addEdge('financeAgent', 'synthesizer')
@@ -900,10 +778,48 @@ export class BusinessLangGraphService {
         intent,
         roundNumber: nextRound,
         supervisorDirective: {
-          activeAgents: intent.intent === 'general' || intent.intent === 'detect_conflicts'
-            ? []
-            : ['marketAgent', 'productAgent', 'financeAgent'],
+          activeAgents:
+            intent.intent === 'general'
+            || intent.intent === 'detect_conflicts'
+            || intent.intent === 'deep_research'
+              ? []
+              : ['marketAgent', 'productAgent', 'financeAgent'],
           guidance: '',
+          conflictSummary: ''
+        }
+      }
+    }
+
+    // Phase 2.6 · HITL revision-scope directive (set externally by the
+    // conversation-store after `resumeConversation` / `approveDecision`).
+    // Overrides the auto-revision logic when present:
+    //   - accepted / rejected → halt critic loop (current state is final)
+    //   - edit_plan with dimension → run only that dimension's owning agent
+    //   - edit_plan without dimension → continue auto-revision but use the
+    //     user's plan body as the guidance preamble
+    const directive = this.consumeHitlResumeDirective(state.traceId)
+    if (directive && shouldHaltCriticLoop(directive)) {
+      this.logTrace({
+        step: 'supervisor',
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        status: 'completed',
+        durationMs: Date.now() - startedAt,
+        metadata: { round: nextRound, mode: 'hitl-halt', directiveKind: directive.kind }
+      })
+      // Empty `activeAgents` makes the supervisor → agents conditional edge
+      // route through nothing, and on the next critic→supervisor evaluation
+      // the synthesizer/critic re-run with no new agent output, producing no
+      // new conflicts → graph falls through to END.
+      return {
+        roundNumber: nextRound,
+        conflicts: [],
+        supervisorDirective: {
+          activeAgents: [],
+          guidance: directive.kind === 'accepted'
+            ? '人类已批准当前方案，结束讨论'
+            : '人类已驳回继续修订，结束讨论',
           conflictSummary: ''
         }
       }
@@ -914,6 +830,40 @@ export class BusinessLangGraphService {
     const conflictSummary = conflicts
       .map((c) => `[${c.severity}] ${c.label}: ${c.content.substring(0, 100)}`)
       .join('\n')
+
+    // edit_plan with a specific dimension — scope revision to that one agent.
+    // We bypass the conflict-driven set entirely so the user's instruction is
+    // applied verbatim instead of being mixed with auto-detected conflicts.
+    if (directive && directive.kind === 'edit_plan' && directive.dimension) {
+      const targetAgent = agentNodeForBmcDomain(directive.dimension)
+      if (targetAgent) {
+        const guidance = `[人类指令 · ${directive.dimension}] ${directive.body}`
+        this.logTrace({
+          step: 'supervisor',
+          traceId: state.traceId,
+          workspaceId: state.workspaceId,
+          userId: state.userId,
+          status: 'completed',
+          durationMs: Date.now() - startedAt,
+          metadata: {
+            round: nextRound,
+            mode: 'hitl-edit-plan',
+            directiveKind: directive.kind,
+            scopedAgent: targetAgent,
+            scopedDimension: directive.dimension
+          }
+        })
+        return {
+          roundNumber: nextRound,
+          conflicts: [],
+          supervisorDirective: {
+            activeAgents: [targetAgent],
+            guidance,
+            conflictSummary: ''
+          }
+        }
+      }
+    }
 
     // 确定哪些 Agent 需要修正
     const agentsToRevise = new Set<string>()
@@ -955,6 +905,11 @@ export class BusinessLangGraphService {
     let guidance = `请根据以下冲突修正你的分析：\n${conflictSummary}`
     if (missingDims.length > 0) {
       guidance += `\n\n[结构补全] BMC 仍缺少以下维度：${missingDims.join('、')}。负责的 Agent 必须在本轮补全。`
+    }
+    // edit_plan without a specific dimension: prepend the user's plan body so
+    // it leads the prompt and the LLM-rewritten guidance respects it.
+    if (directive && directive.kind === 'edit_plan' && !directive.dimension) {
+      guidance = `[人类指令] ${directive.body}\n\n${guidance}`
     }
     if (this.model) {
       try {
@@ -1016,6 +971,7 @@ ${this.buildWorkspaceContextPrompt(state)}
 - generate_bmc: 用户希望生成完整的商业模型画布（CC-BMC 九大维度）
 - analyze: 用户希望分析现有画布或获取建议
 - detect_conflicts: 用户希望检测逻辑冲突或矛盾
+- deep_research: 用户希望对某个市场/行业/产品/赛道做深度调研，要求基于知识库证据综合呈现，而不是直接产出 BMC（典型词：调研、研究、对比、综述、行业分析、深入分析、参考文献）
 - general: 通用对话或信息查询
 
 返回 JSON 格式：
@@ -1266,7 +1222,7 @@ ${snippets}
    */
   private toParserEvidence(evidence: KnowledgeEvidence[] | undefined): Evidence[] {
     if (!evidence || evidence.length === 0) return []
-    return evidence.map((e, i) => {
+    return evidence.map((e) => {
       const snippetId = deriveSnippetId(
         e.docId,
         e.metadata as { chunkIndex?: number } | undefined,
@@ -1885,6 +1841,154 @@ ${snippets}
       messages: [],
       ...ownPrevious
     }
+  }
+
+  /**
+   * Phase 2.6 · DeepResearch agent.
+   *
+   * Activated when `intent.intent === 'deep_research'`. Synthesises a single
+   * research note from the KB evidence already retrieved upstream
+   * (`state.knowledgeEvidence`) plus the workspace / cross-context prompts.
+   * Output is one `insight-note` MacraNode pushed to `generalNodes`, which
+   * the canvas builder renders the same way as the general responder.
+   *
+   * The graph routes deepResearchAgent → END (no critic, no synthesizer):
+   * research output is presented as-is and is not subject to BMC conflict
+   * detection. Future Phase: chain a follow-up KB query loop or web search
+   * before LLM synthesis if more depth is needed.
+   *
+   * Registry-mode parity: when `ORCHESTRATION_MODE=registry` and the
+   * `deep-research` agent is registered, delegate to its subgraph (mirrors
+   * runGeneralResponder).
+   */
+  private async runDeepResearchAgent(
+    state: BusinessStateType
+  ): Promise<Partial<BusinessStateType>> {
+    const startedAt = Date.now()
+
+    if (
+      getOrchestrationMode() === 'registry' &&
+      agentRegistry.has('deep-research')
+    ) {
+      try {
+        const projected = await this.invokeRegisteredAgent(
+          'deep-research',
+          state,
+          (s) => ({
+            traceId: s.traceId,
+            workspaceId: s.workspaceId,
+            userId: s.userId,
+            question: s.question,
+            workspaceContext: this.buildWorkspaceContextPrompt(s),
+            knowledgeEvidence: s.knowledgeEvidence
+          }),
+          (result) => ({
+            generalNodes: (result.generalNodes as MacraNodeData[]) ?? []
+          })
+        )
+        if (projected && (projected.generalNodes?.length ?? 0) > 0) {
+          this.logTrace({
+            step: 'deepResearchAgent',
+            traceId: state.traceId,
+            workspaceId: state.workspaceId,
+            userId: state.userId,
+            status: 'completed',
+            durationMs: Date.now() - startedAt,
+            metadata: { mode: 'registry', evidenceCount: state.knowledgeEvidence.length }
+          })
+          return projected
+        }
+      } catch (error) {
+        auditLogger.warn({
+          action: 'business-langgraph.runDeepResearchAgent.registry-fallback',
+          requestId: state.traceId,
+          workflowId: state.workspaceId,
+          userId: state.userId,
+          metadata: { error: error instanceof Error ? error.message : String(error) }
+        })
+        // fall through to legacy inline path
+      }
+    }
+
+    if (!this.model) {
+      const fallback = makeDeepResearchPair(
+        state.traceId,
+        '当前未配置 LLM，无法生成核心结论。',
+        '当前未配置 LLM，无法生成详细研究综述。',
+        state.knowledgeEvidence.length,
+        'low'
+      )
+      return { generalNodes: fallback }
+    }
+
+    const evidenceBlock = this.buildKnowledgePrompt(state)
+    const workspaceBlock = this.buildWorkspaceContextPrompt(state)
+    const systemPrompt = `你是 Deep Research 研究员，按照学术综述方式回答用户。
+
+要求：
+1. 全部论断必须基于"参考资料"，每条论断后用 [[ref:docId#snippetId]] 标注证据；找不到证据的论断用 [[no-ref]] 显式标注，不要编造引用
+2. **必须**严格按以下两段输出，**不要省略小标题，不要合并**：
+
+## 核心结论
+1-3 句话给出最重要的判断（用户读这一段就能拿走 80% 的价值）。
+
+## 详细分析
+分 3-5 段展开（市场、用户、产品、竞争、风险等任选相关），每段 80-200 字，论断后必须标注引用。
+
+3. 使用简洁 Markdown，禁止使用一级标题（#），只用二级（##）以下
+4. 不要输出 BMC 九维结构，本任务只产出研究综述`
+
+    const userMsg = `${state.question}${workspaceBlock}${evidenceBlock}`
+
+    let raw: string
+    try {
+      const response = await this.model.invoke([
+        new SystemMessage(systemPrompt),
+        new HumanMessage(userMsg)
+      ])
+      raw = readModelText(response) || ''
+    } catch (error) {
+      auditLogger.error({
+        action: 'business-langgraph.runDeepResearchAgent',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: { error: error instanceof Error ? error.message : String(error) },
+        error: error as Error
+      })
+      raw = ''
+    }
+
+    const split = splitDeepResearchSections(raw)
+    const pair = makeDeepResearchPair(
+      state.traceId,
+      split.summary || '研究综述生成失败，请重试。',
+      split.detail || '研究综述生成失败，请重试。',
+      state.knowledgeEvidence.length,
+      raw ? 'high' : 'low'
+    )
+
+    // Reuse the cell-level citation pipeline so each card gets
+    // grounding-rate metadata + clean text identical to BMC nodes.
+    const parsed = this.applyCitationParsing(pair, state.knowledgeEvidence)
+
+    this.logTrace({
+      step: 'deepResearchAgent',
+      traceId: state.traceId,
+      workspaceId: state.workspaceId,
+      userId: state.userId,
+      status: 'completed',
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        mode: 'legacy',
+        evidenceCount: state.knowledgeEvidence.length,
+        cardCount: parsed.length,
+        groundingRateDetail:
+          (parsed[1]?.metadata as { groundingRate?: number } | undefined)?.groundingRate ?? null
+      }
+    })
+
+    return { generalNodes: parsed }
   }
 
   private async runMarketAgent(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
@@ -2534,13 +2638,27 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
       notes.push('- 资源模型矛盾：同时提及重资产自建和轻资产平台模式')
     }
 
+    // Phase 2.6 · TL;DR — 1-3 句的整体核心结论。
+    //   - 0 风险 0 节点：空字符串（流程没真正出 BMC，emit 跳过）
+    //   - 0 风险有节点：基于 9 维覆盖度 + 一句话定位结论
+    //   - >0 风险：把规则触发的核心矛盾用 1 句拎出来，提醒用户重点看
+    const consistencySummary = buildConsistencySummary({
+      bmcNodeCount: allNodes.length,
+      hasHighEnd,
+      hasLowPrice,
+      hasHeavyAssets,
+      hasLightModel,
+      ruleNoteCount: notes.length
+    })
+
     return {
       marketSummary,
       productSummary,
       financeSummary,
       consistencyNotes: notes.length > 0
         ? `## 维度间一致性分析\n\n${notes.join('\n')}\n\n请各 Agent 在下一轮修正中关注以上问题。`
-        : ''
+        : '',
+      consistencySummary
     }
   }
 
@@ -2685,7 +2803,15 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
             knowledgeEvidence: this.buildKnowledgePrompt(state)
           },
           {
-            configurable: { thread_id: state.traceId, agent_id: 'critic-agent' },
+            // P1: critic subgraph thread_id namespace —
+            // `critic-{userId}-{traceId}-{round}` — keeps it isolated
+            // from the main `business-*` checkpoint stream so resume
+            // can target the precise critic round without colliding
+            // with the main graph's state.
+            configurable: {
+              thread_id: `critic-${state.userId}-${state.traceId}-r${state.roundNumber}`,
+              agent_id: 'critic-agent'
+            },
             tags: ['critic-agent', 'bmc']
           }
         )
@@ -2869,713 +2995,275 @@ ${workspaceContext}
 
     return conflicts
   }
-}
 
-// ============== Canvas Builder（管理节点和边） ==============
-class BusinessCanvasBuilder {
-  private readonly nodes = new Map<string, CanvasNode>()
-  private readonly edges = new Map<string, CanvasEdge>()
-  private readonly rootId: string | null
-  private nextY = ROOT_POSITION.y + NODE_SPACING
+  // ==========================================================================
+  // PUBLIC · Mention-router entry points (2026-05-04)
+  //
+  // The mention-router invokes a specific agent without going through the
+  // full supervisor graph. These wrappers build a minimal BusinessState,
+  // delegate to invokeRegisteredAgent, and project the output back as a
+  // simple shape the router can persist to canvas.
+  // ==========================================================================
 
-  constructor(
-    private readonly workspaceId: string,
-    private readonly userId: string,
-    private readonly question: string,
-    initialGraph?: CanvasGraph
-  ) {
-    if (initialGraph?.workspaceId === this.workspaceId) {
-      for (const node of initialGraph.nodes) {
-        this.nodes.set(node.id, cloneCanvasNode(node))
-      }
-      for (const edge of initialGraph.edges) {
-        this.edges.set(edge.id, { ...edge })
-      }
-      this.nextY = computeNextY(initialGraph.nodes)
-    }
-
-    if (this.nodes.size > 0) {
-      this.rootId = null
-      return
-    }
-
-    this.rootId = `root-${nanoid(8)}`
-    const rootNode: CanvasNode = {
-      id: this.rootId,
-      type: 'note',
-      position: { ...ROOT_POSITION },
-      data: {
-        type: 'note',
-        title: 'Business LangGraph 分析任务',
-        subtitle: `提问人：${this.userId || 'anonymous'}`,
-        content: this.question,
-        footerText: 'Multi-Agent 研讨会模式 · MACRA 系统',
-        variant: 'primary'
-      }
-    }
-    this.nodes.set(rootNode.id, rootNode)
-  }
-
-  getGraph(): CanvasGraph {
+  private buildMentionState(args: {
+    traceId: string
+    workspaceId: string
+    userId: string
+    question: string
+    knowledgeEvidence?: KnowledgeEvidence[]
+    seed?: typeof EMPTY_SEEDED_STATE
+  }): BusinessStateType {
+    const seed = args.seed ?? EMPTY_SEEDED_STATE
     return {
-      workspaceId: this.workspaceId,
-      nodes: [...this.nodes.values()],
-      edges: [...this.edges.values()]
+      traceId: args.traceId,
+      workspaceId: args.workspaceId,
+      userId: args.userId,
+      question: args.question,
+      contextPrompt: '',
+      intent: null,
+      roundNumber: 1,
+      supervisorDirective: null,
+      crossContext: EMPTY_CROSS_CONTEXT,
+      knowledgeEvidence: args.knowledgeEvidence ?? [],
+      generalNodes: [],
+      marketNodes: seed.marketNodes,
+      productNodes: seed.productNodes,
+      financeNodes: seed.financeNodes,
+      agentAvatars: seed.agentAvatars,
+      conflicts: seed.conflicts,
+      edges: seed.edges
     }
   }
 
-  addMacraNode(macraNode: MacraNodeData): GraphDelta {
-    const existing = this.nodes.get(macraNode.id)
-    const node: CanvasNode = {
-      id: macraNode.id,
-      type: 'note',
-      position: existing?.position ?? { x: ROOT_POSITION.x, y: this.nextY },
-      data: {
-        type: 'note',
-        title: macraNode.label,
-        content: macraNode.content,
-        variant: 'insight',
-        meta: {
-          macraType: macraNode.type,
-          domain: macraNode.domain,
-          agentType: macraNode.agentType,
-          severity: macraNode.severity,
-          conflictType: macraNode.conflictType,
-          isInteractive: macraNode.isInteractive,
-          metadata: macraNode.metadata
-        }
+  /** Invoke a BMC generator (market/product/finance) standalone. */
+  async invokeBmcGeneratorForMention(
+    self: 'market' | 'product' | 'finance',
+    args: {
+      traceId: string
+      workspaceId: string
+      userId: string
+      question: string
+      seed?: typeof EMPTY_SEEDED_STATE
+    }
+  ): Promise<MacraNodeData[]> {
+    const agentId = `${self}-agent`
+    const state = this.buildMentionState(args)
+    const userSkillPrompt = await this.buildUserSkillPrompt(args.userId, args.workspaceId, args.question)
+    const projected = await this.invokeRegisteredAgent(
+      agentId,
+      state,
+      (s) => this.projectBlackboardForGenerator(s, self, userSkillPrompt),
+      (result) => {
+        const key = `${self}Nodes` as 'marketNodes' | 'productNodes' | 'financeNodes'
+        return { [key]: (result[key] as MacraNodeData[]) ?? [] } as Partial<BusinessStateType>
       }
-    }
-
-    this.nodes.set(node.id, node)
-    if (!existing) {
-      this.nextY += NODE_SPACING
-    }
-
-    return { nodes: [node] }
+    )
+    if (!projected) return []
+    const key = `${self}Nodes` as 'marketNodes' | 'productNodes' | 'financeNodes'
+    return (projected as Record<string, MacraNodeData[] | undefined>)[key] ?? []
   }
 
-  replaceNodesByMacraType(macraType: MacraNodeData['type'], nextNodes: MacraNodeData[]): GraphDelta {
-    const removedNodeIds = [...this.nodes.values()]
-      .filter((node) => {
-        const meta = node.data as { meta?: { macraType?: string } } | undefined
-        return meta?.meta?.macraType === macraType
-      })
-      .map((node) => node.id)
-    const removedEdgeIds = [...this.edges.values()]
-      .filter((edge) => removedNodeIds.includes(edge.source) || removedNodeIds.includes(edge.target))
-      .map((edge) => edge.id)
-
-    for (const nodeId of removedNodeIds) {
-      this.nodes.delete(nodeId)
-    }
-    for (const edgeId of removedEdgeIds) {
-      this.edges.delete(edgeId)
-    }
-
-    const addedNodes: CanvasNode[] = []
-    for (const macraNode of nextNodes) {
-      const delta = this.addMacraNode(macraNode)
-      addedNodes.push(...(delta.nodes ?? []))
-    }
-
-    return {
-      nodes: addedNodes,
-      removedNodeIds,
-      removedEdgeIds
-    }
+  /** Invoke critic with reconstructed BMC context. */
+  async invokeCriticForMention(args: {
+    traceId: string
+    workspaceId: string
+    userId: string
+    question: string
+    seed: typeof EMPTY_SEEDED_STATE
+  }): Promise<CriticConflict[]> {
+    const state = this.buildMentionState(args)
+    const projected = await this.invokeRegisteredAgent(
+      'critic-agent',
+      state,
+      (s) => ({
+        traceId: s.traceId,
+        workspaceId: s.workspaceId,
+        userId: s.userId,
+        question: s.question,
+        roundNumber: s.roundNumber,
+        nodesSummary: renderCompactBmcCardsForPrompt([
+          ...s.marketNodes,
+          ...s.productNodes,
+          ...s.financeNodes
+        ]),
+        workspaceContext: this.buildWorkspaceContextPrompt(s),
+        supervisorDirective: '',
+        knowledgeEvidence: this.buildKnowledgePrompt(s)
+      }),
+      (result) => ({ conflicts: (result.conflicts as CriticConflict[]) ?? [] })
+    )
+    return projected?.conflicts ?? []
   }
 
-  addInsightNode(title: string, content: string, stage: SeminarPhase = 'planning'): GraphDelta {
-    const id = `insight-${nanoid(8)}`
-    const node: CanvasNode = {
-      id,
-      type: 'note',
-      position: { x: ROOT_POSITION.x, y: this.nextY },
-      data: {
-        type: 'note',
-        title,
-        content,
-        variant: 'insight',
-        meta: {
-          macraType: 'insight-note',
-          metadata: {
-            agent_signature: 'Orchestrator',
-            confidence: 'high',
-            stage
-          }
-        }
+  /** Invoke synthesizer subgraph. */
+  async invokeSynthesizerForMention(args: {
+    traceId: string
+    workspaceId: string
+    userId: string
+    question: string
+    seed: typeof EMPTY_SEEDED_STATE
+  }): Promise<{ insights: string[]; suggestedEdges: Array<{ from: string; to: string; label: string }> }> {
+    const state = this.buildMentionState(args)
+    let insights: string[] = []
+    let suggestedEdges: Array<{ from: string; to: string; label: string }> = []
+    await this.invokeRegisteredAgent(
+      'synthesizer',
+      state,
+      (s) => ({
+        traceId: s.traceId,
+        workspaceId: s.workspaceId,
+        userId: s.userId,
+        question: s.question,
+        roundNumber: s.roundNumber,
+        marketNodes: s.marketNodes,
+        productNodes: s.productNodes,
+        financeNodes: s.financeNodes
+      }),
+      (result) => {
+        insights = (result.insights as string[]) ?? []
+        suggestedEdges =
+          (result.suggestedEdges as Array<{ from: string; to: string; label: string }>) ?? []
+        return {} as Partial<BusinessStateType>
       }
+    )
+    return { insights, suggestedEdges }
+  }
+
+  /** Invoke deep-research / general-responder standalone. */
+  async invokeUtilityForMention(
+    agentId: 'deep-research' | 'general-responder',
+    args: {
+      traceId: string
+      workspaceId: string
+      userId: string
+      question: string
+      knowledgeEvidence?: KnowledgeEvidence[]
     }
-
-    this.nodes.set(id, node)
-    this.nextY += NODE_SPACING
-
-    return { nodes: [node] }
+  ): Promise<MacraNodeData[]> {
+    const state = this.buildMentionState(args)
+    const projected = await this.invokeRegisteredAgent(
+      agentId,
+      state,
+      (s) => ({
+        traceId: s.traceId,
+        workspaceId: s.workspaceId,
+        userId: s.userId,
+        question: s.question,
+        roundNumber: s.roundNumber,
+        knowledgeEvidence: s.knowledgeEvidence,
+        contextPrompt: this.buildWorkspaceContextPrompt(s),
+        evidenceBlock: this.buildKnowledgePrompt(s)
+      }),
+      (result) => ({ generalNodes: (result.generalNodes as MacraNodeData[]) ?? [] })
+    )
+    return projected?.generalNodes ?? []
   }
-}
 
-// ============== Helper Functions ==============
-function extractUsageMetadata(response: unknown): Record<string, number> | undefined {
-  const raw = response as {
-    usage_metadata?: Record<string, unknown>
-    response_metadata?: {
-      tokenUsage?: Record<string, unknown>
-      usage?: Record<string, unknown>
-    }
-  }
+  /**
+   * Invoke the report-writer (Phase 6, 2026-05-04). Takes the full
+   * canvas seed (BMC + conflicts + insights), renders it into a
+   * markdown context block, and asks the agent to produce one
+   * 6-section structured long report (returned as a single
+   * MacraNodeData with type='report-card').
+   *
+   * Unlike BMC generators, this is a single-call no-tool path — the
+   * agent reads from the projected context, no ReAct loop, no
+   * reasoning_content roundtrip.
+   */
+  async invokeReportWriterForMention(args: {
+    traceId: string
+    workspaceId: string
+    userId: string
+    question: string
+    seed: typeof EMPTY_SEEDED_STATE
+    /** Synthesizer / general-responder / deep-research / opponent /
+     *  moderator outputs collected from the canvas. The report writer
+     *  cites these as `[[insight:nodeId]]` to attribute claims. */
+    insightNotes?: MacraNodeData[]
+    knowledgeEvidence?: KnowledgeEvidence[]
+  }): Promise<MacraNodeData | null> {
+    const state = this.buildMentionState(args)
 
-  const usage = raw?.usage_metadata ?? raw?.response_metadata?.tokenUsage ?? raw?.response_metadata?.usage
+    // ── Build the multi-section context block the agent consumes. ────
+    // Each section is clearly labeled so the LLM can attribute claims
+    // back to specific agents in the report (e.g. "synthesizer 跨维度洞察
+    // 指出 [[insight:xxx]] ...").
+    const allBmc = [...state.marketNodes, ...state.productNodes, ...state.financeNodes]
+    const bmcBlock = renderCompactBmcCardsForPrompt(allBmc)
 
-  if (!usage) return undefined
+    const conflictsBlock = state.conflicts.length === 0
+      ? ''
+      : '\n\n## Critic Agent 检测的冲突\n' +
+        state.conflicts
+          .map((c, i) => {
+            const cc = c as MacraNodeData & { severity?: string; conflictType?: string; relatedAgents?: string[] }
+            return `${i + 1}. **${cc.label ?? `冲突 ${i + 1}`}**` +
+              ` (severity=${cc.severity ?? 'high'}, type=${cc.conflictType ?? 'other'}, id=${c.id})\n   ${cc.content ?? ''}` +
+              (cc.relatedAgents?.length ? `\n   _涉及: ${cc.relatedAgents.join(' / ')}_` : '')
+          })
+          .join('\n\n')
 
-  const inputTokens = readNumber(usage, ['input_tokens', 'promptTokens', 'prompt_tokens']) ?? 0
-  const outputTokens = readNumber(usage, ['output_tokens', 'completionTokens', 'completion_tokens']) ?? 0
-  const totalTokens = readNumber(usage, ['total_tokens', 'totalTokens']) ?? inputTokens + outputTokens
+    // Insight notes (synthesizer / general-responder / deep-research /
+    // opponents / moderator). Group by agent_signature so the report
+    // can weave each agent's voice in with proper attribution.
+    const insights = args.insightNotes ?? []
+    const insightsBlock = insights.length === 0
+      ? ''
+      : '\n\n## 各 Agent 已产出的 Insight Notes（撰写时按 [[insight:nodeId]] 引用）\n' +
+        insights
+          .map((n) => {
+            const meta = (n.metadata ?? {}) as { agent_signature?: string; tags?: string[] }
+            const sig = meta.agent_signature ?? 'Unknown_Agent'
+            const tags = meta.tags?.length ? ` _[${meta.tags.join(', ')}]_` : ''
+            return `### [${sig}] ${n.label ?? n.id}${tags}\n（id=${n.id}）\n${n.content ?? ''}`
+          })
+          .join('\n\n')
 
-  return {
-    inputTokens,
-    outputTokens,
-    totalTokens
-  }
-}
+    // Cross-context (synthesizer's own structured cross-dim summary, if
+    // any was set in state by an earlier orchestrator round). Format
+    // as a structured block — empty when synthesizer hasn't run.
+    const cc = state.crossContext
+    const crossContextBlock = (cc && (cc.consistencySummary || cc.consistencyNotes))
+      ? '\n\n## Synthesizer 跨维度一致性分析\n' +
+        (cc.consistencySummary ? `**TL;DR**: ${cc.consistencySummary}\n\n` : '') +
+        (cc.consistencyNotes ? `**详细**:\n${cc.consistencyNotes}\n` : '') +
+        (cc.marketSummary ? `\n_Market 维度摘要_: ${cc.marketSummary}` : '') +
+        (cc.productSummary ? `\n_Product 维度摘要_: ${cc.productSummary}` : '') +
+        (cc.financeSummary ? `\n_Finance 维度摘要_: ${cc.financeSummary}` : '')
+      : ''
 
-function readNumber(source: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key]
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value
-    }
-  }
-  return undefined
-}
+    // Agent avatars carry the per-agent "I analyzed X, Y, Z" summary —
+    // good signal for the report's attribution. Compact rendering.
+    const avatarsBlock = state.agentAvatars.length === 0
+      ? ''
+      : '\n\n## Agent 自我陈述（Avatar）\n' +
+        state.agentAvatars
+          .map((a) => {
+            const sig = (a.metadata as { agent_signature?: string })?.agent_signature ?? a.id
+            return `- **[${sig}]**: ${a.content?.slice(0, 240) ?? ''}`
+          })
+          .join('\n')
 
-/**
- * Extract one balanced top-level JSON object substring starting at `start`
- * (which must point at `{`). Tracks string-state so braces inside string
- * literals don't trip the depth counter. Returns the substring including
- * outer braces, or null if no balanced object found before EOF.
- */
-function extractBalancedObject(src: string, start: number): string | null {
-  if (src[start] !== '{') return null
-  let depth = 0
-  let inString = false
-  let escape = false
-  for (let i = start; i < src.length; i++) {
-    const ch = src[i]
-    if (escape) { escape = false; continue }
-    if (ch === '\\') { escape = true; continue }
-    if (ch === '"') { inString = !inString; continue }
-    if (inString) continue
-    if (ch === '{') depth++
-    else if (ch === '}') {
-      depth--
-      if (depth === 0) return src.slice(start, i + 1)
-    }
-  }
-  return null
-}
+    const fullContext = bmcBlock + conflictsBlock + crossContextBlock + insightsBlock + avatarsBlock
 
-/**
- * Per-cell partial-recovery fallback. When the top-level JSON.parse fails
- * (a single malformed cell taints the whole array), this iterates the
- * cleaned source extracting balanced `{...}` blocks one at a time and
- * tries to parse each independently. Even one broken cell of three no
- * longer drops the entire batch — the surviving cells are returned.
- *
- * Without this, a single SyntaxError at position N inside cell 2 would
- * zero out cells 1, 2, AND 3 — a single point of failure for 3 BMC
- * dimensions. Observed on Notion + Coursera in N=12 evals where
- * market-agent's verbose JSON occasionally trips on Chinese punctuation.
- */
-function partialRecoveryParseObjects(
-  cleaned: string,
-  agentName: string
-): MacraNodeData[] {
-  const nodes: MacraNodeData[] = []
-  let cursor = cleaned.indexOf('{')
-  let attempts = 0
-  let recovered = 0
-  while (cursor !== -1 && attempts < 20) {
-    attempts++
-    const objStr = extractBalancedObject(cleaned, cursor)
-    if (!objStr) break
-    try {
-      const cleanedObj = objStr.replace(/,(\s*[}\]])/g, '$1')
-      const node = JSON.parse(cleanedObj) as MacraNodeData
-      // Lightweight shape check: must look like a cc-bmc-card cell
-      if (
-        node &&
-        typeof node === 'object' &&
-        typeof (node as { domain?: string }).domain === 'string' &&
-        typeof (node as { content?: string }).content === 'string'
-      ) {
-        nodes.push(node)
-        recovered++
+    let reportNode: MacraNodeData | null = null
+    await this.invokeRegisteredAgent(
+      'report-writer',
+      state,
+      (s) => ({
+        traceId: s.traceId,
+        workspaceId: s.workspaceId,
+        userId: s.userId,
+        question: s.question || '基于当前画布生成完整商业报告',
+        bmcContext: fullContext,
+        workspaceContext: this.buildWorkspaceContextPrompt(s),
+        knowledgeEvidence: s.knowledgeEvidence,
+      }),
+      (result) => {
+        reportNode = (result.reportNode as MacraNodeData | null) ?? null
+        return {} as Partial<BusinessStateType>
       }
-    } catch {
-      // skip this object, continue scanning
-    }
-    cursor = cleaned.indexOf('{', cursor + objStr.length)
-  }
-  if (recovered > 0) {
-    auditLogger.warn({
-      action: `business-langgraph.${agentName}.parseJSON.partial-recovery`,
-      metadata: { recovered, attempts }
-    })
-  }
-  return nodes
-}
-
-export function extractAndParseJSON(content: string, agentName: string): MacraNodeData[] {
-  try {
-    // 1. 移除 Markdown 代码块标记
-    let cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '')
-
-    // 2. 提取 JSON 数组
-    const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) {
-      auditLogger.error({
-        action: `business-langgraph.${agentName}.extractJSON`,
-        metadata: { error: 'No JSON array found', content: content.substring(0, 200) }
-      })
-      return []
-    }
-
-    let jsonStr = jsonMatch[0]
-
-    // 3. 清理常见的 JSON 格式问题
-    jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1')
-
-    // 4. 解析 JSON
-    const nodes = JSON.parse(jsonStr) as MacraNodeData[]
-
-    if (!Array.isArray(nodes) || nodes.length === 0) {
-      auditLogger.error({
-        action: `business-langgraph.${agentName}.parseJSON`,
-        metadata: { error: 'Parsed result is not a valid array', nodes }
-      })
-      return []
-    }
-
-    return nodes
-  } catch (error) {
-    // Per-cell partial recovery: don't lose ALL cells just because ONE has
-    // a syntax error somewhere in the JSON.
-    const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '')
-    const recovered = partialRecoveryParseObjects(cleanedContent, agentName)
-    if (recovered.length > 0) {
-      auditLogger.warn({
-        action: `business-langgraph.${agentName}.parseJSON.recovered`,
-        metadata: {
-          originalError: String(error),
-          recoveredCount: recovered.length,
-          errorType: error instanceof SyntaxError ? 'SyntaxError' : 'UnknownError'
-        }
-      })
-      return recovered
-    }
-    auditLogger.error({
-      action: `business-langgraph.${agentName}.parseJSON`,
-      metadata: {
-        error: String(error),
-        content: content.substring(0, 500),
-        errorType: error instanceof SyntaxError ? 'SyntaxError' : 'UnknownError'
-      }
-    })
-    return []
+    )
+    return reportNode
   }
 }
-
-export function normalizeDomainNodes(
-  nodes: MacraNodeData[],
-  options: {
-    allowedDomains: readonly CCBMCDomain[]
-    agentType: AgentType
-    round: number
-  }
-): MacraNodeData[] {
-  const byDomain = new Map<CCBMCDomain, MacraNodeData>()
-
-  for (const node of nodes) {
-    const domain = node.domain as CCBMCDomain | undefined
-    if (!domain || !options.allowedDomains.some((allowedDomain) => allowedDomain === domain)) continue
-    if (!byDomain.has(domain)) {
-      byDomain.set(domain, node)
-    }
-  }
-
-  const missing = options.allowedDomains.filter((d) => !byDomain.has(d))
-  if (missing.length > 0) {
-    auditLogger.warn({
-      action: 'business-langgraph.normalizeDomainNodes.missingDomains',
-      metadata: {
-        agentType: options.agentType,
-        round: options.round,
-        expected: options.allowedDomains,
-        produced: [...byDomain.keys()],
-        missing
-      }
-    })
-  }
-
-  return options.allowedDomains.flatMap((domain) => {
-    const node = byDomain.get(domain)
-    if (!node) return []
-
-    return [{
-      ...node,
-      id: buildDeterministicNodeId(options.agentType, domain),
-      type: 'cc-bmc-card' as const,
-      domain,
-      metadata: {
-        ...node.metadata,
-        agent_signature: options.agentType,
-        stage: options.round > 1 ? ('review' as const) : ('execution' as const),
-        tags: appendRoundTag(node.metadata?.tags ?? [], options.round)
-      }
-    }]
-  })
-}
-
-/**
- * Validate that a generated graph covers the full 9-dimension CC-BMC spec.
- * Used as an integration-level invariant check: if any dimension is absent
- * from agent output, the system should at minimum surface this as a
- * structural issue rather than silently accept an 8-dimension graph.
- *
- * Returns the list of missing dimensions (empty = complete).
- */
-export function validateNineBmcDimensions(nodes: MacraNodeData[]): CCBMCDomain[] {
-  const produced = new Set<CCBMCDomain>()
-  for (const node of nodes) {
-    const d = node.domain as CCBMCDomain | undefined
-    if (d) produced.add(d)
-  }
-  const allDomains = Object.values(CC_BMC_DOMAINS) as CCBMCDomain[]
-  return allDomains.filter((d) => !produced.has(d))
-}
-
-/**
- * Map a BMC dimension to the LangGraph node name of the agent that owns it.
- * Used by the supervisor's coverage gate to decide which agent to bring back
- * for a revision round when a dimension is structurally missing — so we
- * don't silently ship an 8-dim BMC just because no critic conflict happened
- * to mention the gap.
- */
-export function agentNodeForBmcDomain(domain: CCBMCDomain): string | null {
-  if ((MARKET_DOMAINS as readonly CCBMCDomain[]).includes(domain)) return 'marketAgent'
-  if ((PRODUCT_DOMAINS as readonly CCBMCDomain[]).includes(domain)) return 'productAgent'
-  if ((FINANCE_DOMAINS as readonly CCBMCDomain[]).includes(domain)) return 'financeAgent'
-  return null
-}
-
-export function buildDeterministicNodeId(agentType: AgentType, domain: CCBMCDomain) {
-  const agentPrefix: Record<AgentType, string> = {
-    [AGENT_TYPES.MARKET]: 'market',
-    [AGENT_TYPES.PRODUCT]: 'product',
-    [AGENT_TYPES.FINANCE]: 'finance',
-    [AGENT_TYPES.COMPLIANCE]: 'compliance',
-    [AGENT_TYPES.ORCHESTRATOR]: 'orchestrator',
-    [AGENT_TYPES.CRITIC]: 'critic'
-  }
-  const domainSuffix: Record<CCBMCDomain, string> = {
-    [CC_BMC_DOMAINS.CUSTOMER_SEGMENTS]: 'customer-segments',
-    [CC_BMC_DOMAINS.CHANNELS]: 'channels',
-    [CC_BMC_DOMAINS.CUSTOMER_RELATIONSHIPS]: 'customer-relationships',
-    [CC_BMC_DOMAINS.VALUE_PROPOSITIONS]: 'value-propositions',
-    [CC_BMC_DOMAINS.KEY_RESOURCES]: 'key-resources',
-    [CC_BMC_DOMAINS.KEY_ACTIVITIES]: 'key-activities',
-    [CC_BMC_DOMAINS.KEY_PARTNERSHIPS]: 'key-partnerships',
-    [CC_BMC_DOMAINS.REVENUE_STREAMS]: 'revenue-streams',
-    [CC_BMC_DOMAINS.COST_STRUCTURE]: 'cost-structure'
-  }
-
-  return `${agentPrefix[agentType]}-${domainSuffix[domain]}`
-}
-
-function appendRoundTag(tags: string[], round: number) {
-  if (round <= 1) return [...new Set(tags)]
-  return [...new Set([...tags, `round-${round}`])]
-}
-
-export function buildCompactBmcCardContext(node: MacraNodeData): BmcCompactCardContext {
-  const keyClaims = extractKeyClaims(node.content)
-  return {
-    id: node.id,
-    domain: node.domain as BmcCompactCardContext['domain'],
-    label: node.label,
-    agentSignature: node.metadata.agent_signature as BmcCompactCardContext['agentSignature'],
-    confidence: node.metadata.confidence,
-    keyClaims,
-    assumptions: findContextSignals(keyClaims, ['假设', '预计', '可能', '依赖', '如果']),
-    risks: findContextSignals(keyClaims, ['风险', '冲突', '不足', '不确定', '成本', '监管', '依赖']),
-    evidenceRefs: extractEvidenceRefs(node.metadata)
-  }
-}
-
-export function renderCompactBmcCardsForPrompt(nodes: MacraNodeData[]): string {
-  if (nodes.length === 0) return ''
-
-  return nodes
-    .map(buildCompactBmcCardContext)
-    .map((card) => {
-      const lines = [
-        `- **${card.domain ?? card.label}** (${card.agentSignature ?? 'unknown'}, confidence: ${card.confidence ?? 'unknown'})`
-      ]
-      for (const [index, claim] of card.keyClaims.entries()) {
-        lines.push(`  - claim ${index + 1}: ${claim}`)
-      }
-      if (card.assumptions.length > 0) {
-        lines.push(`  - assumptions: ${card.assumptions.join('；')}`)
-      }
-      if (card.risks.length > 0) {
-        lines.push(`  - risks: ${card.risks.join('；')}`)
-      }
-      if (card.evidenceRefs.length > 0) {
-        lines.push(`  - evidence: ${card.evidenceRefs.join(', ')}`)
-      }
-      return lines.join('\n')
-    })
-    .join('\n')
-}
-
-function extractKeyClaims(content: string): string[] {
-  const normalized = content
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/\[\[(?:ref:[^\]]+|no-ref)\]\]/g, '')
-    .replace(/[#*_`>]/g, '')
-    .replace(/\r/g, '\n')
-
-  const lineClaims = normalized
-    .split('\n')
-    .map(cleanClaim)
-    .filter(isUsefulClaim)
-
-  const claims = lineClaims.length > 0
-    ? lineClaims
-    : normalized
-        .split(/[。！？!?；;]/)
-        .map(cleanClaim)
-        .filter(isUsefulClaim)
-
-  return [...new Set(claims)].slice(0, MAX_CONTEXT_CLAIMS_PER_CARD)
-}
-
-function cleanClaim(value: string) {
-  return value
-    .replace(/^\s*[-+*•\d.、）)]+/, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function isUsefulClaim(value: string) {
-  return value.length >= 6 && !/^[-\s]+$/.test(value)
-}
-
-function findContextSignals(claims: string[], keywords: string[]) {
-  return claims
-    .filter((claim) => keywords.some((keyword) => claim.includes(keyword)))
-    .slice(0, 3)
-}
-
-function extractEvidenceRefs(metadata: MacraNodeData['metadata']) {
-  const citations = (metadata as { citations?: unknown }).citations
-  if (!Array.isArray(citations)) return []
-
-  const refs = new Set<string>()
-  for (const citation of citations) {
-    const citationRefs = (citation as { refs?: unknown }).refs
-    if (!Array.isArray(citationRefs)) continue
-    for (const ref of citationRefs) {
-      const evidenceRef = ref as { docId?: unknown; snippetId?: unknown }
-      if (typeof evidenceRef.docId === 'string' && typeof evidenceRef.snippetId === 'string') {
-        refs.add(`${evidenceRef.docId}#${evidenceRef.snippetId}`)
-      }
-    }
-  }
-
-  return [...refs].slice(0, 8)
-}
-
-function shouldReuseWorkspaceGraph(intent?: Intent['intent'] | null) {
-  return intent === 'general' || intent === 'analyze' || intent === 'detect_conflicts'
-}
-
-function hasUsableWorkspaceGraph(graph?: CanvasGraph) {
-  return Boolean(graph && graph.nodes.length > 0)
-}
-
-function hasSeededDomainNodes(state: SeededBusinessState) {
-  return state.marketNodes.length > 0
-    || state.productNodes.length > 0
-    || state.financeNodes.length > 0
-}
-
-function createBlankState(params: {
-  traceId: string
-  workspaceId: string
-  userId: string
-  question: string
-  contextPrompt?: string
-}): BusinessStateType {
-  return {
-    traceId: params.traceId,
-    workspaceId: params.workspaceId,
-    userId: params.userId,
-    question: params.question,
-    contextPrompt: params.contextPrompt ?? '',
-    intent: null,
-    roundNumber: 0,
-    supervisorDirective: null,
-    crossContext: EMPTY_CROSS_CONTEXT,
-    knowledgeEvidence: [],
-    generalNodes: [],
-    marketNodes: [],
-    productNodes: [],
-    financeNodes: [],
-    agentAvatars: [],
-    conflicts: [],
-    edges: []
-  }
-}
-
-function extractSeededStateFromGraph(graph: CanvasGraph): SeededBusinessState {
-  const seeded: SeededBusinessState = {
-    marketNodes: [],
-    productNodes: [],
-    financeNodes: [],
-    agentAvatars: [],
-    conflicts: [],
-    edges: graph.edges.map((edge) => ({ ...edge }))
-  }
-
-  for (const node of graph.nodes) {
-    const macraNode = extractMacraNodeFromCanvasNode(node)
-    if (!macraNode) continue
-
-    if (macraNode.type === 'agent-avatar') {
-      seeded.agentAvatars.push(macraNode)
-      continue
-    }
-
-    if (macraNode.type === 'conflict-alert') {
-      seeded.conflicts.push(macraNode as CriticConflict)
-      continue
-    }
-
-    const agentId = macraNode.metadata.agent_signature ?? macraNode.agentType
-    if (agentId === AGENT_TYPES.MARKET) {
-      seeded.marketNodes.push(macraNode)
-    } else if (agentId === AGENT_TYPES.PRODUCT) {
-      seeded.productNodes.push(macraNode)
-    } else if (agentId === AGENT_TYPES.FINANCE) {
-      seeded.financeNodes.push(macraNode)
-    }
-  }
-
-  return seeded
-}
-
-function extractMacraNodeFromCanvasNode(node: CanvasNode): MacraNodeData | null {
-  const data = (node.data ?? {}) as {
-    title?: string
-    content?: string
-    meta?: {
-      macraType?: MacraNodeData['type']
-      domain?: CCBMCDomain
-      agentType?: AgentType
-      severity?: MacraNodeData['severity']
-      conflictType?: MacraNodeData['conflictType']
-      isInteractive?: boolean
-      metadata?: MacraNodeData['metadata']
-    }
-  }
-  const meta = data.meta
-  if (!meta?.macraType) return null
-
-  return {
-    id: node.id,
-    type: meta.macraType,
-    label: typeof data.title === 'string' && data.title.trim() ? data.title : node.id,
-    content: typeof data.content === 'string' ? data.content : '',
-    domain: meta.domain,
-    metadata: meta.metadata ?? {},
-    agentType: meta.agentType,
-    severity: meta.severity,
-    conflictType: meta.conflictType,
-    isInteractive: meta.isInteractive
-  }
-}
-
-function createGeneralResponseNode(traceId: string, content: string, stage: SeminarPhase): MacraNodeData {
-  return {
-    id: `general-response-${traceId}`,
-    type: 'insight-note',
-    label: '综合回答',
-    content,
-    metadata: {
-      agent_signature: AGENT_TYPES.ORCHESTRATOR,
-      confidence: 'high',
-      stage
-    }
-  }
-}
-
-export function readModelText(response: unknown) {
-  if (typeof response === 'string') return response
-  const payload = response as { content?: unknown }
-  if (typeof payload?.content === 'string') return payload.content
-  if (Array.isArray(payload?.content)) {
-    return payload.content
-      .map((item) => {
-        if (typeof item === 'string') return item
-        if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') {
-          return item.text
-        }
-        return ''
-      })
-      .join('')
-      .trim()
-  }
-  return ''
-}
-
-function computeNextY(nodes: CanvasNode[]) {
-  const maxY = nodes.reduce((max, node) => Math.max(max, node.position?.y ?? ROOT_POSITION.y), ROOT_POSITION.y)
-  return maxY + NODE_SPACING
-}
-
-function cloneCanvasNode(node: CanvasNode): CanvasNode {
-  return {
-    ...node,
-    position: { ...node.position },
-    data: structuredClone(node.data)
-  }
-}
-
-export function createLLMModel(): BusinessModel | null {
-  const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || ''
-  if (!apiKey) {
-    auditLogger.warn({
-      action: 'business-langgraph.createLLMModel',
-      metadata: { message: 'No LLM_API_KEY or OPENAI_API_KEY found in environment' }
-    })
-    return null
-  }
-
-  const baseURL = process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || ''
-  const model = process.env.LANGGRAPH_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini'
-  const configuration = baseURL ? { baseURL } : undefined
-
-  return new ChatOpenAI({
-    apiKey,
-    model,
-    temperature: 0.3,
-    maxTokens: 40000,
-    configuration
-  })
-}
-
-const ROOT_POSITION = { x: 160, y: 160 }
-const NODE_SPACING = 220

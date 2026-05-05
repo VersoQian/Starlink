@@ -28,7 +28,13 @@ export const conversationSessionSchema = z.object({
   contextSnapshot: z.record(z.unknown()),
   createdAt: z.string(),
   updatedAt: z.string(),
-  completedAt: z.string().nullable()
+  completedAt: z.string().nullable(),
+  // P1: heartbeat-driven session lifecycle. heartbeatAt is updated every
+  // 30s by the gateway running the stream; failureReason is populated by
+  // the reaper when a stale row is recovered.
+  heartbeatAt: z.string().nullable().optional(),
+  ownerPid: z.string().nullable().optional(),
+  failureReason: z.string().nullable().optional()
 })
 
 export const conversationMessageSchema = z.object({

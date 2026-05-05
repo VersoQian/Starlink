@@ -103,8 +103,17 @@ const initTables = runtimeDdlEnabled ? pool.query(`
     completed_at TIMESTAMPTZ
   );
 
+  -- P1: heartbeat-driven session lifecycle (see migrations/009)
+  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS owner_pid TEXT;
+  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+
   CREATE INDEX IF NOT EXISTS idx_conversation_sessions_workspace_updated
     ON conversation_sessions (workspace_id, updated_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_conversation_sessions_running_heartbeat
+    ON conversation_sessions (heartbeat_at NULLS FIRST)
+    WHERE status = 'running';
 
   CREATE TABLE IF NOT EXISTS conversation_messages (
     id TEXT PRIMARY KEY,
@@ -248,6 +257,77 @@ export class ConversationMemoryStore {
   }
 
   /**
+   * Heartbeat update for an active stream. Called every 30s by the
+   * gateway process running the LangGraph stream. Stale rows (no
+   * heartbeat in >90s) are detected by listStaleSessions() and
+   * marked failed by the reaper script.
+   */
+  async touchHeartbeat(conversationId: string, ownerPid: string): Promise<void> {
+    await this.ensureTables()
+    await pool.query(
+      `UPDATE conversation_sessions
+         SET heartbeat_at = now(), owner_pid = $2, updated_at = now()
+       WHERE id = $1 AND status = 'running'`,
+      [conversationId, ownerPid]
+    )
+  }
+
+  /**
+   * Find sessions whose heartbeat is older than the given interval.
+   * Returns sessions in 'running' status with stale or missing heartbeat.
+   *
+   * Used by:
+   *   - session-reaper.ts (cron) — marks them 'failed' with reason='heartbeat-lost'
+   *   - findActiveSession() — to decide whether a 'running' row should
+   *     block a new conversation
+   *
+   * graceMs: how long after creation before a heartbeat is required
+   * (covers the gap between createSession and the first touchHeartbeat).
+   */
+  async listStaleSessions(opts?: {
+    olderThanMs?: number
+    graceMs?: number
+    limit?: number
+  }): Promise<ConversationSession[]> {
+    await this.ensureTables()
+    const olderThanMs = opts?.olderThanMs ?? 90_000
+    const graceMs = opts?.graceMs ?? 60_000
+    const limit = clampLimit(opts?.limit ?? 50, 1, 500)
+    const result = await pool.query(
+      `SELECT * FROM conversation_sessions
+        WHERE status = 'running'
+          AND created_at < now() - ($2 || ' milliseconds')::interval
+          AND (
+            heartbeat_at IS NULL
+            OR heartbeat_at < now() - ($1 || ' milliseconds')::interval
+          )
+        ORDER BY updated_at ASC
+        LIMIT $3`,
+      [olderThanMs, graceMs, limit]
+    )
+    return result.rows.map(rowToSession)
+  }
+
+  /**
+   * Mark a session as failed with a specific reason. Used by the reaper
+   * to bulk-recover crashed-gateway sessions; also exposed via GraphQL
+   * for explicit user-driven cancel.
+   */
+  async failSession(conversationId: string, reason: string): Promise<void> {
+    await this.ensureTables()
+    await pool.query(
+      `UPDATE conversation_sessions
+         SET status = 'failed',
+             failure_reason = $2,
+             completed_at = now(),
+             updated_at = now()
+       WHERE id = $1
+         AND status = 'running'`,
+      [conversationId, reason]
+    )
+  }
+
+  /**
    * Find a single in-flight conversation in the given workspace, if any.
    *
    * Used by the workspace soft-lock (DEC-5) at conversation-store.startConversation
@@ -255,19 +335,44 @@ export class ConversationMemoryStore {
    * (which races on memory_items writes + canvas mutations).
    *
    * Returns the most recently updated 'running' session, or null when the
-   * workspace is idle. Stale 'running' rows from crashed processes still
-   * count as active here — operator must manually mark them failed:
-   *   UPDATE conversation_sessions SET status='failed' WHERE id='...';
-   * Auto-staleness recovery is intentionally deferred (separate decision).
+   * workspace is idle. Heartbeat-aware: rows whose heartbeat is older
+   * than 90s (or NULL after the 60s grace window from createSession)
+   * are treated as crashed gateway leftovers and ignored — the reaper
+   * will eventually mark them 'failed'.
+   *
+   * userId: optional filter for "find an active session OWNED BY this
+   * user" (multi-tenant safety — a user shouldn't be blocked by another
+   * user's stream in the same workspace).
    */
-  async findActiveSession(workspaceId: string): Promise<ConversationSession | null> {
+  async findActiveSession(
+    workspaceId: string,
+    options?: { userId?: string }
+  ): Promise<ConversationSession | null> {
     await this.ensureTables()
+    const userId = options?.userId
+    const params: unknown[] = [workspaceId]
+    let userFilter = ''
+    if (userId) {
+      params.push(userId)
+      userFilter = ` AND user_id = $${params.length}`
+    }
     const result = await pool.query(
       `SELECT * FROM conversation_sessions
-       WHERE workspace_id = $1 AND status = 'running'
-       ORDER BY updated_at DESC
-       LIMIT 1`,
-      [workspaceId]
+        WHERE workspace_id = $1
+          AND status = 'running'
+          ${userFilter}
+          AND (
+            -- Fresh heartbeat: still considered active
+            heartbeat_at > now() - INTERVAL '90 seconds'
+            OR (
+              -- Within grace window after creation, no heartbeat yet
+              heartbeat_at IS NULL
+              AND created_at > now() - INTERVAL '60 seconds'
+            )
+          )
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      params
     )
     return result.rowCount ? rowToSession(result.rows[0]) : null
   }
@@ -744,7 +849,10 @@ function rowToSession(row: Record<string, unknown>): ConversationSession {
     contextSnapshot: parseJsonRecord(row.context_snapshot),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
-    completedAt: row.completed_at ? toIso(row.completed_at) : null
+    completedAt: row.completed_at ? toIso(row.completed_at) : null,
+    heartbeatAt: row.heartbeat_at ? toIso(row.heartbeat_at) : null,
+    ownerPid: (row.owner_pid as string | undefined) ?? null,
+    failureReason: (row.failure_reason as string | undefined) ?? null
   })
 }
 
