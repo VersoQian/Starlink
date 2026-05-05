@@ -31,7 +31,8 @@ export class WorkspaceContextBuilder {
         : Promise.resolve([]),
       this.memoryStore.searchMemories(input.workspaceId, input.query, 8),
       input.kbId
-        ? searchKnowledgeBase(input.workspaceId, input.kbId, input.query, 5)
+        ? // F1 · pass userId so private KBs are owner-restricted
+          searchKnowledgeBase(input.workspaceId, input.kbId, input.query, 5, input.userId)
         : Promise.resolve([])
     ])
 

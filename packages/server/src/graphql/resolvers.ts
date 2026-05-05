@@ -23,7 +23,8 @@ import {
   importKnowledgeUrl,
   listKnowledgeBases,
   publishKnowledgeBase,
-  searchKnowledgeBase
+  searchKnowledgeBase,
+  updateKnowledgeBaseVisibility
 } from '../services/kb-task-service.js'
 import { pubsub, FLOW_EXECUTION_PROGRESS, publishExecutionEvent } from './subscriptions.js'
 import {
@@ -269,7 +270,16 @@ export const resolvers = {
     ) => {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
-        const results = await searchKnowledgeBase(args.workspaceId, args.kbId, args.query, args.topK ?? 5)
+        // F1 · pass ctx.userId so private KBs are restricted to their
+        // owner; workspace KBs require workspaceId match (already ensured
+        // above via assertWorkspaceAccess); global KBs always pass.
+        const results = await searchKnowledgeBase(
+          args.workspaceId,
+          args.kbId,
+          args.query,
+          args.topK ?? 5,
+          ctx.userId
+        )
         return results.map((result) => ({
           docId: result.docId,
           snippet: result.snippet,
@@ -613,16 +623,62 @@ export const resolvers = {
         await ctx.conversationStore.connectNodes(args.workspaceId, ctx.userId, args.input)
       ))
     },
-    createKnowledgeBase: async (_: unknown, args: { workspaceId: string }, ctx: GraphQLContext) => {
+    createKnowledgeBase: async (
+      _: unknown,
+      args: { workspaceId: string; name?: string | null; visibility?: string | null },
+      ctx: GraphQLContext
+    ) => {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.write')
-        return await createKnowledgeBase(args.workspaceId)
+        // F1 · sanitize visibility — only accept the 3 known values; any
+        // other input falls back to 'workspace' (the safe default).
+        let visibility: 'private' | 'workspace' | 'global' = 'workspace'
+        if (args.visibility === 'private' || args.visibility === 'workspace' || args.visibility === 'global') {
+          visibility = args.visibility
+        }
+        return await createKnowledgeBase(args.workspaceId, {
+          name: args.name ?? undefined,
+          ownerUserId: ctx.userId,
+          visibility
+        })
       })
     },
     publishKnowledgeBase: async (_: unknown, args: { workspaceId: string; kbId: string }, ctx: GraphQLContext) => {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.publish')
         return await publishKnowledgeBase(args.workspaceId, args.kbId)
+      })
+    },
+    /**
+     * F1 · Update a KB's visibility. Only the owner may invoke (enforced
+     * inside updateKnowledgeBaseVisibility — throws FORBIDDEN otherwise).
+     * Cascades to kb_chunks so vector search RLS + WHERE filters reflect
+     * the new state immediately.
+     */
+    updateKnowledgeBaseVisibility: async (
+      _: unknown,
+      args: { kbId: string; visibility: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('updateKnowledgeBaseVisibility: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        if (args.visibility !== 'private' && args.visibility !== 'workspace' && args.visibility !== 'global') {
+          throw new GraphQLError(
+            `updateKnowledgeBaseVisibility: invalid visibility "${args.visibility}"; must be private | workspace | global`,
+            { extensions: { code: 'BAD_USER_INPUT' } }
+          )
+        }
+        const updated = await updateKnowledgeBaseVisibility(args.kbId, args.visibility, ctx.userId)
+        if (!updated) {
+          throw new GraphQLError('updateKnowledgeBaseVisibility: KB not found', {
+            extensions: { code: 'NOT_FOUND' }
+          })
+        }
+        return updated
       })
     },
     addKnowledgeSeed: async (_: unknown, args: { workspaceId: string; kbId: string; text: string }, ctx: GraphQLContext) => {

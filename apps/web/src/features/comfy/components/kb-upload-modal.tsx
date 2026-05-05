@@ -28,9 +28,9 @@ const KB_LIST = /* GraphQL */ `
 `
 
 const KB_CREATE = /* GraphQL */ `
-  mutation KbCreate($workspaceId: ID!) {
-    createKnowledgeBase(workspaceId: $workspaceId) {
-      id workspaceId name description status sourceCount
+  mutation KbCreate($workspaceId: ID!, $visibility: String) {
+    createKnowledgeBase(workspaceId: $workspaceId, visibility: $visibility) {
+      id workspaceId name description status sourceCount visibility
     }
   }
 `
@@ -98,16 +98,25 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
     setActiveKbId(kbs[0].id)
   }, [open, kbs, activeKbId])
 
+  // F1 · KB visibility selector. Defaults to 'workspace' (legacy
+  // behaviour: shared with all members). Users uploading personal
+  // documents can pick 'private' so other workspace members can't
+  // search those chunks even when they share the workspace.
+  const [newKbVisibility, setNewKbVisibility] = useState<'private' | 'workspace' | 'global'>('workspace')
+
   const createMutation = useMutation({
     mutationFn: async () => {
       const client = getGraphQLClient()
-      const r = await client.request<{ createKnowledgeBase: KnowledgeBase }>(KB_CREATE, { workspaceId })
+      const r = await client.request<{ createKnowledgeBase: KnowledgeBase }>(KB_CREATE, {
+        workspaceId,
+        visibility: newKbVisibility
+      })
       return r.createKnowledgeBase
     },
     onSuccess: (kb) => {
       void qc.invalidateQueries({ queryKey: ['kbList', workspaceId] })
       setActiveKbId(kb.id)
-      setSubmitNote(`已创建知识库 ${kb.id.slice(0, 8)}…`)
+      setSubmitNote(`已创建知识库 ${kb.id.slice(0, 8)}… · ${newKbVisibility === 'private' ? '私人' : newKbVisibility === 'global' ? '全局' : '工作区'}`)
     },
   })
 
@@ -203,17 +212,34 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
                     </span>
                   </button>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => createMutation.mutate()}
-                  disabled={createMutation.isPending}
-                  className="flex items-center gap-1.5 rounded-lg border border-dashed border-stratum-line bg-white px-3 py-2 text-stratum-muted hover:border-stratum-blue/40 hover:text-stratum-blue transition-colors disabled:opacity-50"
-                >
-                  <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  <span className="font-body text-[12px] font-medium">
-                    {createMutation.isPending ? '创建中…' : '新建知识库'}
-                  </span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* F1 · Visibility selector — drives whether the new KB
+                      is private to the caller, shared with the workspace,
+                      or globally visible. Default 'workspace' matches the
+                      legacy behaviour pre-isolation. */}
+                  <select
+                    value={newKbVisibility}
+                    onChange={(e) => setNewKbVisibility(e.target.value as 'private' | 'workspace' | 'global')}
+                    className="rounded-lg border border-stratum-line bg-white px-2 py-2 font-body text-[11px] text-stratum-ink focus:border-stratum-blue focus:outline-none"
+                    disabled={createMutation.isPending}
+                    aria-label="新建知识库的可见性"
+                  >
+                    <option value="private">🔒 私人 · 只我可搜</option>
+                    <option value="workspace">👥 工作区 · 所有成员可搜</option>
+                    <option value="global">🌐 全局 · 所有用户可搜</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => createMutation.mutate()}
+                    disabled={createMutation.isPending}
+                    className="flex items-center gap-1.5 rounded-lg border border-dashed border-stratum-line bg-white px-3 py-2 text-stratum-muted hover:border-stratum-blue/40 hover:text-stratum-blue transition-colors disabled:opacity-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    <span className="font-body text-[12px] font-medium">
+                      {createMutation.isPending ? '创建中…' : '新建知识库'}
+                    </span>
+                  </button>
+                </div>
               </div>
             )}
           </section>

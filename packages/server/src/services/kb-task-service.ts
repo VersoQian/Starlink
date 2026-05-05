@@ -34,7 +34,13 @@ export type GatewayKnowledgeBase = {
   createdAt: KnowledgeBase['createdAt']
   updatedAt: KnowledgeBase['updatedAt']
   publishedAt?: KnowledgeBase['publishedAt']
+  /** F1 · Owner user id (NULL for legacy KBs created before isolation). */
+  ownerUserId?: string | null
+  /** F1 · 'private' | 'workspace' | 'global'. Defaults to 'workspace'. */
+  visibility: 'private' | 'workspace' | 'global'
 }
+
+export type KbVisibility = 'private' | 'workspace' | 'global'
 
 export type GatewayKbTask = {
   id: KnowledgeTask['id']
@@ -64,8 +70,16 @@ const KB_DEFINITIONS_DDL = `
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     published_at TIMESTAMPTZ
   );
+
+  -- F1 · per-user visibility (see migrations/010)
+  ALTER TABLE kb_definitions
+    ADD COLUMN IF NOT EXISTS owner_user_id TEXT,
+    ADD COLUMN IF NOT EXISTS visibility    TEXT;
+
   CREATE INDEX IF NOT EXISTS idx_kb_definitions_workspace_id
     ON kb_definitions(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_kb_definitions_owner_visibility
+    ON kb_definitions(owner_user_id, visibility);
 `
 
 let kbDefDdlPromise: Promise<void> | null = null
@@ -85,6 +99,11 @@ function ensureKbDefinitionsTable(): Promise<void> {
 }
 
 function rowToKb(row: Record<string, unknown>): GatewayKnowledgeBase {
+  const rawVisibility = row.visibility as string | undefined
+  const visibility: KbVisibility =
+    rawVisibility === 'private' || rawVisibility === 'global'
+      ? rawVisibility
+      : 'workspace'
   return {
     id: row.id as string,
     workspaceId: row.workspace_id as string,
@@ -94,7 +113,9 @@ function rowToKb(row: Record<string, unknown>): GatewayKnowledgeBase {
     updatedAt: new Date(row.updated_at as string).toISOString(),
     publishedAt: row.published_at
       ? new Date(row.published_at as string).toISOString()
-      : null
+      : null,
+    ownerUserId: (row.owner_user_id as string | undefined) ?? null,
+    visibility
   }
 }
 
@@ -124,18 +145,80 @@ export async function listKnowledgeBases(
 
 export async function createKnowledgeBase(
   workspaceId: string,
-  options: { name?: string } = {}
+  options: {
+    name?: string
+    /** F1 · Owner user id; required for non-legacy creation. */
+    ownerUserId?: string
+    /** F1 · Visibility (private | workspace | global); default 'workspace'. */
+    visibility?: KbVisibility
+  } = {}
 ): Promise<GatewayKnowledgeBase> {
   await ensureKbDefinitionsTable()
   const id = nanoid()
   const name = options.name ?? `kb-${id.slice(0, 6)}`
+  const ownerUserId = options.ownerUserId ?? '__legacy__'
+  const visibility: KbVisibility = options.visibility ?? 'workspace'
   const result = await pool.query(
-    `INSERT INTO kb_definitions (id, workspace_id, name, status, created_at, updated_at)
-     VALUES ($1, $2, $3, 'draft', now(), now())
+    `INSERT INTO kb_definitions (id, workspace_id, name, status, owner_user_id, visibility, created_at, updated_at)
+     VALUES ($1, $2, $3, 'draft', $4, $5, now(), now())
      RETURNING *`,
-    [id, workspaceId, name]
+    [id, workspaceId, name, ownerUserId, visibility]
   )
   return rowToKb(result.rows[0])
+}
+
+/**
+ * F1 · Update a KB's visibility. Authorization: caller must own the
+ * KB (owner_user_id match). Cascades the new visibility into the
+ * denormalised columns on kb_chunks so vector search WHERE filters
+ * stay consistent.
+ */
+export async function updateKnowledgeBaseVisibility(
+  kbId: string,
+  newVisibility: KbVisibility,
+  callerUserId: string
+): Promise<GatewayKnowledgeBase | null> {
+  await ensureKbDefinitionsTable()
+  const existing = await pool.query(
+    `SELECT * FROM kb_definitions WHERE id = $1 LIMIT 1`,
+    [kbId]
+  )
+  if (existing.rowCount === 0) return null
+  const row = existing.rows[0] as Record<string, unknown>
+  if (row.owner_user_id && row.owner_user_id !== '__legacy__' && row.owner_user_id !== callerUserId) {
+    throw new Error('FORBIDDEN: only the KB owner can change visibility')
+  }
+  // Update in a transaction so kb_definitions + kb_chunks stay aligned.
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(
+      `UPDATE kb_definitions
+          SET visibility = $2,
+              owner_user_id = COALESCE(NULLIF(owner_user_id, '__legacy__'), $3),
+              updated_at = now()
+        WHERE id = $1`,
+      [kbId, newVisibility, callerUserId]
+    )
+    await client.query(
+      `UPDATE kb_chunks
+          SET visibility = $2,
+              owner_user_id = COALESCE(NULLIF(owner_user_id, '__legacy__'), $3)
+        WHERE kb_id = $1`,
+      [kbId, newVisibility, callerUserId]
+    )
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+  const after = await pool.query(
+    `SELECT * FROM kb_definitions WHERE id = $1`,
+    [kbId]
+  )
+  return rowToKb(after.rows[0])
 }
 
 export async function publishKnowledgeBase(
@@ -306,10 +389,25 @@ export async function searchKnowledgeBase(
   workspaceId: string,
   kbId: string,
   query: string,
-  topK = 5
+  topK = 5,
+  /**
+   * F1 · Caller user id for visibility filtering. When provided,
+   * private chunks are restricted to those owned by this user;
+   * workspace chunks restricted to the matching workspaceId; global
+   * chunks always visible.
+   *
+   * Optional for backward compatibility — internal/admin callers
+   * (legacy paths) that don't have a user identity skip the filter
+   * and get the legacy "all chunks for kbId" behaviour. Production
+   * GraphQL resolvers should always pass it.
+   */
+  callerUserId?: string
 ): Promise<KnowledgeSearchResult[]> {
   try {
-    const results = await getKbStore().searchChunks(kbId, query, topK)
+    const results = await getKbStore().searchChunks(kbId, query, topK, {
+      callerUserId,
+      callerWorkspaceId: workspaceId
+    })
     if (results.length === 0) {
       auditLogger.info({
         action: 'kb-task-service.searchKnowledgeBase.empty',

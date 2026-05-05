@@ -202,6 +202,18 @@ export const typeDefs = gql`
     createdAt: String!
     updatedAt: String!
     publishedAt: String
+    """
+    F1 · Owner user id. NULL for legacy KBs created before per-user
+    visibility was wired (such rows behave as workspace-shared).
+    """
+    ownerUserId: ID
+    """
+    F1 · Access scope:
+      - 'private'   only the owner can search this KB
+      - 'workspace' any workspace member can search (default)
+      - 'global'    every authenticated user across all workspaces
+    """
+    visibility: String!
   }
 
   type KbTask {
@@ -500,8 +512,20 @@ export const typeDefs = gql`
     correctMemoryItem(input: CorrectMemoryItemInput!): MemoryItem!
     addNode(workspaceId: ID!, input: NodeInput!): CanvasNode!
     connectNodes(workspaceId: ID!, input: EdgeInput!): CanvasEdge!
-    createKnowledgeBase(workspaceId: ID!): KnowledgeBase!
+    """
+    Create a new KB. F1 · Visibility defaults to 'workspace' (shared
+    with all workspace members). Pass 'private' for personal documents
+    only the caller should see, 'global' for curated cross-workspace
+    knowledge (admin-only by convention).
+    """
+    createKnowledgeBase(workspaceId: ID!, name: String, visibility: String): KnowledgeBase!
     publishKnowledgeBase(workspaceId: ID!, kbId: ID!): KnowledgeBase!
+    """
+    F1 · Change a KB's visibility. Only the KB owner may invoke this.
+    Cascades the new visibility into kb_chunks so vector search RLS
+    + WHERE filters stay aligned.
+    """
+    updateKnowledgeBaseVisibility(kbId: ID!, visibility: String!): KnowledgeBase!
     addKnowledgeSeed(workspaceId: ID!, kbId: ID!, text: String!): KbTask!
     importKnowledgeUrl(workspaceId: ID!, kbId: ID!, url: String!): KbTask!
     saveCommunityPost(input: CommunityPostInput!): WorkspaceAsset!

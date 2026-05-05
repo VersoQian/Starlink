@@ -269,6 +269,18 @@ export class KbStore {
       // here matches the "replace all chunks" semantics callers expect.
       await client.query('DELETE FROM kb_chunks WHERE doc_id = $1', [docId])
 
+      // F1 · Resolve owner + visibility from parent kb_definitions so
+      // chunk-level columns stay denormalised in sync with KB ownership.
+      // RLS on kb_chunks reads these columns directly. If the parent KB
+      // doesn't exist yet (rare), fall back to '__legacy__' / 'workspace'
+      // so the row remains queryable for cleanup.
+      const kbDefRow = await client.query(
+        `SELECT owner_user_id, visibility FROM kb_definitions WHERE id = $1 LIMIT 1`,
+        [input.kbId]
+      )
+      const ownerUserId = (kbDefRow.rows[0]?.owner_user_id as string | undefined) ?? '__legacy__'
+      const visibility = (kbDefRow.rows[0]?.visibility as string | undefined) ?? 'workspace'
+
       // Embed each chunk. We embed sequentially rather than in parallel —
       // most embedding providers rate-limit at ~3000 RPM, and a typical
       // document fits in 1-20 chunks; sequential is simpler and well within
@@ -279,9 +291,10 @@ export class KbStore {
         await client.query(
           `INSERT INTO kb_chunks (
              id, kb_id, doc_id, chunk_index, content,
-             embedding, metadata, created_at
+             embedding, metadata, created_at,
+             workspace_id, owner_user_id, visibility
            )
-           VALUES ($1, $2, $3, $4, $5, $6::vector, $7::jsonb, now())`,
+           VALUES ($1, $2, $3, $4, $5, $6::vector, $7::jsonb, now(), $8, $9, $10)`,
           [
             nanoid(),
             input.kbId,
@@ -294,7 +307,10 @@ export class KbStore {
               embeddingModel: embedding.model,
               chunkIndex: i,
               ...(input.metadata ?? {})
-            })
+            }),
+            input.workspaceId,
+            ownerUserId,
+            visibility
           ]
         )
       }
@@ -318,7 +334,19 @@ export class KbStore {
   async searchChunks(
     kbId: string,
     query: string,
-    topK = 5
+    topK = 5,
+    /**
+     * F1 · Optional visibility filter applied at the SQL layer in
+     * addition to RLS. Pass userId + workspaceId so the application
+     * matches RLS policy on private chunks (only owner sees) without
+     * relying on RLS context being set (which requires withUserContext
+     * — not all callers wrap their query). Belt-and-suspenders.
+     *
+     * When omitted, the chunk list is unfiltered beyond kb_id (legacy
+     * behaviour); RLS still applies if the connection has
+     * app.current_user_id set.
+     */
+    options: { callerUserId?: string; callerWorkspaceId?: string } = {}
   ): Promise<KnowledgeSearchResult[]> {
     await this.ensureTables()
     const trimmed = query.trim()
@@ -326,6 +354,29 @@ export class KbStore {
 
     const embedding = await embedText(trimmed)
     const limit = Math.max(1, Math.min(50, Math.floor(topK)))
+
+    // Build visibility filter:
+    //   - 'global' → always visible
+    //   - 'workspace' → must match callerWorkspaceId (when provided)
+    //   - 'private' → must match callerUserId (when provided)
+    // When neither caller hint is provided, return all chunks for the
+    // kb_id (callers without identity context are typically internal
+    // admin/migration paths).
+    const params: unknown[] = [kbId, toPgVector(embedding.vector)]
+    let visibilityFilter = ''
+    if (options.callerUserId || options.callerWorkspaceId) {
+      const clauses: string[] = ["visibility = 'global'"]
+      if (options.callerWorkspaceId) {
+        params.push(options.callerWorkspaceId)
+        clauses.push(`(visibility = 'workspace' AND workspace_id = $${params.length})`)
+      }
+      if (options.callerUserId) {
+        params.push(options.callerUserId)
+        clauses.push(`(visibility = 'private' AND owner_user_id = $${params.length})`)
+      }
+      visibilityFilter = ` AND (${clauses.join(' OR ')})`
+    }
+    params.push(limit)
 
     // Cosine distance: lower is closer; 1 - distance ≈ similarity.
     const result = await pool.query(
@@ -335,10 +386,10 @@ export class KbStore {
               embedding <=> $2::vector AS distance,
               metadata
        FROM kb_chunks
-       WHERE kb_id = $1 AND embedding IS NOT NULL
+       WHERE kb_id = $1 AND embedding IS NOT NULL${visibilityFilter}
        ORDER BY embedding <=> $2::vector ASC
-       LIMIT $3`,
-      [kbId, toPgVector(embedding.vector), limit]
+       LIMIT $${params.length}`,
+      params
     )
 
     return (result.rows as Array<Record<string, unknown>>).map((row) => ({
