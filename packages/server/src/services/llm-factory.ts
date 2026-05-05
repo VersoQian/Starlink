@@ -72,6 +72,23 @@ function readFamilyConfig(family: ModelFamily): FamilyConfig | null {
   }
 }
 
+/** DeepSeek V4 family — supports `thinking.type` + `reasoning_effort`
+ * extra params (passed through OpenAI-compatible body via modelKwargs).
+ * Detected by name prefix; fallback for older deepseek-chat / -reasoner
+ * does NOT inject these (they reject unknown fields). */
+function isDeepSeekThinkingModel(model: string): boolean {
+  const m = model.toLowerCase()
+  return m.startsWith('deepseek-v4') || m.includes('-thinking')
+}
+
+function buildModelKwargs(model: string): Record<string, unknown> | undefined {
+  if (!isDeepSeekThinkingModel(model)) return undefined
+  return {
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high',
+  }
+}
+
 export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
   const family = detectFamily(profile.model)
   const cfg = readFamilyConfig(family)
@@ -83,6 +100,7 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
     return null
   }
   const configuration = cfg.baseURL ? { baseURL: cfg.baseURL } : undefined
+  const modelKwargs = buildModelKwargs(profile.model)
   auditLogger.info({
     action: 'llm-factory.created',
     metadata: {
@@ -90,7 +108,8 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
       model: profile.model,
       family,
       source: cfg.source,
-      hasBaseURL: Boolean(cfg.baseURL)
+      hasBaseURL: Boolean(cfg.baseURL),
+      hasThinking: Boolean(modelKwargs)
     }
   })
 
@@ -99,6 +118,7 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
     model: profile.model,
     temperature: profile.temperature,
     maxTokens: profile.max_tokens,
-    configuration
+    configuration,
+    ...(modelKwargs ? { modelKwargs } : {})
   })
 }

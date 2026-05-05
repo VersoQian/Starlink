@@ -22,12 +22,32 @@ const FALLBACK_LOG_EVERY = 100
  * KB search quality. Returns the configured mode for callers that want
  * to surface it elsewhere (e.g. /health response).
  */
+/**
+ * Explicit override: `EMBEDDING_PROVIDER=local-hash` (or `=disabled` / `=none`)
+ * forces local-hash mode without any remote attempt. Set this when the
+ * configured chat endpoint (e.g. DeepSeek `/beta`) doesn't host an
+ * embeddings route — otherwise every KB chunk floods the log with
+ * "Embedding API failed: 404 Not Found" before the fallback.
+ */
+function isLocalHashForced(): boolean {
+  const v = (process.env.EMBEDDING_PROVIDER ?? '').trim().toLowerCase()
+  return v === 'local-hash' || v === 'local' || v === 'disabled' || v === 'none'
+}
+
 export function describeEmbeddingConfig(): {
   mode: 'remote' | 'local-hash'
   baseUrl: string | null
   model: string | null
   warning: string | null
 } {
+  if (isLocalHashForced()) {
+    return {
+      mode: 'local-hash',
+      baseUrl: null,
+      model: null,
+      warning: null
+    }
+  }
   const apiKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY
   if (!apiKey) {
     return {
@@ -58,7 +78,7 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
   const dimensions = getEmbeddingDimensions()
   const apiKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY
 
-  if (apiKey && normalizedText) {
+  if (apiKey && normalizedText && !isLocalHashForced()) {
     try {
       return await embedRemote(normalizedText, apiKey, dimensions)
     } catch (error) {

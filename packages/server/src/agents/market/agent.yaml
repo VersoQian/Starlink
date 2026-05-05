@@ -5,6 +5,12 @@ name: Market Agent
 role: generator
 language: zh-CN
 model: deepseek-chat
+# Note (2026-05-04): switched off v4-pro for now. v4-pro thinking mode
+# requires reasoning_content roundtrip across multi-turn calls, which
+# LangChain's createReactAgent ReAct loop doesn't preserve — second
+# LLM call hits "400 reasoning_content must be passed back". chat
+# model has no thinking, no roundtrip requirement. BMC structured
+# extraction works fine without thinking.
 temperature: 0.3
 max_tokens: 8000
 timeout_ms: 60000

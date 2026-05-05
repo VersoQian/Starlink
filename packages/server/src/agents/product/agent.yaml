@@ -5,6 +5,8 @@ name: Product Agent
 role: generator
 language: zh-CN
 model: deepseek-chat
+# See market/agent.yaml comment — same reasoning_content roundtrip
+# constraint applies to all ReAct generators.
 temperature: 0.3
 max_tokens: 8000
 timeout_ms: 60000

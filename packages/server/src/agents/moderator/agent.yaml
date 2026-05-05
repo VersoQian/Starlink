@@ -4,7 +4,7 @@ id: moderator
 name: Debate Moderator
 role: meta
 language: zh-CN
-model: deepseek-chat
+model: deepseek-v4-pro
 temperature: 0.2
 max_tokens: 1200
 timeout_ms: 30000

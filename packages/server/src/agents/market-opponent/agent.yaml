@@ -4,14 +4,17 @@ id: market-opponent
 name: Market Opponent
 role: advisor
 language: zh-CN
-model: deepseek-chat
+model: deepseek-v4-pro
 temperature: 0.5
 max_tokens: 1000
 timeout_ms: 30000
 retries: 1
 cacheable: false
 tools:
+  - web-search
   - knowledge-base
+  - memory-search
+  - url-fetch
 knowledge_bases: []
 capabilities:
   - { kind: critique, mode: devils-advocate }

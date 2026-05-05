@@ -28,6 +28,7 @@ import {
   conversationMetadataSchema
 } from '@starlink/shared'
 import { BusinessLangGraphService, type BusinessStreamUpdate, type GraphDelta } from '../services/business-langgraph.js'
+import { MentionRouter, type MentionResult } from '../services/mention-router.js'
 import type { ConversationEventBus, ConversationEventFilter } from './conversation-event-bus.js'
 import type {
   ConversationRecord,
@@ -46,6 +47,7 @@ import { ConversationMemoryStore, type AppendMessageInput, type UpsertMemoryInpu
 export { WorkspaceLockError } from './workspace-lock-error.js'
 import { WorkspaceLockError } from './workspace-lock-error.js'
 import { HitlApprovalStore } from './hitl-approval-store.js'
+import { parseHitlDecision } from './hitl-resume.js'
 import { WorkspaceContextBuilder } from './workspace-context-builder.js'
 import { applyGraphDelta } from './graph-delta.js'
 import { BmcFlowAdapter } from '../engine/bmc-flow-adapter.js'
@@ -103,6 +105,7 @@ export class ConversationStore {
   private readonly memoryStore: ConversationMemoryStore
   private readonly contextBuilder: WorkspaceContextBuilder
   private readonly businessLangGraphService: BusinessLangGraphService
+  private readonly mentionRouter: MentionRouter
   private readonly bmcFlowAdapter: BmcFlowAdapter | null
   private readonly toolRegistry: ToolRegistry | null
   private readonly bmcFlowRuntime: BmcFlowRuntime
@@ -135,6 +138,7 @@ export class ConversationStore {
     this.eventBus = eventBus
     this.runtimeRepository = runtimeRepository
     this.businessLangGraphService = businessLangGraphService
+    this.mentionRouter = new MentionRouter(businessLangGraphService)
     this.toolRegistry = toolRegistry ?? null
     this.bmcFlowAdapter = bmcFlowAdapter ?? (toolRegistry ? new BmcFlowAdapter(toolRegistry) : null)
     this.bmcFlowRuntime = bmcFlowRuntime
@@ -628,6 +632,77 @@ export class ConversationStore {
     return asset
   }
 
+  /**
+   * @-mention agent (2026-05-04). Reads the current canvas snapshot, calls
+   * MentionRouter.mention to get a single-shot agent response, then writes
+   * any appended nodes/edges to the workspace graph and returns the result.
+   *
+   * Permission: workspace.write (the mention may add canvas nodes).
+   * Refusals (e.g. critic without BMC) DO NOT mutate the canvas — the
+   * MentionResult is returned with refused=true and an explanation.
+   */
+  async mentionAgent(
+    workspaceId: string,
+    userId: string,
+    input: { agentId: string; message: string; conversationId?: string }
+  ): Promise<MentionResult> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
+    const baseGraph = await this.getGraph(workspaceId)
+    const result = await this.mentionRouter.mention({
+      workspaceId,
+      userId,
+      conversationId: input.conversationId,
+      agentId: input.agentId,
+      message: input.message,
+      canvasNodes: baseGraph.nodes,
+      canvasEdges: baseGraph.edges,
+      knowledgeEvidence: []
+    })
+
+    if (!result.refused && (result.appendedNodes.length > 0 || result.appendedEdges.length > 0)) {
+      const newNodeIds = new Set(result.appendedNodes.map((n) => n.id))
+      const newEdgeIds = new Set(result.appendedEdges.map((e) => e.id))
+      const newNodes: CanvasNode[] = result.appendedNodes.map((n) =>
+        canvasNodeSchema.parse({
+          id: n.id,
+          type: n.type,
+          position: n.position,
+          data: n.data
+        })
+      )
+      const newEdges: CanvasEdge[] = result.appendedEdges.map((e) =>
+        canvasEdgeSchema.parse({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          label: e.label ?? null
+        })
+      )
+      const updatedGraph: CanvasGraph = {
+        workspaceId,
+        nodes: [...baseGraph.nodes.filter((n) => !newNodeIds.has(n.id)), ...newNodes],
+        edges: [...baseGraph.edges.filter((e) => !newEdgeIds.has(e.id)), ...newEdges]
+      }
+      await this.graphStore.setWorkspaceGraph(workspaceId, updatedGraph)
+      await this.graphStore.persistGraph(updatedGraph)
+
+      const conversations = await this.sessionStore.getConversationsByWorkspace(workspaceId)
+      for (const item of conversations) {
+        const nextRecord: ConversationRecord = {
+          ...item.record,
+          graph: {
+            ...item.record.graph,
+            nodes: updatedGraph.nodes,
+            edges: updatedGraph.edges
+          }
+        }
+        await this.sessionStore.updateConversation(item.id, nextRecord)
+      }
+    }
+
+    return result
+  }
+
   async addNode(
     workspaceId: string,
     userId: string,
@@ -941,6 +1016,26 @@ export class ConversationStore {
               decision: update.decision,
               record
             })
+
+            // Phase 2.6 · parse the human's decision and stash a directive
+            // for the next supervisor revision round. The supervisor consumes
+            // and clears the entry; this is the link between the GraphQL
+            // mutation and the LangGraph node.
+            //
+            // `conversationId === traceId` in this app (see conversation
+            // creation site that passes `traceId: id`).
+            const directive = parseHitlDecision(userDecision)
+            if (directive.kind === 'invalid') {
+              console.warn(
+                '[conversation-store] HITL decision parse failed; falling back to auto-revision',
+                { conversationId, reason: directive.reason }
+              )
+            } else {
+              this.businessLangGraphService.setHitlResumeDirective(
+                conversationId,
+                directive
+              )
+            }
 
             record.metadata = {
               ...record.metadata,

@@ -59,10 +59,30 @@ const agentsDir = join(here, '..')
 
 const profileGetters = new Map<AgentId, ReturnType<typeof makeProfileGetter>>()
 
+/**
+ * Map an `AgentId` to its on-disk yaml directory. Most ids match dir 1:1
+ * (e.g. `market-opponent` → `agents/market-opponent/`), but the four
+ * core BMC agents declare ids with an `-agent` suffix while their dirs
+ * don't (e.g. id `market-agent` lives in `agents/market/`). Strip the
+ * suffix only for those four — leaving `*-opponent` / `moderator` /
+ * `synthesizer` / `general-responder` / `deep-research` untouched.
+ */
+function speakerToYamlDir(agentId: AgentId): string {
+  if (
+    agentId === 'market-agent' ||
+    agentId === 'product-agent' ||
+    agentId === 'finance-agent' ||
+    agentId === 'critic-agent'
+  ) {
+    return agentId.replace(/-agent$/, '')
+  }
+  return agentId
+}
+
 function getProfileFor(agentId: AgentId): ReturnType<typeof makeProfileGetter> {
   let g = profileGetters.get(agentId)
   if (!g) {
-    const path = join(agentsDir, agentId, 'agent.yaml')
+    const path = join(agentsDir, speakerToYamlDir(agentId), 'agent.yaml')
     g = makeProfileGetter(path)
     profileGetters.set(agentId, g)
   }
@@ -162,6 +182,11 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
         dimension: params.dimension
       })
       const response = await this.client.chat({
+        // Pin the speaker's profile model. Without this LLMClient falls
+        // through to LLM_MODEL → gpt-4o-mini, which DeepSeek's /beta
+        // endpoint rejects with "supported names are deepseek-v4-pro
+        // or deepseek-v4-flash".
+        model: profile.model,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user }
@@ -234,6 +259,9 @@ export class LlmDebateInvoker implements DebateAgentInvoker {
         turns: params.turns
       })
       const response = await this.client.chat({
+        // Same as nextTurn — pin moderator's profile model so DeepSeek
+        // doesn't see gpt-4o-mini.
+        model: profile.model,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user }
