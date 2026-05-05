@@ -216,6 +216,21 @@ export const typeDefs = gql`
     visibility: String!
   }
 
+  type KbAgentBinding {
+    id: ID!
+    workspaceId: ID!
+    kbId: ID!
+    agentId: String!
+    boundByUserId: ID!
+    createdAt: String!
+    """
+    When true, the agent auto-searches this KB on every invocation
+    (top-3 chunks per query). When false, the binding is "available"
+    but the agent only pulls when explicitly directed by a tool call.
+    """
+    autoSearch: Boolean!
+  }
+
   type KbTask {
     id: ID!
     workspaceId: ID!
@@ -437,6 +452,11 @@ export const typeDefs = gql`
     workspaceContextSnapshot(workspaceId: ID!, conversationId: ID, query: String!, kbId: ID): WorkspaceContextSnapshot!
     kbTaskStatus(workspaceId: ID!, kbId: ID!): [KbTaskStatus!]!
     knowledgeBases(workspaceId: ID!): [KnowledgeBase!]!
+    """
+    F4 · List agents bound to a specific KB in a workspace. UI uses
+    this to show "this KB is wired to N agents" + bind/unbind buttons.
+    """
+    knowledgeBaseAgentBindings(workspaceId: ID!, kbId: ID!): [KbAgentBinding!]!
     knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!
     knowledgeBaseSearch(workspaceId: ID!, kbId: ID!, query: String!, topK: Int): [KnowledgeEvidence!]!
     workspaces: [WorkspaceDirectoryItem!]!
@@ -526,8 +546,53 @@ export const typeDefs = gql`
     + WHERE filters stay aligned.
     """
     updateKnowledgeBaseVisibility(kbId: ID!, visibility: String!): KnowledgeBase!
+
+    """
+    F4 · Bind a KB to an agent so the agent auto-searches it on every
+    invocation. Idempotent: re-binding the same (workspace, kb, agent)
+    triple just updates auto_search.
+
+    Authorization: caller needs workspace.write; for 'private' KBs
+    additionally must be the KB owner. Returns the binding row.
+    """
+    bindKbToAgent(
+      workspaceId: ID!
+      kbId: ID!
+      agentId: String!
+      autoSearch: Boolean
+    ): KbAgentBinding!
+
+    """
+    F4 · Remove a KB ↔ agent binding. Returns true when a row was
+    deleted, false when the binding didn't exist (no-op).
+    """
+    unbindKbFromAgent(
+      workspaceId: ID!
+      kbId: ID!
+      agentId: String!
+    ): Boolean!
     addKnowledgeSeed(workspaceId: ID!, kbId: ID!, text: String!): KbTask!
     importKnowledgeUrl(workspaceId: ID!, kbId: ID!, url: String!): KbTask!
+    """
+    F4 · In-process file import. Replaces the broken kb-proxy route that
+    expected an external task service at port 4001.
+
+    Frontend reads the file via FileReader.readAsText() and posts the
+    contents directly. Supported content-types: text/plain, text/markdown,
+    text/html, application/json. PDF is NOT supported (requires pdf-parse
+    install — see kb-extractor.ts PDF_INSTALL_HINT).
+
+    The fileName becomes the document title; content is chunked + embedded
+    via the same KbStore.addDocument pipeline used by addKnowledgeSeed,
+    so visibility / RLS / agent-binding propagate naturally.
+    """
+    addKnowledgeFile(
+      workspaceId: ID!
+      kbId: ID!
+      fileName: String!
+      contentType: String!
+      content: String!
+    ): KbTask!
     saveCommunityPost(input: CommunityPostInput!): WorkspaceAsset!
     savePracticeSession(input: SavePracticeSessionInput!): WorkspaceAsset!
     updateWorkspaceMetadata(input: UpdateWorkspaceMetadataInput!): WorkspaceDirectoryItem!

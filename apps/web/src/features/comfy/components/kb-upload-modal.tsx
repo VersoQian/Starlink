@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { listAgents } from '../registries/agent-registry'
 import { Database, FileText, Globe, Pencil, Plus, Sparkles, Upload, X } from 'lucide-react'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 
@@ -40,6 +41,48 @@ const KB_ADD_SEED = /* GraphQL */ `
     addKnowledgeSeed(workspaceId: $workspaceId, kbId: $kbId, text: $text) {
       id status
     }
+  }
+`
+
+const KB_ADD_FILE = /* GraphQL */ `
+  mutation KbAddFile(
+    $workspaceId: ID!
+    $kbId: ID!
+    $fileName: String!
+    $contentType: String!
+    $content: String!
+  ) {
+    addKnowledgeFile(
+      workspaceId: $workspaceId
+      kbId: $kbId
+      fileName: $fileName
+      contentType: $contentType
+      content: $content
+    ) {
+      id status payload error
+    }
+  }
+`
+
+const KB_LIST_BINDINGS = /* GraphQL */ `
+  query KbAgentBindings($workspaceId: ID!, $kbId: ID!) {
+    knowledgeBaseAgentBindings(workspaceId: $workspaceId, kbId: $kbId) {
+      id agentId autoSearch createdAt
+    }
+  }
+`
+
+const KB_BIND_AGENT = /* GraphQL */ `
+  mutation KbBindAgent($workspaceId: ID!, $kbId: ID!, $agentId: String!, $autoSearch: Boolean) {
+    bindKbToAgent(workspaceId: $workspaceId, kbId: $kbId, agentId: $agentId, autoSearch: $autoSearch) {
+      id agentId autoSearch
+    }
+  }
+`
+
+const KB_UNBIND_AGENT = /* GraphQL */ `
+  mutation KbUnbindAgent($workspaceId: ID!, $kbId: ID!, $agentId: String!) {
+    unbindKbFromAgent(workspaceId: $workspaceId, kbId: $kbId, agentId: $agentId)
   }
 `
 
@@ -77,6 +120,11 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
   const [sourceTab, setSourceTab] = useState<SourceTab>('text')
   const [textInput, setTextInput] = useState('')
   const [urlInput, setUrlInput] = useState('')
+  // F4 · file import state. selectedFile is the File object from the
+  // <input type="file"> change handler; cleared after successful submit
+  // so users can upload the next file without manually re-clicking the
+  // dropzone.
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [submittingSource, setSubmittingSource] = useState(false)
   const [submitNote, setSubmitNote] = useState<string | null>(null)
 
@@ -93,9 +141,21 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
 
   // Auto-select most-recent or first KB on open
   useEffect(() => {
-    if (!open) return
-    if (activeKbId || !kbs || kbs.length === 0) return
-    setActiveKbId(kbs[0].id)
+    if (!open) {
+      // Reset transient state on close so reopening with a different
+      // workspace doesn't auto-select a stale KB.
+      setSelectedFile(null)
+      setSubmitNote(null)
+      return
+    }
+    // If currently selected KB no longer exists in the loaded list
+    // (e.g. workspace switched), drop it.
+    if (activeKbId && kbs && !kbs.some((k) => k.id === activeKbId)) {
+      setActiveKbId(null)
+    }
+    if (!activeKbId && kbs && kbs.length > 0) {
+      setActiveKbId(kbs[0].id)
+    }
   }, [open, kbs, activeKbId])
 
   // F1 · KB visibility selector. Defaults to 'workspace' (legacy
@@ -137,7 +197,42 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
         setUrlInput('')
         setSubmitNote('URL 已提交抓取，agent 后台分析中…')
       } else if (sourceTab === 'file') {
-        setSubmitNote('文件上传需要 KB task service (port 4001) — 当前未运行；先用文本/URL 替代')
+        if (!selectedFile) throw new Error('请先选择一个文件')
+        // 5 MiB cap matches the server-side guard in addKnowledgeFile
+        // resolver. Larger files should be split client-side.
+        if (selectedFile.size > 5 * 1024 * 1024) {
+          throw new Error(`文件过大（${(selectedFile.size / 1024 / 1024).toFixed(2)} MiB），上限 5 MiB`)
+        }
+        // Reject PDF early — extractor doesn't support them yet (the
+        // pdf-parse dep is not installed). Other binary formats fail
+        // gracefully via best-effort plaintext extraction.
+        const fileName = selectedFile.name
+        const lower = fileName.toLowerCase()
+        if (lower.endsWith('.pdf') || selectedFile.type === 'application/pdf') {
+          throw new Error('PDF 暂不支持；请先转成 .md / .txt / .html 后上传')
+        }
+        // FileReader.readAsText handles utf-8 by default — sufficient
+        // for txt / md / html / json / csv / log etc.
+        const text = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+          reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'))
+          reader.readAsText(selectedFile)
+        })
+        const contentType = selectedFile.type
+          || (lower.endsWith('.md') ? 'text/markdown'
+              : lower.endsWith('.html') || lower.endsWith('.htm') ? 'text/html'
+              : lower.endsWith('.json') ? 'application/json'
+              : 'text/plain')
+        await client.request(KB_ADD_FILE, {
+          workspaceId,
+          kbId: activeKbId,
+          fileName,
+          contentType,
+          content: text
+        })
+        setSelectedFile(null)
+        setSubmitNote(`✓ ${fileName} 已入库（${(text.length / 1024).toFixed(1)} KB），后台 chunk + embed 中…`)
       }
       void qc.invalidateQueries({ queryKey: ['kbList', workspaceId] })
     } catch (err) {
@@ -146,7 +241,7 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
     } finally {
       setSubmittingSource(false)
     }
-  }, [activeKbId, submittingSource, sourceTab, textInput, urlInput, workspaceId, qc])
+  }, [activeKbId, submittingSource, sourceTab, textInput, urlInput, selectedFile, workspaceId, qc])
 
   if (!open) return null
 
@@ -295,12 +390,53 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
               ) : null}
 
               {sourceTab === 'file' ? (
-                <div className="rounded-lg border-2 border-dashed border-stratum-line bg-stratum-surface-low p-6 text-center">
-                  <Upload className="h-6 w-6 text-stratum-blue/40 mx-auto mb-2" strokeWidth={1.5} />
-                  <p className="font-body text-[12px] text-stratum-muted leading-relaxed">
-                    需要 KB task service (port 4001) 启动。<br />
-                    暂用左侧「文本笔记」或「导入 URL」替代。
-                  </p>
+                <div>
+                  <label
+                    htmlFor="kb-file-input"
+                    className="block rounded-lg border-2 border-dashed border-stratum-line bg-stratum-surface-low p-6 text-center cursor-pointer hover:border-stratum-blue/60 transition-colors"
+                  >
+                    <Upload className="h-6 w-6 text-stratum-blue/60 mx-auto mb-2" strokeWidth={1.5} />
+                    {selectedFile ? (
+                      <p className="font-body text-[12px] text-stratum-navy font-semibold">
+                        ✓ {selectedFile.name}
+                        <span className="block mt-0.5 font-mono text-[10px] tabular-nums text-stratum-muted">
+                          {(selectedFile.size / 1024).toFixed(1)} KB · {selectedFile.type || '未知类型'}
+                        </span>
+                      </p>
+                    ) : (
+                      <>
+                        <p className="font-body text-[12px] text-stratum-muted leading-relaxed">
+                          点击或拖拽文件到此处<br />
+                          支持 .txt / .md / .html / .json（≤ 5 MiB）
+                        </p>
+                        <p className="mt-2 font-body text-[10px] text-stratum-muted">
+                          ⚠ PDF 暂不支持，请先转成 .md / .txt
+                        </p>
+                      </>
+                    )}
+                  </label>
+                  <input
+                    id="kb-file-input"
+                    type="file"
+                    accept=".txt,.md,.markdown,.html,.htm,.json,.csv,.log,text/*,application/json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null
+                      setSelectedFile(f)
+                      // Reset input so the same file can be re-selected
+                      // after a failure.
+                      e.target.value = ''
+                    }}
+                  />
+                  {selectedFile ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFile(null)}
+                      className="mt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-stratum-muted hover:text-stratum-danger"
+                    >
+                      清除选择
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -312,6 +448,13 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
                 >
                   {submitNote}
                 </p>
+              ) : null}
+
+              {/* F4 · Agent binding panel — at the bottom of the source
+                  section so users can assign the active KB to one or more
+                  agents (e.g. "researcher always pulls from market-trends KB"). */}
+              {activeKbId ? (
+                <KbAgentBindingPanel workspaceId={workspaceId} kbId={activeKbId} />
               ) : null}
             </section>
           ) : (
@@ -328,7 +471,13 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
           <button
             type="button"
             onClick={handleSubmitSource}
-            disabled={!activeKbId || submittingSource || sourceTab === 'file'}
+            disabled={
+              !activeKbId
+              || submittingSource
+              || (sourceTab === 'file' && !selectedFile)
+              || (sourceTab === 'text' && !textInput.trim())
+              || (sourceTab === 'url' && !urlInput.trim())
+            }
             className="rounded-full border border-stratum-line bg-white px-4 py-2 font-body text-[11px] font-semibold text-stratum-navy hover:border-stratum-blue/40 hover:text-stratum-blue transition-colors disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submittingSource ? '提交中…' : '添加到 KB'}
@@ -391,5 +540,158 @@ function SourceTabBtn({
       <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
       {label}
     </button>
+  )
+}
+
+// ============================================================================
+// F4 · Agent binding panel
+// ============================================================================
+
+interface KbAgentBindingRow {
+  id: string
+  agentId: string
+  autoSearch: boolean
+  createdAt: string
+}
+
+function KbAgentBindingPanel({ workspaceId, kbId }: { workspaceId: string; kbId: string }) {
+  const qc = useQueryClient()
+  const { data: bindings, isLoading } = useQuery({
+    queryKey: ['kbBindings', workspaceId, kbId],
+    queryFn: async () => {
+      const client = getGraphQLClient()
+      const r = await client.request<{ knowledgeBaseAgentBindings: KbAgentBindingRow[] }>(
+        KB_LIST_BINDINGS,
+        { workspaceId, kbId }
+      )
+      return r.knowledgeBaseAgentBindings
+    }
+  })
+
+  const [pickerAgent, setPickerAgent] = useState<string>('')
+  const [autoSearch, setAutoSearch] = useState(true)
+
+  const bindMutation = useMutation({
+    mutationFn: async () => {
+      if (!pickerAgent) return
+      const client = getGraphQLClient()
+      await client.request(KB_BIND_AGENT, {
+        workspaceId,
+        kbId,
+        agentId: pickerAgent,
+        autoSearch
+      })
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['kbBindings', workspaceId, kbId] })
+      setPickerAgent('')
+    }
+  })
+
+  const unbindMutation = useMutation({
+    mutationFn: async (agentId: string) => {
+      const client = getGraphQLClient()
+      await client.request(KB_UNBIND_AGENT, { workspaceId, kbId, agentId })
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['kbBindings', workspaceId, kbId] })
+    }
+  })
+
+  const allAgents = listAgents()
+  const boundAgentIds = new Set(bindings?.map((b) => b.agentId) ?? [])
+  const availableAgents = allAgents.filter((a) => !boundAgentIds.has(a.id))
+
+  return (
+    <div className="mt-4 pt-3 border-t border-stratum-line">
+      <div className="flex items-baseline justify-between mb-2">
+        <p className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-muted">
+          AGENT 绑定 · 让 agent 自动检索此 KB
+        </p>
+        {bindings && bindings.length > 0 ? (
+          <span className="font-mono text-[9px] tabular-nums text-stratum-muted">
+            已绑 {bindings.length}
+          </span>
+        ) : null}
+      </div>
+
+      {isLoading ? (
+        <p className="font-body text-[11px] text-stratum-muted py-1">加载中…</p>
+      ) : bindings && bindings.length > 0 ? (
+        <ul className="space-y-1 mb-3">
+          {bindings.map((b) => {
+            const agent = allAgents.find((a) => a.id === b.agentId)
+            return (
+              <li key={b.id} className="flex items-center justify-between gap-2 rounded-lg bg-stratum-surface-low/50 px-3 py-1.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-stratum-navy shrink-0">
+                    {agent?.glyph ?? '?'}
+                  </span>
+                  <span className="font-body text-[12px] font-medium text-stratum-ink truncate">
+                    {agent?.displayName ?? b.agentId}
+                  </span>
+                  {b.autoSearch ? (
+                    <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-stratum-blue">
+                      AUTO
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-stratum-muted">
+                      OPT-IN
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => unbindMutation.mutate(b.agentId)}
+                  disabled={unbindMutation.isPending}
+                  className="font-mono text-[9px] uppercase tracking-[0.14em] text-stratum-muted hover:text-stratum-danger transition-colors disabled:opacity-40"
+                >
+                  解除
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <p className="font-body text-[11px] text-stratum-muted italic py-1">
+          还未绑定任何 agent。绑定后该 agent 每次被调用都会自动检索此 KB。
+        </p>
+      )}
+
+      {availableAgents.length > 0 ? (
+        <div className="flex items-center gap-2">
+          <select
+            value={pickerAgent}
+            onChange={(e) => setPickerAgent(e.target.value)}
+            disabled={bindMutation.isPending}
+            className="flex-1 rounded-lg border border-stratum-line bg-white px-2 py-1.5 font-body text-[11px] text-stratum-ink focus:border-stratum-blue focus:outline-none"
+          >
+            <option value="">选择要绑定的 agent…</option>
+            {availableAgents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.displayName} · {a.shortDescription.slice(0, 30)}
+              </option>
+            ))}
+          </select>
+          <label className="flex items-center gap-1 font-body text-[10px] text-stratum-muted whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={autoSearch}
+              onChange={(e) => setAutoSearch(e.target.checked)}
+              className="h-3 w-3"
+            />
+            自动检索
+          </label>
+          <button
+            type="button"
+            onClick={() => bindMutation.mutate()}
+            disabled={!pickerAgent || bindMutation.isPending}
+            className="rounded-lg bg-stratum-navy px-3 py-1.5 font-body text-[11px] font-semibold text-white hover:bg-stratum-navy-soft transition-colors disabled:opacity-40"
+          >
+            {bindMutation.isPending ? '绑定中…' : '绑定'}
+          </button>
+        </div>
+      ) : null}
+    </div>
   )
 }

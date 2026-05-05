@@ -167,6 +167,183 @@ export async function createKnowledgeBase(
   return rowToKb(result.rows[0])
 }
 
+// =============================================================================
+// F4 · Agent ↔ KB binding
+// =============================================================================
+
+const KB_AGENT_BINDINGS_DDL = `
+  CREATE TABLE IF NOT EXISTS kb_agent_bindings (
+    id              TEXT PRIMARY KEY,
+    workspace_id    TEXT NOT NULL,
+    kb_id           TEXT NOT NULL,
+    agent_id        TEXT NOT NULL,
+    bound_by_user_id TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    auto_search     BOOLEAN NOT NULL DEFAULT true
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS uniq_kb_agent_bindings_kb_agent_workspace
+    ON kb_agent_bindings (workspace_id, kb_id, agent_id);
+  CREATE INDEX IF NOT EXISTS idx_kb_agent_bindings_agent_workspace
+    ON kb_agent_bindings (agent_id, workspace_id)
+    WHERE auto_search = true;
+  CREATE INDEX IF NOT EXISTS idx_kb_agent_bindings_kb
+    ON kb_agent_bindings (kb_id);
+`
+
+let kbAgentBindingsDdlPromise: Promise<void> | null = null
+function ensureKbAgentBindingsTable(): Promise<void> {
+  if (!kbAgentBindingsDdlPromise) {
+    kbAgentBindingsDdlPromise = pool
+      .query(KB_AGENT_BINDINGS_DDL)
+      .then(
+        () => undefined,
+        (err: unknown) => {
+          kbAgentBindingsDdlPromise = null
+          throw err
+        }
+      )
+  }
+  return kbAgentBindingsDdlPromise as Promise<void>
+}
+
+export type KbAgentBinding = {
+  id: string
+  workspaceId: string
+  kbId: string
+  agentId: string
+  boundByUserId: string
+  createdAt: string
+  autoSearch: boolean
+}
+
+function rowToBinding(row: Record<string, unknown>): KbAgentBinding {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    kbId: row.kb_id as string,
+    agentId: row.agent_id as string,
+    boundByUserId: row.bound_by_user_id as string,
+    createdAt: new Date(row.created_at as string).toISOString(),
+    autoSearch: Boolean(row.auto_search)
+  }
+}
+
+/**
+ * F4 · Bind a KB to an agent in a workspace. Idempotent: re-binding
+ * the same (workspace, kb, agent) tuple updates auto_search but
+ * doesn't error.
+ *
+ * Authorization: caller must have workspace.write AND must own the
+ * KB (owner_user_id check) OR be a workspace admin. Resolver enforces
+ * the workspace.write side; this function only checks KB ownership.
+ */
+export async function bindKbToAgent(args: {
+  workspaceId: string
+  kbId: string
+  agentId: string
+  boundByUserId: string
+  autoSearch?: boolean
+}): Promise<KbAgentBinding> {
+  await ensureKbDefinitionsTable()
+  await ensureKbAgentBindingsTable()
+
+  // Verify KB exists in the workspace and caller is allowed to bind.
+  // For 'private' KBs, only owner; for 'workspace'/'global' KBs any
+  // workspace member with write access (already enforced upstream).
+  const kbRow = await pool.query(
+    `SELECT * FROM kb_definitions WHERE id = $1 AND workspace_id = $2 LIMIT 1`,
+    [args.kbId, args.workspaceId]
+  )
+  if (kbRow.rowCount === 0) {
+    throw new Error(`KB ${args.kbId} not found in workspace ${args.workspaceId}`)
+  }
+  const kb = kbRow.rows[0] as Record<string, unknown>
+  if (
+    kb.visibility === 'private'
+    && kb.owner_user_id
+    && kb.owner_user_id !== '__legacy__'
+    && kb.owner_user_id !== args.boundByUserId
+  ) {
+    throw new Error(`FORBIDDEN: only owner can bind a private KB`)
+  }
+
+  const id = nanoid()
+  const result = await pool.query(
+    `INSERT INTO kb_agent_bindings (id, workspace_id, kb_id, agent_id, bound_by_user_id, auto_search, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, now())
+     ON CONFLICT (workspace_id, kb_id, agent_id) DO UPDATE SET
+       auto_search = EXCLUDED.auto_search,
+       bound_by_user_id = COALESCE(kb_agent_bindings.bound_by_user_id, EXCLUDED.bound_by_user_id)
+     RETURNING *`,
+    [id, args.workspaceId, args.kbId, args.agentId, args.boundByUserId, args.autoSearch ?? true]
+  )
+  auditLogger.info({
+    action: 'kb-task-service.bindKbToAgent.completed',
+    workflowId: args.workspaceId,
+    userId: args.boundByUserId,
+    metadata: { kbId: args.kbId, agentId: args.agentId, autoSearch: args.autoSearch ?? true }
+  })
+  return rowToBinding(result.rows[0])
+}
+
+/**
+ * F4 · Remove an agent ↔ KB binding. No-op when not bound. Returns
+ * true when a row was removed.
+ */
+export async function unbindKbFromAgent(args: {
+  workspaceId: string
+  kbId: string
+  agentId: string
+}): Promise<boolean> {
+  await ensureKbAgentBindingsTable()
+  const result = await pool.query(
+    `DELETE FROM kb_agent_bindings
+      WHERE workspace_id = $1 AND kb_id = $2 AND agent_id = $3`,
+    [args.workspaceId, args.kbId, args.agentId]
+  )
+  return (result.rowCount ?? 0) > 0
+}
+
+/**
+ * F4 · List bindings for an agent in a workspace. Used at runtime
+ * by business-langgraph to decide which KBs to auto-search before
+ * invoking the agent.
+ */
+export async function listKbBindingsForAgent(
+  workspaceId: string,
+  agentId: string,
+  options: { onlyAutoSearch?: boolean } = {}
+): Promise<KbAgentBinding[]> {
+  await ensureKbAgentBindingsTable()
+  const filters = ['workspace_id = $1', 'agent_id = $2']
+  if (options.onlyAutoSearch) filters.push('auto_search = true')
+  const result = await pool.query(
+    `SELECT * FROM kb_agent_bindings
+      WHERE ${filters.join(' AND ')}
+      ORDER BY created_at DESC`,
+    [workspaceId, agentId]
+  )
+  return result.rows.map(rowToBinding)
+}
+
+/**
+ * F4 · List bindings for a KB. Used by the KB management UI to show
+ * "this KB is wired to agents [A, B, C]".
+ */
+export async function listAgentBindingsForKb(
+  workspaceId: string,
+  kbId: string
+): Promise<KbAgentBinding[]> {
+  await ensureKbAgentBindingsTable()
+  const result = await pool.query(
+    `SELECT * FROM kb_agent_bindings
+      WHERE workspace_id = $1 AND kb_id = $2
+      ORDER BY agent_id ASC`,
+    [workspaceId, kbId]
+  )
+  return result.rows.map(rowToBinding)
+}
+
 /**
  * F1 · Update a KB's visibility. Authorization: caller must own the
  * KB (owner_user_id match). Cascades the new visibility into the
@@ -250,6 +427,77 @@ export async function publishKnowledgeBase(
  * in this implementation; if KbStore embedding fails, status='failed'
  * with the error message.
  */
+/**
+ * F4 · In-process file import. Frontend reads the file via FileReader,
+ * passes content + contentType + fileName here, and we route through
+ * the same addDocument pipeline as addKnowledgeSeed. The KbStore's
+ * extractor handles plaintext / markdown / html / json natively;
+ * PDFs throw with an actionable error message.
+ *
+ * The fileName becomes the doc title (truncated to 200 chars to keep
+ * UI columns sane). Metadata records the original content-type so a
+ * future re-extraction (e.g. PDF support added later) can re-process
+ * stored bytes.
+ */
+export async function addKnowledgeFile(
+  workspaceId: string,
+  kbId: string,
+  fileName: string,
+  contentType: string,
+  content: string
+): Promise<GatewayKbTask> {
+  const taskId = nanoid()
+  const now = new Date().toISOString()
+  const title = (fileName || `file-${taskId.slice(0, 6)}`).slice(0, 200)
+  try {
+    if (!content.trim()) {
+      throw new Error('addKnowledgeFile: empty content')
+    }
+    const { docId, chunkCount } = await getKbStore().addDocument({
+      kbId,
+      workspaceId,
+      title,
+      content,
+      contentType,
+      metadata: { kind: 'file', originalFileName: fileName }
+    })
+    auditLogger.info({
+      action: 'kb-task-service.addKnowledgeFile.completed',
+      workflowId: workspaceId,
+      metadata: { kbId, taskId, docId, chunkCount, fileName, contentType }
+    })
+    return {
+      id: taskId,
+      workspaceId,
+      kbId,
+      type: 'file',
+      status: 'succeeded',
+      payload: { docId, chunkCount, fileName },
+      error: null,
+      createdAt: now,
+      updatedAt: now
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    auditLogger.warn({
+      action: 'kb-task-service.addKnowledgeFile.failed',
+      workflowId: workspaceId,
+      metadata: { kbId, fileName, contentType, message }
+    })
+    return {
+      id: taskId,
+      workspaceId,
+      kbId,
+      type: 'file',
+      status: 'failed',
+      payload: { fileName },
+      error: message,
+      createdAt: now,
+      updatedAt: now
+    }
+  }
+}
+
 export async function addKnowledgeSeed(
   workspaceId: string,
   kbId: string,

@@ -18,13 +18,17 @@ import {
 import type { FlowDefinition } from '@starlink/shared'
 import type { GraphQLContext } from '../context/index.js'
 import {
+  addKnowledgeFile,
   addKnowledgeSeed,
+  bindKbToAgent,
   createKnowledgeBase,
   getKnowledgeBaseStatus,
   importKnowledgeUrl,
+  listAgentBindingsForKb,
   listKnowledgeBases,
   publishKnowledgeBase,
   searchKnowledgeBase,
+  unbindKbFromAgent,
   updateKnowledgeBaseVisibility
 } from '../services/kb-task-service.js'
 import { pubsub, FLOW_EXECUTION_PROGRESS, publishExecutionEvent } from './subscriptions.js'
@@ -256,6 +260,16 @@ export const resolvers = {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
         return await listKnowledgeBases(args.workspaceId)
+      })
+    },
+    knowledgeBaseAgentBindings: async (
+      _: unknown,
+      args: { workspaceId: string; kbId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
+        return await listAgentBindingsForKb(args.workspaceId, args.kbId)
       })
     },
     knowledgeBaseStatus: async (_: unknown, args: { workspaceId: string; kbId: string }, ctx: GraphQLContext) => {
@@ -672,6 +686,48 @@ export const resolvers = {
      * Cascades to kb_chunks so vector search RLS + WHERE filters reflect
      * the new state immediately.
      */
+    /**
+     * F4 · Bind a KB to an agent for auto-search. Authorization:
+     * workspace.write enforced upstream; KB ownership for 'private'
+     * KBs enforced inside bindKbToAgent (throws FORBIDDEN).
+     */
+    bindKbToAgent: async (
+      _: unknown,
+      args: { workspaceId: string; kbId: string; agentId: string; autoSearch?: boolean | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('bindKbToAgent: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.write')
+        return await bindKbToAgent({
+          workspaceId: args.workspaceId,
+          kbId: args.kbId,
+          agentId: args.agentId,
+          boundByUserId: ctx.userId,
+          autoSearch: args.autoSearch ?? true
+        })
+      })
+    },
+
+    unbindKbFromAgent: async (
+      _: unknown,
+      args: { workspaceId: string; kbId: string; agentId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.write')
+        return await unbindKbFromAgent({
+          workspaceId: args.workspaceId,
+          kbId: args.kbId,
+          agentId: args.agentId
+        })
+      })
+    },
+
     updateKnowledgeBaseVisibility: async (
       _: unknown,
       args: { kbId: string; visibility: string },
@@ -702,6 +758,31 @@ export const resolvers = {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.write')
         return await addKnowledgeSeed(args.workspaceId, args.kbId, args.text)
+      })
+    },
+    addKnowledgeFile: async (
+      _: unknown,
+      args: { workspaceId: string; kbId: string; fileName: string; contentType: string; content: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.write')
+        // Cap input size to 5 MiB (raw string length). PG TOAST handles
+        // larger values, but ingesting > 5 MiB at once stalls embedding
+        // and floods the LLM provider's chunk queue. Frontend should
+        // split larger files client-side.
+        if (args.content.length > 5 * 1024 * 1024) {
+          throw new GraphQLError('addKnowledgeFile: content exceeds 5 MiB limit', {
+            extensions: { code: 'BAD_USER_INPUT' }
+          })
+        }
+        return await addKnowledgeFile(
+          args.workspaceId,
+          args.kbId,
+          args.fileName,
+          args.contentType,
+          args.content
+        )
       })
     },
     importKnowledgeUrl: async (_: unknown, args: { workspaceId: string; kbId: string; url: string }, ctx: GraphQLContext) => {

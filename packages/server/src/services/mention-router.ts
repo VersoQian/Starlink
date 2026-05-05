@@ -33,6 +33,7 @@ import {
 } from './business-langgraph.js'
 import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
 import { LLMClient } from './llm-client.js'
+import { listKbBindingsForAgent, searchKnowledgeBase } from './kb-task-service.js'
 import { makeProfileGetter } from '../capabilities/profile-loader.js'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -137,19 +138,32 @@ export class MentionRouter {
     })
 
     try {
+      // F4 · agent-bound KB auto-search.
+      // Each agent can have N KBs bound via kb_agent_bindings (auto_search=true).
+      // When the agent is invoked, we run a fresh kb-search for each binding
+      // using the user's message as the query and merge the resulting chunks
+      // into knowledgeEvidence. The agent then sees these chunks via
+      // buildKnowledgePrompt downstream just as if the user had passed
+      // an explicit kbId.
+      //
+      // We don't replace any caller-provided knowledgeEvidence — we APPEND.
+      // This lets the user pass an explicit kbId (single-shot one-off
+      // research) on top of the agent's standing bindings.
+      const enrichedInput = await this.injectAgentKbEvidence(input, entry.id)
+
       switch (entry.callability) {
         case 'standalone-bmc-generator':
-          return await this.handleBmcGenerator(input, entry)
+          return await this.handleBmcGenerator(enrichedInput, entry)
         case 'standalone-utility':
-          return await this.handleUtility(input, entry)
+          return await this.handleUtility(enrichedInput, entry)
         case 'standalone-advisor-needs-bmc':
-          return await this.handleAdvisor(input, entry)
+          return await this.handleAdvisor(enrichedInput, entry)
         case 'debate-side':
-          return await this.handleDebateSide(input, entry)
+          return await this.handleDebateSide(enrichedInput, entry)
         case 'debate-judge':
-          return await this.handleDebateJudge(input, entry)
+          return await this.handleDebateJudge(enrichedInput, entry)
         case 'standalone-report':
-          return await this.handleReportWriter(input, entry)
+          return await this.handleReportWriter(enrichedInput, entry)
         default:
           return refuse(entry.id, `不支持的 callability：${entry.callability}`)
       }
@@ -163,6 +177,83 @@ export class MentionRouter {
         error: err as Error
       })
       return refuse(entry.id, `调用 agent 失败：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /**
+   * F4 · Pre-fetch KB chunks for the agent's standing bindings.
+   *
+   * For every (agentId, workspaceId) binding with auto_search=true,
+   * runs a kb-search using the user's message as query (top-3 per
+   * binding). Results are appended to input.knowledgeEvidence so the
+   * downstream agent prompt sees them as if the user had passed an
+   * explicit kbId.
+   *
+   * Errors are logged and swallowed — a KB outage shouldn't block
+   * the agent invocation; the agent just runs without that source.
+   */
+  private async injectAgentKbEvidence(
+    input: MentionInput,
+    agentId: string
+  ): Promise<MentionInput> {
+    try {
+      const bindings = await listKbBindingsForAgent(input.workspaceId, agentId, {
+        onlyAutoSearch: true
+      })
+      if (bindings.length === 0) return input
+
+      // Cap total injected chunks so a heavily-bound agent doesn't blow
+      // out the prompt window. Top-3 per binding × max 5 bindings = 15.
+      const perBindingTopK = 3
+      const maxBindings = 5
+      const targets = bindings.slice(0, maxBindings)
+
+      const fetched = await Promise.all(
+        targets.map((b) =>
+          searchKnowledgeBase(
+            input.workspaceId,
+            b.kbId,
+            input.message,
+            perBindingTopK,
+            input.userId
+          ).catch((err) => {
+            auditLogger.warn({
+              action: 'mention-router.kb-binding-search-failed',
+              workflowId: input.workspaceId,
+              userId: input.userId,
+              metadata: {
+                agentId,
+                kbId: b.kbId,
+                error: err instanceof Error ? err.message : String(err)
+              }
+            })
+            return [] as KnowledgeEvidence[]
+          })
+        )
+      )
+      const merged: KnowledgeEvidence[] = [
+        ...(input.knowledgeEvidence ?? []),
+        ...fetched.flat()
+      ]
+      auditLogger.info({
+        action: 'mention-router.kb-binding-injected',
+        workflowId: input.workspaceId,
+        userId: input.userId,
+        metadata: {
+          agentId,
+          bindingCount: targets.length,
+          chunkCount: merged.length - (input.knowledgeEvidence?.length ?? 0)
+        }
+      })
+      return { ...input, knowledgeEvidence: merged }
+    } catch (err) {
+      auditLogger.warn({
+        action: 'mention-router.kb-binding-fetch-failed',
+        workflowId: input.workspaceId,
+        userId: input.userId,
+        metadata: { agentId, error: err instanceof Error ? err.message : String(err) }
+      })
+      return input
     }
   }
 
