@@ -1,5 +1,6 @@
 import GraphQLJSON from 'graphql-type-json'
 import { GraphQLError } from 'graphql'
+import { assertOperationRateLimit } from '../middleware/operation-rate-limit.js'
 import {
   communityPostInputSchema,
   conversationMessageSchema,
@@ -498,6 +499,15 @@ export const resolvers = {
             extensions: { code: 'UNAUTHENTICATED' }
           })
         }
+        // F2 · per-user / per-operation rate limit. Each refresh fires a
+        // DeepSeek extraction (~3000 tokens / ~$0.05). A user spamming
+        // the button could blow through token budget. Enforce both
+        // a minimum gap AND a per-hour cap.
+        assertOperationRateLimit(ctx.userId, 'refreshUserSkills', {
+          minIntervalMs: 10_000,        // ≥ 10s between calls
+          maxInWindow: 6,               // ≤ 6 per hour per user
+          windowMs: 60 * 60_000
+        })
         const extractor = ctx.userSkillExtractor
         if (!extractor) {
           throw new GraphQLError('refreshUserSkills: extractor not configured', {
@@ -543,6 +553,13 @@ export const resolvers = {
             extensions: { code: 'UNAUTHENTICATED' }
           })
         }
+        // F2 · prevent spam — 30/min cap is generous for legitimate UI
+        // use (one user can flag/archive at most ~1 per 2s) but blocks
+        // automated abuse.
+        assertOperationRateLimit(ctx.userId, 'correctMemoryItem', {
+          maxInWindow: 30,
+          windowMs: 60_000
+        })
         const updated = await defaultConversationMemoryStore.correctMemoryItem({
           itemId: args.input.itemId,
           callerUserId: ctx.userId,

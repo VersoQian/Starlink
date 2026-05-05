@@ -104,6 +104,12 @@ const CORRECT_MEMORY_MUTATION = /* GraphQL */ `
   }
 `
 
+const REFRESH_USER_SKILLS_MUTATION = /* GraphQL */ `
+  mutation RefreshUserSkills($workspaceId: ID!) {
+    refreshUserSkills(workspaceId: $workspaceId)
+  }
+`
+
 export function useMyMemories(opts: {
   workspaceId?: string | null
   kind?: string | null
@@ -175,6 +181,32 @@ export function useCorrectMemoryItem() {
     onSuccess: () => {
       // Invalidate all memory queries so the drawer re-renders with the
       // updated row (or hides archived rows).
+      queryClient.invalidateQueries({ queryKey: ['memory'] })
+    }
+  })
+}
+
+/**
+ * F3 · Demand-mode user-skill extraction. User clicks the "立即更新画像"
+ * button → triggers a fresh DeepSeek extraction pass. Server-side rate
+ * limit (F2): min 10s gap, max 6 per hour per user.
+ *
+ * Returns the count of changes applied (creates + updates + refines +
+ * decays + cross-workspace promotes). 0 means no new traits detected.
+ */
+export function useRefreshUserSkills() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { workspaceId: string }) => {
+      const client = getGraphQLClient()
+      const response = await client.request<{ refreshUserSkills: number }>(
+        REFRESH_USER_SKILLS_MUTATION,
+        { workspaceId: input.workspaceId }
+      )
+      return response.refreshUserSkills
+    },
+    onSuccess: () => {
+      // Refresh memory queries so newly-extracted user-skill rows show up.
       queryClient.invalidateQueries({ queryKey: ['memory'] })
     }
   })

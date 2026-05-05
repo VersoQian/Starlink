@@ -16,9 +16,16 @@
  */
 
 import { useMemo, useState } from 'react'
-import { X, Trash2, AlertCircle, BookOpen, FileText } from 'lucide-react'
+import { X, Trash2, AlertCircle, BookOpen, FileText, RefreshCw } from 'lucide-react'
 import { EditorialProse } from '../registries/renderers/editorial-prose'
-import { useMyMemories, useMyKnowledgeEvidence, useCorrectMemoryItem, type MemoryItem, type KnowledgeEvidenceRef } from '../hooks/use-memory-list'
+import {
+  useMyMemories,
+  useMyKnowledgeEvidence,
+  useCorrectMemoryItem,
+  useRefreshUserSkills,
+  type MemoryItem,
+  type KnowledgeEvidenceRef
+} from '../hooks/use-memory-list'
 
 interface MemoryDrawerProps {
   open: boolean
@@ -92,14 +99,19 @@ export function MemoryDrawer({ open, onClose, workspaceId }: MemoryDrawerProps) 
             长期画像与记忆
           </h2>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="flex items-center justify-center h-8 w-8 rounded-full text-stratum-muted hover:text-stratum-navy hover:bg-stratum-surface-low transition-colors"
-        >
-          <X className="h-4 w-4" strokeWidth={1.5} />
-        </button>
+        <div className="flex items-center gap-2">
+          {tab === 'profile' && workspaceId ? (
+            <RefreshUserSkillsButton workspaceId={workspaceId} />
+          ) : null}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭"
+            className="flex items-center justify-center h-8 w-8 rounded-full text-stratum-muted hover:text-stratum-navy hover:bg-stratum-surface-low transition-colors"
+          >
+            <X className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </div>
       </header>
 
       {/* Tabs */}
@@ -389,5 +401,58 @@ function KbEvidenceTab(props: {
         </li>
       ))}
     </ul>
+  )
+}
+
+/**
+ * F3 · Demand-mode user-skill extraction trigger button.
+ *
+ * On click → fires refreshUserSkills mutation → server-side extractor
+ * runs immediately (mode='demand'), bypassing the throttle/cold-start
+ * tier selection. Returns count of changes; success toast shows
+ * "✓ 学到 N 项新画像" or "✓ 已是最新".
+ *
+ * Server enforces F2 rate limits: ≥10s gap, ≤6/hour. On 429 the
+ * mutation throws GraphQLError with code RATE_LIMITED + retryAfterSec
+ * extension; we surface the seconds in a tooltip.
+ */
+function RefreshUserSkillsButton({ workspaceId }: { workspaceId: string }) {
+  const refresh = useRefreshUserSkills()
+  const handleClick = () => {
+    refresh.mutate(
+      { workspaceId },
+      {
+        onSuccess: (count) => {
+          if (count > 0) {
+            window.alert(`✓ AI 学到 ${count} 项新画像`)
+          } else {
+            window.alert('✓ 已是最新；最近没有新会话可供推断')
+          }
+        },
+        onError: (err) => {
+          const ext =
+            (err as { response?: { errors?: Array<{ extensions?: { code?: string; retryAfterSec?: number } }> } })
+              .response?.errors?.[0]?.extensions
+          if (ext?.code === 'RATE_LIMITED' && typeof ext.retryAfterSec === 'number') {
+            window.alert(`触发频率限制，请 ${ext.retryAfterSec}s 后重试`)
+          } else {
+            window.alert(`刷新失败: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        }
+      }
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={refresh.isPending}
+      aria-label="立即更新画像"
+      title="基于最近对话立即重新推断画像（每小时最多 6 次）"
+      className="flex items-center gap-1.5 rounded-full px-3 h-7 bg-stratum-navy text-white font-mono text-[10px] font-bold uppercase tracking-[0.14em] hover:bg-stratum-navy-soft transition-colors disabled:opacity-50"
+    >
+      <RefreshCw className={`h-3 w-3 ${refresh.isPending ? 'animate-spin' : ''}`} strokeWidth={2} />
+      {refresh.isPending ? '推断中…' : '立即更新'}
+    </button>
   )
 }
