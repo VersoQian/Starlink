@@ -38,6 +38,7 @@ import {
 import { UserSkillExtractor } from './user-skill-extractor.js'
 import { buildUserSkillPrompt as buildUserSkillPromptShared } from './user-skill-prompt.js'
 import { getCheckpointer } from '../infrastructure/langgraph/checkpointer.js'
+import { LruCache } from '../infrastructure/utils/lru-cache.js'
 import { runDebate } from '../agents/shared/debate-orchestrator.js'
 import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
 import { trace, context as otelContext, SpanStatusCode, type Context as OtelContext } from '@opentelemetry/api'
@@ -1474,36 +1475,64 @@ ${snippets}
 
   // ============== Phase 4.4 · Workspace memory helpers ==============
 
+  /**
+   * P4 · Per-process LRU cache for memory prompt blocks.
+   *
+   * A single conversation stream invokes 5-6 LangGraph agents
+   * (supervisor + 3 generators + synthesizer + critic). Each call
+   * to readWorkspaceMemoriesPrompt without caching is a separate
+   * pgvector query — typically ~50-100ms of DB time × 6 = redundant
+   * cost on every stream.
+   *
+   * 5s TTL is short enough that mid-stream memory writes (e.g. critic
+   * detecting a conflict, writing a summary row) are picked up by the
+   * NEXT stream within seconds. Long enough that all agents within a
+   * single stream share one snapshot.
+   *
+   * Cache key includes workspaceId AND query so different agents asking
+   * different questions get different cache entries; without query in
+   * the key the cache would return stale prompt blocks. (In practice
+   * supervisor + generators + critic mostly share the same `query`
+   * — the user's original question — so cache hit rate is high.)
+   */
+  private readonly memoryPromptCache = new LruCache<string, string>({
+    ttlMs: 5_000,
+    max: 256
+  })
+
   private async readWorkspaceMemoriesPrompt(
     workspaceId: string,
     query?: string
   ): Promise<string> {
     if (!isMemoryReadEnabled()) return ''
-    try {
-      const store = getWorkspaceMemoryStore()
-      // When the supervisor knows the user's current question, pass it as
-      // `query` so the bridged store can do pgvector cosine retrieval
-      // (semantic relevance) instead of the default tag+recency listing.
-      // This makes "memory-driven supervisor routing" actually work.
-      const memories = await store.search(workspaceId, {
-        limit: 8,
-        query: query?.trim() || undefined
-      })
-      if (memories.length === 0) return ''
-      const lines = memories
-        .map((m, i) => `[${i + 1}] (${m.tags.join(',') || 'general'}) ${m.content}`)
-        .join('\n')
-      const header = query
-        ? '## 此工作区与当前问题语义相关的会话洞察（来自长期记忆）'
-        : '## 此工作区的近期会话洞察（来自长期记忆）'
-      return `\n\n${header}\n${lines}\n`
-    } catch (err) {
-      auditLogger.warn({
-        action: 'business-langgraph.readWorkspaceMemories.failed',
-        metadata: { workspaceId, error: String(err) }
-      })
-      return ''
-    }
+    const cacheKey = `mem:${workspaceId}|${query?.trim() ?? ''}`
+    return await this.memoryPromptCache.memoise(cacheKey, async () => {
+      try {
+        const store = getWorkspaceMemoryStore()
+        // When the supervisor knows the user's current question, pass it as
+        // `query` so the bridged store can do pgvector cosine retrieval
+        // (semantic relevance) instead of the default tag+recency listing.
+        // This makes "memory-driven supervisor routing" actually work.
+        const memories = await store.search(workspaceId, {
+          limit: 8,
+          query: query?.trim() || undefined
+        })
+        if (memories.length === 0) return ''
+        const lines = memories
+          .map((m, i) => `[${i + 1}] (${m.tags.join(',') || 'general'}) ${m.content}`)
+          .join('\n')
+        const header = query
+          ? '## 此工作区与当前问题语义相关的会话洞察（来自长期记忆）'
+          : '## 此工作区的近期会话洞察（来自长期记忆）'
+        return `\n\n${header}\n${lines}\n`
+      } catch (err) {
+        auditLogger.warn({
+          action: 'business-langgraph.readWorkspaceMemories.failed',
+          metadata: { workspaceId, error: String(err) }
+        })
+        return ''
+      }
+    })
   }
 
   private async writeConversationSummary(args: {
