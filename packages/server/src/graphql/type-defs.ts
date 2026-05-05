@@ -466,6 +466,22 @@ export const typeDefs = gql`
     extractConversationMemory(conversationId: ID!): [MemoryItem!]!
 
     """
+    P3 · Demand-mode user-skill extraction. Forces the
+    UserSkillExtractor to run immediately for the calling user,
+    bypassing throttle and tier selection. Used by the Memory drawer
+    "立即更新画像" button.
+
+    Returns the count of changes applied (creates + updates + refines
+    + decays + cross-workspace promotes). 0 means no new traits
+    detected from recent conversations.
+
+    Workspace-id is required so the extractor knows which workspace
+    to record any new scope='workspace' rows in (cross-workspace
+    promotion happens automatically afterwards).
+    """
+    refreshUserSkills(workspaceId: ID!): Int!
+
+    """
     P2 · Memory UI · user-driven correction of an inferred memory row.
     Three actions:
       - newContent != null  → update content (and refresh updatedAt);

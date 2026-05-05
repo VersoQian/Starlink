@@ -257,6 +257,56 @@ export class ConversationMemoryStore {
   }
 
   /**
+   * P3 · List ALL user-skill rows owned by a user across ALL workspaces.
+   *
+   * Used by the cross-workspace promote pass in UserSkillExtractor to
+   * detect titles that recur across multiple ideas. Unlike
+   * searchUserSkills, this method does NOT take a workspaceId — it
+   * deliberately walks the user's entire skill set.
+   */
+  async listAllUserSkillsForUser(userId: string, limit = 200): Promise<MemoryItem[]> {
+    await this.ensureTables()
+    const cap = clampLimit(limit, 1, 500)
+    const result = await pool.query(
+      `SELECT * FROM memory_items
+        WHERE user_id = $1
+          AND kind = 'user-skill'
+          AND archived_at IS NULL
+        ORDER BY updated_at DESC
+        LIMIT $2`,
+      [userId, cap]
+    )
+    return result.rows.map((row: Record<string, unknown>) => rowToMemory(row))
+  }
+
+  /**
+   * P3 · Count completed conversation sessions for a user.
+   *
+   * Used by the user-skill extractor to decide which trigger tier to
+   * use:
+   *   - count < 5  → eager (extract every conversation, fast cold-start)
+   *   - count ≥ 5  → throttled (extract every Nth, default 3)
+   *
+   * "Completed" means status='completed' OR status='failed' — both
+   * represent finished sessions where the user got SOMETHING out of
+   * the conversation. status='running' rows are excluded so an
+   * in-progress session doesn't accidentally bump the user past the
+   * cold-start threshold.
+   */
+  async countCompletedSessionsForUser(userId: string): Promise<number> {
+    await this.ensureTables()
+    const result = await pool.query(
+      `SELECT COUNT(*) AS n
+         FROM conversation_sessions
+        WHERE user_id = $1
+          AND status IN ('completed', 'failed')`,
+      [userId]
+    )
+    const n = result.rows[0]?.n
+    return typeof n === 'number' ? n : Number.parseInt(String(n ?? 0), 10) || 0
+  }
+
+  /**
    * Heartbeat update for an active stream. Called every 30s by the
    * gateway process running the LangGraph stream. Stale rows (no
    * heartbeat in >90s) are detected by listStaleSessions() and

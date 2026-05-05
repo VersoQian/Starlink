@@ -13,6 +13,7 @@ import { FlowStore } from '../application/flow-store.js'
 import { ExecutionStore } from '../application/execution-store.js'
 import { GraphCompiler } from '../engine/graph-compiler.js'
 import { GraphExecutor } from '../engine/graph-executor.js'
+import { UserSkillExtractor } from '../services/user-skill-extractor.js'
 import {
   createWorkspaceMemoryStore,
   setWorkspaceMemoryStore
@@ -34,6 +35,8 @@ export type GraphQLContext = {
   executionStore?: ExecutionStore
   graphCompiler?: GraphCompiler
   graphExecutor?: GraphExecutor
+  /** P3 · UserSkillExtractor exposed for demand-mode mutation (refreshUserSkills). */
+  userSkillExtractor?: UserSkillExtractor
 }
 
 const conversationEventBus = createConversationEventBus()
@@ -56,6 +59,15 @@ const sharedConversationMemoryStore = new ConversationMemoryStore()
 setWorkspaceMemoryStore(
   createWorkspaceMemoryStore({ conversationMemoryStore: sharedConversationMemoryStore })
 )
+
+// P3 · Single shared UserSkillExtractor instance (per process). The
+// extractor's call counter (Map<userId, count>) is in-memory; a single
+// instance keeps cold-start eager mode + throttled mode counters
+// consistent across both GraphQL resolvers and the BusinessLangGraph
+// fire-and-forget call site.
+const sharedUserSkillExtractor = new UserSkillExtractor({
+  memoryStore: sharedConversationMemoryStore
+})
 
 // Flow infrastructure (initialized lazily)
 const flowStore = new FlowStore()
@@ -114,7 +126,8 @@ export async function createContext(
     flowStore,
     executionStore,
     graphCompiler,
-    graphExecutor
+    graphExecutor,
+    userSkillExtractor: sharedUserSkillExtractor
   }
 }
 
@@ -141,7 +154,8 @@ export async function createWsContext(connectionParams?: Record<string, unknown>
     flowStore,
     executionStore,
     graphCompiler,
-    graphExecutor
+    graphExecutor,
+    userSkillExtractor: sharedUserSkillExtractor
   }
 }
 

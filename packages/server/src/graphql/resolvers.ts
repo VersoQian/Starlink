@@ -470,6 +470,39 @@ export const resolvers = {
       })
     },
     /**
+     * P3 · refreshUserSkills — demand-mode extraction trigger.
+     *
+     * Bypasses the usual throttle/tier selection so a user clicking
+     * "立即更新画像" in the Memory drawer gets immediate feedback. The
+     * extractor's own dedup + confidence-update logic prevents double-
+     * counting when this is called repeatedly in quick succession.
+     */
+    refreshUserSkills: async (
+      _: unknown,
+      args: { workspaceId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('refreshUserSkills: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        const extractor = ctx.userSkillExtractor
+        if (!extractor) {
+          throw new GraphQLError('refreshUserSkills: extractor not configured', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' }
+          })
+        }
+        return await extractor.extractUserSkills({
+          userId: ctx.userId,
+          workspaceId: args.workspaceId,
+          traceId: `refresh-${ctx.userId}-${Date.now()}`,
+          mode: 'demand'
+        })
+      })
+    },
+    /**
      * P2 · correctMemoryItem — user-driven correction of an inferred
      * memory row. Three actions in priority order:
      *   1. archive=true → soft-delete (sets archived_at)
