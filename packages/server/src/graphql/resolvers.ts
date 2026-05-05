@@ -128,6 +128,65 @@ export const resolvers = {
         return memories.map((memory) => memoryItemSchema.parse(memory))
       })
     },
+    /**
+     * P2 · myMemories — user-scoped memory list. Always filters by
+     * ctx.userId (no override possible). Returns rows where:
+     *   - user_id = ctx.userId
+     *   - archived_at IS NULL
+     *   - workspace_id = $args.workspaceId   (when provided)
+     *     OR scope='user' AND workspace_id IS NULL  (cross-workspace
+     *     personal user-skill rows, when workspaceId omitted)
+     *   - kind = $args.kind   (when provided)
+     */
+    myMemories: async (
+      _: unknown,
+      args: {
+        workspaceId?: string | null
+        kind?: string | null
+        query?: string | null
+        limit?: number | null
+      },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('myMemories: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        const memories = await defaultConversationMemoryStore.listMemoriesForUser({
+          userId: ctx.userId,
+          workspaceId: args.workspaceId ?? null,
+          kind: args.kind ?? null,
+          query: args.query ?? null,
+          limit: typeof args.limit === 'number' ? args.limit : 50
+        })
+        return memories.map((memory) => memoryItemSchema.parse(memory))
+      })
+    },
+    /**
+     * P2 · myKnowledgeEvidence — reverse-lookup of "AI cited which KB
+     * chunks for me, where". Scans memory_items.metadata->>'knowledgeEvidence'
+     * JSONB for rows owned by ctx.userId.
+     */
+    myKnowledgeEvidence: async (
+      _: unknown,
+      args: { workspaceId?: string | null; limit?: number | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('myKnowledgeEvidence: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        return await defaultConversationMemoryStore.listKnowledgeEvidenceForUser({
+          userId: ctx.userId,
+          workspaceId: args.workspaceId ?? null,
+          limit: typeof args.limit === 'number' ? args.limit : 100
+        })
+      })
+    },
     workspaceContextSnapshot: async (
       _: unknown,
       args: { workspaceId: string; conversationId?: string | null; query: string; kbId?: string | null },
@@ -408,6 +467,47 @@ export const resolvers = {
           metadata: args.input.metadata ?? undefined
         }, ctx.userId)
         return conversationMessageSchema.parse(message)
+      })
+    },
+    /**
+     * P2 · correctMemoryItem — user-driven correction of an inferred
+     * memory row. Three actions in priority order:
+     *   1. archive=true → soft-delete (sets archived_at)
+     *   2. newContent != null → update content; refreshes updatedAt;
+     *      stores user-correction marker in metadata so future
+     *      extractor passes don't auto-overwrite it
+     *   3. feedback != null → append to metadata.userFeedback array
+     *      (used as reinforcement signal by user-skill-extractor)
+     *
+     * Authorization: caller must own the row. Cross-user attempts
+     * throw FORBIDDEN.
+     */
+    correctMemoryItem: async (
+      _: unknown,
+      args: {
+        input: {
+          itemId: string
+          newContent?: string | null
+          archive?: boolean | null
+          feedback?: string | null
+        }
+      },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('correctMemoryItem: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        const updated = await defaultConversationMemoryStore.correctMemoryItem({
+          itemId: args.input.itemId,
+          callerUserId: ctx.userId,
+          newContent: args.input.newContent ?? null,
+          archive: Boolean(args.input.archive),
+          feedback: args.input.feedback ?? null
+        })
+        return memoryItemSchema.parse(updated)
       })
     },
     createMemoryItem: async (

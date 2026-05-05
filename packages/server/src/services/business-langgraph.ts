@@ -662,7 +662,8 @@ export class BusinessLangGraphService {
           conflictCount,
           dimsCovered: dimsCovered.size,
           durationMs: Date.now() - streamStartedAt,
-          handoffCount: handoffLogger.size
+          handoffCount: handoffLogger.size,
+          knowledgeEvidence: context.knowledgeEvidence
         })
       } catch {
         // writeConversationSummary already swallows; redundant guard.
@@ -1516,6 +1517,15 @@ ${snippets}
     dimsCovered: number
     durationMs: number
     handoffCount: number
+    /**
+     * P2 · KB evidence used during the stream. When present, written
+     * into memory_items.metadata.knowledgeEvidence as a flat array of
+     * { docId, chunkId, snippet, score } entries that the front-end
+     * Memory drawer reverse-lookup tab uses to show "AI cited which
+     * KB chunks where". Stream callers should pass the same array
+     * they originally seeded the conversation with (context.knowledgeEvidence).
+     */
+    knowledgeEvidence?: KnowledgeEvidence[]
   }): Promise<void> {
     if (!isMemoryWriteEnabled()) return
     try {
@@ -1526,6 +1536,31 @@ ${snippets}
       })
       const content = formatBmcSummaryContent(args)
 
+      // Flatten KnowledgeEvidence to the JSONB shape the memory drawer
+      // reverse-lookup expects. Cap at 50 entries so the metadata column
+      // stays small (heavy KB sessions can otherwise produce 200+ chunks).
+      const knowledgeEvidence = (args.knowledgeEvidence ?? [])
+        .slice(0, 50)
+        .map((e) => {
+          // KnowledgeEvidence carries chunk index inside metadata
+          // (see schemas/citation.ts deriveSnippetId). Surface a chunkId
+          // for the front-end without depending on extra schema work.
+          const chunkIndex = (e.metadata as Record<string, unknown> | undefined)?.chunkIndex
+          const chunkId =
+            typeof chunkIndex === 'number' || typeof chunkIndex === 'string'
+              ? String(chunkIndex)
+              : null
+          return {
+            docId: e.docId,
+            chunkId,
+            snippet:
+              typeof e.snippet === 'string' && e.snippet.length > 240
+                ? e.snippet.slice(0, 240) + '…'
+                : e.snippet ?? null,
+            score: typeof e.score === 'number' ? e.score : null
+          }
+        })
+
       await store.record(args.workspaceId, {
         content,
         tags,
@@ -1535,7 +1570,8 @@ ${snippets}
           conflictCount: args.conflictCount,
           dimsCovered: args.dimsCovered,
           durationMs: args.durationMs,
-          handoffCount: args.handoffCount
+          handoffCount: args.handoffCount,
+          knowledgeEvidence
         }
       })
     } catch (err) {

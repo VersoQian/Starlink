@@ -794,6 +794,235 @@ export class ConversationMemoryStore {
       [id]
     )
   }
+
+  /**
+   * P2 · listMemoriesForUser — user-scoped memory list.
+   *
+   * Returns rows where:
+   *   - user_id = $userId  (always — no override possible)
+   *   - archived_at IS NULL
+   *   - workspace_id = $workspaceId  (when provided)
+   *     OR workspace_id IS NULL  (cross-workspace personal rows)
+   *   - kind = $kind  (when provided)
+   *   - (title ILIKE $query OR content ILIKE $query)  (when provided)
+   *
+   * When workspaceId is null/omitted, returns ONLY scope='user' global
+   * rows (e.g. cross-workspace user-skill traits) — workspace-scoped
+   * rows from any workspace are excluded to avoid leaking inferences
+   * from one workspace into the unrelated context of another.
+   */
+  async listMemoriesForUser(opts: {
+    userId: string
+    workspaceId?: string | null
+    kind?: string | null
+    query?: string | null
+    limit?: number | null
+  }): Promise<MemoryItem[]> {
+    await this.ensureTables()
+    const limit = clampLimit(opts.limit ?? 50, 1, 200)
+    const params: unknown[] = [opts.userId]
+    const conditions: string[] = ['user_id = $1', 'archived_at IS NULL']
+    if (opts.workspaceId) {
+      params.push(opts.workspaceId)
+      conditions.push(`workspace_id = $${params.length}`)
+    } else {
+      // Cross-workspace personal scope only.
+      conditions.push(`workspace_id IS NULL`)
+    }
+    if (opts.kind) {
+      params.push(opts.kind)
+      conditions.push(`kind = $${params.length}`)
+    }
+    if (opts.query && opts.query.trim().length > 0) {
+      params.push(`%${opts.query.trim()}%`)
+      conditions.push(`(title ILIKE $${params.length} OR content ILIKE $${params.length})`)
+    }
+    params.push(limit)
+    const result = await pool.query(
+      `SELECT * FROM memory_items
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY updated_at DESC
+        LIMIT $${params.length}`,
+      params
+    )
+    return result.rows.map((row: Record<string, unknown>) => rowToMemory(row))
+  }
+
+  /**
+   * P2 · listKnowledgeEvidenceForUser — reverse-lookup KB citations
+   * across the user's memory rows.
+   *
+   * Scans memory_items.metadata->>'knowledgeEvidence' (JSONB array of
+   * { kbId, chunkId, snippet, score } objects, written by
+   * writeConversationSummary when KB chunks were used) and unpacks
+   * each entry into a flat KnowledgeEvidenceRef row.
+   *
+   * Lets the front-end "MEMORY · KB 引用" tab show which conversations
+   * cited which KB documents.
+   */
+  async listKnowledgeEvidenceForUser(opts: {
+    userId: string
+    workspaceId?: string | null
+    limit?: number | null
+  }): Promise<Array<{
+    memoryItemId: string
+    workspaceId: string
+    docId: string
+    snippet: string | null
+    score: number | null
+    citedAt: string
+    sourceTitle: string
+  }>> {
+    await this.ensureTables()
+    const limit = clampLimit(opts.limit ?? 100, 1, 500)
+    const params: unknown[] = [opts.userId]
+    const conditions: string[] = [
+      'user_id = $1',
+      'archived_at IS NULL',
+      `metadata ? 'knowledgeEvidence'`,
+      `jsonb_array_length(metadata->'knowledgeEvidence') > 0`
+    ]
+    if (opts.workspaceId) {
+      params.push(opts.workspaceId)
+      conditions.push(`workspace_id = $${params.length}`)
+    }
+    params.push(limit)
+    const result = await pool.query(
+      `SELECT id, workspace_id, title, updated_at, metadata->'knowledgeEvidence' AS evidence
+         FROM memory_items
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY updated_at DESC
+        LIMIT $${params.length}`,
+      params
+    )
+    type EvidenceRow = {
+      id: string
+      workspace_id: string
+      title: string
+      updated_at: Date | string
+      evidence: Array<{ docId?: string; chunkId?: string; snippet?: string; score?: number }>
+    }
+    const flat: Array<{
+      memoryItemId: string
+      workspaceId: string
+      docId: string
+      snippet: string | null
+      score: number | null
+      citedAt: string
+      sourceTitle: string
+    }> = []
+    for (const row of result.rows as EvidenceRow[]) {
+      const evidence = Array.isArray(row.evidence) ? row.evidence : []
+      for (const ev of evidence) {
+        if (!ev?.docId) continue
+        flat.push({
+          memoryItemId: row.id,
+          workspaceId: row.workspace_id,
+          docId: ev.docId,
+          snippet: ev.snippet ?? null,
+          score: typeof ev.score === 'number' ? ev.score : null,
+          citedAt: toIso(row.updated_at),
+          sourceTitle: row.title
+        })
+      }
+    }
+    return flat.slice(0, limit)
+  }
+
+  /**
+   * P2 · correctMemoryItem — apply user feedback to a memory row.
+   *
+   * Three operations in priority order (per design doc § 5.3):
+   *   1. archive=true: set archived_at = now() and stop further
+   *      mutations (returns the soft-deleted row)
+   *   2. newContent != null: update content, append correction to
+   *      metadata.userCorrections array, refresh updatedAt
+   *   3. feedback != null: append to metadata.userFeedback array
+   *      so the user-skill-extractor LLM has reinforcement signal
+   *
+   * Authorization: callerUserId must equal row.user_id. Throws
+   * FORBIDDEN otherwise. Throws NOT_FOUND if the row doesn't exist.
+   */
+  async correctMemoryItem(opts: {
+    itemId: string
+    callerUserId: string
+    newContent: string | null
+    archive: boolean
+    feedback: string | null
+  }): Promise<MemoryItem> {
+    await this.ensureTables()
+    const existing = await pool.query(
+      'SELECT * FROM memory_items WHERE id = $1 LIMIT 1',
+      [opts.itemId]
+    )
+    if (!existing.rowCount) {
+      throw new Error(`memory item not found: ${opts.itemId}`)
+    }
+    const row = existing.rows[0] as Record<string, unknown>
+    if (row.user_id !== opts.callerUserId) {
+      throw new Error(`FORBIDDEN: memory item belongs to another user`)
+    }
+
+    if (opts.archive) {
+      await pool.query(
+        'UPDATE memory_items SET archived_at = now(), updated_at = now() WHERE id = $1',
+        [opts.itemId]
+      )
+      const after = await pool.query(
+        'SELECT * FROM memory_items WHERE id = $1',
+        [opts.itemId]
+      )
+      return rowToMemory(after.rows[0])
+    }
+
+    // Build metadata update preserving existing JSONB fields.
+    const existingMetadata = parseJsonRecord(row.metadata) ?? {}
+    const corrections = Array.isArray((existingMetadata as Record<string, unknown>).userCorrections)
+      ? ((existingMetadata as Record<string, unknown>).userCorrections as unknown[])
+      : []
+    const feedbacks = Array.isArray((existingMetadata as Record<string, unknown>).userFeedback)
+      ? ((existingMetadata as Record<string, unknown>).userFeedback as unknown[])
+      : []
+    const nowIso = new Date().toISOString()
+    if (opts.newContent != null) {
+      corrections.push({
+        previousContent: row.content,
+        correctedAt: nowIso
+      })
+    }
+    if (opts.feedback != null && opts.feedback.trim().length > 0) {
+      feedbacks.push({ text: opts.feedback.trim(), at: nowIso })
+    }
+    const newMetadata = {
+      ...existingMetadata,
+      userCorrections: corrections,
+      userFeedback: feedbacks,
+      lastCorrectedBy: opts.callerUserId,
+      lastCorrectedAt: nowIso
+    }
+
+    if (opts.newContent != null) {
+      await pool.query(
+        `UPDATE memory_items
+            SET content = $2, metadata = $3::jsonb, updated_at = now()
+          WHERE id = $1`,
+        [opts.itemId, opts.newContent, JSON.stringify(newMetadata)]
+      )
+    } else {
+      // feedback-only: write metadata change only
+      await pool.query(
+        `UPDATE memory_items
+            SET metadata = $2::jsonb, updated_at = now()
+          WHERE id = $1`,
+        [opts.itemId, JSON.stringify(newMetadata)]
+      )
+    }
+    const after = await pool.query(
+      'SELECT * FROM memory_items WHERE id = $1',
+      [opts.itemId]
+    )
+    return rowToMemory(after.rows[0])
+  }
 }
 
 function buildMemoryFilters(

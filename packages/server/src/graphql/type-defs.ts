@@ -145,6 +145,26 @@ export const typeDefs = gql`
     archivedAt: String
   }
 
+  """
+  P2 · A single citation reference reverse-looked-up from a memory
+  item's metadata.knowledgeEvidence array. Lets the frontend show
+  "AI cited THIS KB chunk in THIS memory at THIS time".
+  """
+  type KnowledgeEvidenceRef {
+    memoryItemId: ID!
+    workspaceId: ID!
+    docId: String!
+    snippet: String
+    score: Float
+    citedAt: String!
+    """
+    Title of the source memory item — usually a session summary like
+    "Workspace insight 2026-05-05 14:30". Helps users recognise the
+    conversation that produced this citation.
+    """
+    sourceTitle: String!
+  }
+
   type CanvasContextSummary {
     nodeCount: Int!
     edgeCount: Int!
@@ -288,6 +308,26 @@ export const typeDefs = gql`
     metadata: JSON
   }
 
+  input CorrectMemoryItemInput {
+    itemId: ID!
+    """
+    New content for the memory row. If null + archive=false, the
+    mutation is a no-op (returns row unchanged).
+    """
+    newContent: String
+    """
+    Soft-delete the row. Future extractor runs will see this and
+    decay confidence on similar rows.
+    """
+    archive: Boolean
+    """
+    Optional explanation from the user — stored in metadata.userFeedback
+    for the next user-skill-extractor LLM pass. e.g. "I'm not actually
+    a B2B PM, I do consumer apps."
+    """
+    feedback: String
+  }
+
   input CommunityPostInput {
     workspaceId: ID!
     title: String!
@@ -359,6 +399,29 @@ export const typeDefs = gql`
     conversationRuntimeEvents(workspaceId: ID!, conversationId: ID, sinceCursor: Int): [ConversationEvent!]!
     cardsReferencingEvidence(conversationId: ID!, evidenceId: ID!): [ID!]!
     workspaceMemories(workspaceId: ID!, query: String, scope: String, kind: String, limit: Int): [MemoryItem!]!
+    """
+    P2 · Memory UI · user-scoped memory list. Returns ONLY rows owned by
+    the authenticated caller (ctx.userId). Use this in front-end memory
+    drawer; workspaceMemories above is workspace-scoped and may include
+    other members' rows.
+
+    Args:
+      - workspaceId: optional. Omit to get cross-workspace personal
+        memory (e.g. global user-skill rows with scope='user').
+      - kind: filter by 'user-skill' / 'summary' / etc.
+      - query: substring match against title + content
+      - limit: 1-200, default 50
+    """
+    myMemories(workspaceId: ID, kind: String, query: String, limit: Int): [MemoryItem!]!
+
+    """
+    P2 · Memory UI · KB evidence reverse-lookup. For the authenticated
+    user, returns "where in my conversations did the AI cite which KB
+    chunks". Built by scanning memory_items.metadata.knowledgeEvidence
+    JSONB written by writeConversationSummary when KB chunks were used
+    during the stream.
+    """
+    myKnowledgeEvidence(workspaceId: ID, limit: Int): [KnowledgeEvidenceRef!]!
     workspaceContextSnapshot(workspaceId: ID!, conversationId: ID, query: String!, kbId: ID): WorkspaceContextSnapshot!
     kbTaskStatus(workspaceId: ID!, kbId: ID!): [KbTaskStatus!]!
     knowledgeBases(workspaceId: ID!): [KnowledgeBase!]!
@@ -401,6 +464,24 @@ export const typeDefs = gql`
     appendConversationMessage(input: AppendConversationMessageInput!): ConversationMessage!
     createMemoryItem(input: CreateMemoryItemInput!): MemoryItem!
     extractConversationMemory(conversationId: ID!): [MemoryItem!]!
+
+    """
+    P2 · Memory UI · user-driven correction of an inferred memory row.
+    Three actions:
+      - newContent != null  → update content (and refresh updatedAt);
+                              extractor will treat the row as user-corrected
+                              and not auto-decay it next round
+      - archive == true     → soft-delete (archived_at = now()); user-skill
+                              extractor downgrades confidence on related
+                              rows in next pass
+      - feedback            → reinforcement signal stored in metadata for
+                              the user-skill-extractor LLM ("user said
+                              this trait was wrong because ...")
+
+    Authorization: caller must own the memory row (userId match enforced
+    server-side). Returns the updated row, or throws FORBIDDEN.
+    """
+    correctMemoryItem(input: CorrectMemoryItemInput!): MemoryItem!
     addNode(workspaceId: ID!, input: NodeInput!): CanvasNode!
     connectNodes(workspaceId: ID!, input: EdgeInput!): CanvasEdge!
     createKnowledgeBase(workspaceId: ID!): KnowledgeBase!

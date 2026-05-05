@@ -12,12 +12,13 @@ import { CanvasTutorialDialog } from './canvas-tutorial-dialog'
 import { CanvasPerspectiveToggle } from './canvas-perspective-toggle'
 import { CanvasChatDock } from './canvas-chat-dock'
 import { CanvasCitationPanel } from './canvas-citation-panel'
+import { MemoryDrawer } from './memory-drawer'
 import { CanvasHitlBanner } from './canvas-hitl-banner'
 import { CanvasPromptDialog } from './canvas-prompt-dialog'
 import { CanvasThinkingOverlay } from './canvas-thinking-overlay'
 import { EvidenceDrawer } from './evidence-drawer'
 import { KbUploadModal } from './kb-upload-modal'
-import { Database } from 'lucide-react'
+import { Brain, Database } from 'lucide-react'
 import { WorkspaceShell } from './workspace-shell'
 import type { PendingDecisionRequest } from './workspace-shell-context'
 import './panels/register-default-panels'
@@ -132,6 +133,7 @@ export function CanvasPage({
   const [chatOpen, setChatOpen] = useState(false)
   const [citationOpen, setCitationOpen] = useState(false)
   const [kbModalOpen, setKbModalOpen] = useState(false)
+  const [memoryOpen, setMemoryOpen] = useState(false)
   // Conflict highlight is now driven by the store's focusedConflictId so
   // both the canvas (edge click) and the renderer chips
   // ([[critic:conflictId]] in report-writer output) can request the same
@@ -677,6 +679,20 @@ export function CanvasPage({
                 <Database className="h-4 w-4" strokeWidth={1.75} />
                 <span className="font-body text-[11px] font-semibold">资料 · KB</span>
               </button>
+              {/* Floating Memory button — sits next to KB so users can
+                  inspect / correct AI's long-term inferences alongside
+                  their knowledge base. Per session-memory-design v2 §5,
+                  this satisfies the GDPR/PIPL "view + correct + delete"
+                  requirement for AI-derived user data. */}
+              <button
+                type="button"
+                onClick={() => setMemoryOpen(true)}
+                className="absolute bottom-6 left-[180px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-colors pointer-events-auto"
+                aria-label="查看长期记忆"
+              >
+                <Brain className="h-4 w-4" strokeWidth={1.75} />
+                <span className="font-body text-[11px] font-semibold">记忆 · Memory</span>
+              </button>
             </>
           ) : null}
         </div>
@@ -708,6 +724,11 @@ export function CanvasPage({
         />
         {focusedDrawerKind === 'report' ? <ReportDetailDrawer /> : <CCBMCDetailDrawer />}
         <EvidenceDrawer conversationId={workspaceId} />
+        <MemoryDrawer
+          open={memoryOpen}
+          onClose={() => setMemoryOpen(false)}
+          workspaceId={workspaceId}
+        />
       </div>
     )
   }
