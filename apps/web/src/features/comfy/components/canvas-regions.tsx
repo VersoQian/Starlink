@@ -106,8 +106,9 @@ export const CanvasRegions = memo(() => {
             width={zone.width}
             height={zone.height}
             fill="none"
-            stroke="rgba(74, 71, 68, 0.16)" // ink-ash3 / 16%
+            stroke="rgba(19, 27, 46, 0.10)"
             strokeWidth="0.5"
+            strokeDasharray="6 6"
             // No rounded corners — newspaper rule, brutalist
           />
         ))}
@@ -125,14 +126,14 @@ export const CanvasRegions = memo(() => {
             top: `${zone.y + 12}px`,
           }}
         >
-          <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+          <span className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-blue">
             {zone.sublabel}
           </span>
-          <span className="font-display font-[700] text-[13px] tracking-[0.02em] text-paper">
+          <span className="font-display font-[700] text-[13px] tracking-tight text-stratum-navy">
             {zone.label}
           </span>
           {zone.domains.length > 1 ? (
-            <span className="font-instr text-[9px] uppercase tracking-kicker text-ink-ash4 mt-0.5">
+            <span className="font-body text-[9px] uppercase tracking-[0.18em] text-stratum-muted mt-0.5">
               {zone.domains.join(' · ')}
             </span>
           ) : null}

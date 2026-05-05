@@ -1,8 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
-/* Editorial Boardroom v2 — Fraunces display serif (variable optical
-   size). Loaded browser-side via @import (not next/font/google) so the
-   Next compile doesn't block on font fetches in flaky network envs. */
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&display=swap');
+/* Editorial Boardroom v2 — canonical tokens live in
+   src/shared/design-system/tokens-v2.ts. Three font roles:
+   Fraunces (display) and JetBrains Mono (instrument) load browser-side
+   via @import below; Geist Sans (body) loads via next/font in
+   app/layout.tsx. */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -46,41 +47,6 @@
     --canvas-scroll-thumb-hover: 215.2 17% 66.5%;
   }
 
-  .dark {
-    --background: 220 36% 10%;
-    --foreground: 210 40% 96%;
-    --card: 222 32% 14%;
-    --card-foreground: 210 40% 96%;
-    --popover: 222 32% 14%;
-    --popover-foreground: 210 40% 96%;
-    --primary: 220.1 85.1% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 219 34% 22%;
-    --secondary-foreground: 210 40% 96%;
-    --muted: 219 32% 24%;
-    --muted-foreground: 217 20% 75%;
-    --accent: 219 32% 24%;
-    --accent-foreground: 210 40% 96%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 220 28% 26%;
-    --input: 220 28% 26%;
-    --ring: 220.1 85.1% 50%;
-
-    --canvas-primary: 220.1 85.1% 50%;
-    --canvas-bg: 220 36% 9.8%;
-    --canvas-surface: 218.8 33.3% 10%;
-    --canvas-panel: 217.2 32.6% 17.5%;
-    --canvas-card: 220.8 31.6% 15.5%;
-    --canvas-border: 220.5 34.6% 21%;
-    --canvas-text: 226.7 52.9% 93.3%;
-    --canvas-muted: 218.9 39.1% 72.9%;
-    --canvas-subtle: 218 16.1% 50%;
-    --canvas-grid: 220.5 34.6% 21%;
-    --canvas-scroll-track: 218.8 33.3% 10%;
-    --canvas-scroll-thumb: 220.5 34.6% 21%;
-    --canvas-scroll-thumb-hover: 219.6 34.6% 30%;
-  }
 }
 
 @layer base {
@@ -93,23 +59,13 @@
 }
 
 :root {
-  --bg-deep: #0c1428;
-  --bg-canvas: #1e293b;
-  --accent-amber: #fbbf24;
-  --accent-emerald: #10b981;
-  --accent-coral: #f472b6;
   --neutral-light: #e2e8f0;
   --neutral-mid: #94a3b8;
   --neutral-dark: #334155;
 
-  /* Design Tokens */
-  --canvas-bg: #0c1428;
   --glass-bg: rgba(255, 255, 255, 0.05);
   --glass-border: rgba(255, 255, 255, 0.1);
   --glass-effect-blur: blur(12px);
-  --accent-primary: #fbbf24;
-  --accent-secondary: #10b981;
-  --accent-danger: #f472b6;
   --border-radius-lg: 24px;
   --border-radius-md: 12px;
   --border-radius-sm: 8px;
@@ -119,8 +75,8 @@
   --transition-fast: 200ms;
   --transition-normal: 300ms;
   --transition-slow: 500ms;
-  --font-editorial: 'Manrope', sans-serif;
-  --font-interface: 'Inter', sans-serif;
+  --font-editorial: ui-sans-serif, system-ui, sans-serif;
+  --font-interface: ui-sans-serif, system-ui, sans-serif;
   --stratum-surface: #f7f9fb;
   --stratum-surface-low: #f2f4f6;
   --stratum-surface-raised: #ffffff;
@@ -134,20 +90,20 @@
   --stratum-shadow: 0 24px 48px rgba(19, 27, 46, 0.08);
   --stratum-glow: linear-gradient(135deg, #008cc7 0%, #131b2e 100%);
 
-  font-family: 'DM Sans', -apple-system, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   color-scheme: light;
 }
 
 .canvas-page-shell * {
-  font-family: 'DM Sans', -apple-system, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 .title-font {
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-fraunces);
 }
 
 .mono-font {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-jetbrains-mono);
 }
 
 @keyframes fadeInUp {
@@ -202,10 +158,6 @@
   box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), inset 0 0 20px rgba(251, 191, 36, 0.05);
 }
 
-.dark {
-  color-scheme: dark;
-}
-
 .stratum-shell {
   font-family: var(--font-interface);
 }
@@ -242,13 +194,11 @@ body {
   background-size: 40px 40px;
 }
 
-/* Business canvas dark grid */
+/* Stratum Engine canvas surface — light theme dot grid handled by
+   ReactFlow Background variant=Dots, so this rule only sets the
+   surface color underneath. */
 .canvas-flow-surface {
-  background-color: #1a1a1a;
-  background-image:
-    linear-gradient(#2a2a2a 1px, transparent 1px),
-    linear-gradient(90deg, #2a2a2a 1px, transparent 1px);
-  background-size: 20px 20px;
+  background-color: #F7F9FB;
 }
 
 .react-flow__node.canvas-node {
@@ -398,22 +348,16 @@ body {
 .starlink-pulse { animation: starlinkPulseFade 1.6s ease-in-out infinite; }
 
 /* ============================================================================
-   Editorial Boardroom v2 — globals (P1, 2026-05-01)
-   ============================================================================
-   Source of truth: src/shared/design-system/tokens-v2.ts.
-   These vars are ADDITIVE — old --canvas-*, --stratum-*, --accent-* stay
-   valid for v1 surfaces. Once a surface migrates to v2 it imports from
-   tokens-v2.ts and uses the editorial-* CSS vars below.
-   P4 (final phase) deletes the old vars after all surfaces have moved.
+   Editorial Boardroom v2 — surface tokens. Canonical source of truth is
+   src/shared/design-system/tokens-v2.ts; the CSS variables below mirror
+   it for inline-style call sites. --font-geist-sans is bound by
+   next/font from app/layout.tsx; --font-fraunces and
+   --font-jetbrains-mono are declared here against the @imported faces.
    ============================================================================ */
 
 :root {
-  /* Editorial Boardroom typography — Fraunces + JetBrains Mono are
-     loaded via @import above; Geist variable comes from the geist
-     npm package via layout.tsx. These vars are what tailwind's
-     font-display / font-instr classes resolve to. */
-  --font-fraunces:       'Fraunces', 'ui-serif', Georgia, serif;
-  --font-jetbrains-mono: 'JetBrains Mono', ui-monospace, 'Menlo', monospace;
+  --font-fraunces:       'Fraunces', ui-serif, Georgia, serif;
+  --font-jetbrains-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
 
   /* Color — ink-on-paper inversion */
   --editorial-ink:        #0A0A0A;

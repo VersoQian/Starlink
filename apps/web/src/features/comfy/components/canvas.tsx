@@ -38,6 +38,10 @@ type CanvasFlowProps = {
   onNodesChange: (changes: NodeChange[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
   onConnect: (connection: Connection) => void
+  /** Optional: fired when user clicks an edge. Used by the conflict-edge
+   *  flow to open the Insight Panel · 审查 tab and expand the picked
+   *  conflict. */
+  onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void
   isAnimating: boolean
 }
 
@@ -47,6 +51,7 @@ export function CanvasFlow({
   onNodesChange,
   onEdgesChange,
   onConnect,
+  onEdgeClick,
   isAnimating,
 }: CanvasFlowProps) {
   const setSelectedNodeIds = useComfyStore((s) => s.setSelectedNodeIds)
@@ -82,17 +87,11 @@ export function CanvasFlow({
   }, [undo, redo])
   return (
     <main
-      className={`flex-1 relative overflow-hidden bg-ink ${
+      className={`flex-1 relative overflow-hidden bg-stratum-surface ${
         isAnimating ? 'opacity-0' : 'animate-fade-in-up'
       }`}
       style={{ animationDelay: '0.3s' }}
     >
-      {/* Layer 1 — paper-grain noise (multiply on ink). Pinned to
-          viewport so zooming the canvas doesn't blur the texture. */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 z-0 pointer-events-none bg-grain-ink"
-      />
 
       <ReactFlow
         nodes={nodes}
@@ -100,6 +99,7 @@ export function CanvasFlow({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onEdgeClick={onEdgeClick}
         onSelectionChange={handleSelectionChange}
         nodeTypes={comfyNodeTypes}
         nodesDraggable
@@ -118,19 +118,20 @@ export function CanvasFlow({
           type: 'smoothstep',
           animated: false,
           style: {
-            stroke: '#4A4744',     // ink-ash3 — visible on dark, no amber
-            strokeWidth: 1.5,
+            stroke: '#C6C6CD',     // outline-variant — perspective line on light
+            strokeWidth: 1.25,
+            strokeDasharray: '4 4',
           },
           labelStyle: {
             fontFamily: 'var(--font-jetbrains-mono)',
             fontSize: 10,
             letterSpacing: '0.18em',
             textTransform: 'uppercase',
-            fill: '#8A8784',       // ink-ash4
+            fill: '#6B7280',       // stratum-muted
           },
-          labelBgStyle: { fill: '#161514' },              // ink-ash1
+          labelBgStyle: { fill: '#FFFFFF' },              // surface-raised
           labelBgPadding: [6, 4],
-          labelBgBorderRadius: 0,                         // brutalist
+          labelBgBorderRadius: 4,
         }}
         className="canvas-flow-surface relative z-[1]"
         fitView
@@ -148,29 +149,29 @@ export function CanvasFlow({
           variant={BackgroundVariant.Dots}
           gap={24}
           size={1}
-          color="rgba(74, 71, 68, 0.22)"   // ink-ash3 at 22%
+          color="#C6C6CD"
           style={{ background: 'transparent' }}
         />
         <Controls
-          className="!shadow-none !border-[1.5px] !border-paper/30 !bg-ink-ash1 !rounded-none [&_button]:!bg-transparent [&_button]:!border-0 [&_button]:!text-paper-ash3 [&_button:hover]:!text-paper [&_button:hover]:!bg-ink-ash2/40"
+          className="!shadow-md !border !border-stratum-line !bg-white !rounded-full !overflow-hidden [&>button]:!bg-transparent [&>button]:!border-0 [&>button]:!border-b [&>button]:!border-stratum-line [&>button:last-child]:!border-b-0 [&>button]:!text-stratum-ink [&>button:hover]:!text-stratum-blue [&>button:hover]:!bg-stratum-surface-low"
           showInteractive={false}
         />
         <MiniMap
-          className="!shadow-none !border-[1.5px] !border-paper/30 !rounded-none"
-          nodeColor="#8A8784"            // ink-ash4 nodes
-          nodeStrokeColor="#161514"      // ink-ash1 outline
-          nodeStrokeWidth={2}
-          maskColor="rgba(10, 10, 10, 0.7)"  // ink at 70%
-          style={{ background: '#161514' }}  // ink-ash1
+          className="!shadow-md !border !border-stratum-line !rounded-xl !overflow-hidden"
+          nodeColor="#89CEFF"
+          nodeStrokeColor="#131B2E"
+          nodeStrokeWidth={1.5}
+          maskColor="rgba(19, 27, 46, 0.08)"
+          style={{ background: '#FFFFFF' }}
           pannable
           zoomable
         />
       </ReactFlow>
 
-      {/* Bottom-left keyboard hint — editorial mono kicker, brutalist edge */}
-      <div className="absolute bottom-6 left-6 z-[2] flex items-center gap-3 bg-ink-ash1 border-[1px] border-paper/20 px-3 py-1.5 pointer-events-none">
-        <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
-          按住 <kbd className="font-instr text-[10px] text-paper bg-ink-ash2/60 border-[0.5px] border-paper/30 px-1 py-0.5 mx-1">SPACE</kbd> 拖动 · 滚轮缩放 · ⌘<kbd className="font-instr text-[10px] text-paper bg-ink-ash2/60 border-[0.5px] border-paper/30 px-1 py-0.5 mx-1">Z</kbd>撤销
+      {/* Bottom-left keyboard hint */}
+      <div className="absolute bottom-6 left-6 z-[2] flex items-center gap-3 bg-white/80 backdrop-blur-md border border-stratum-line rounded-full px-4 py-1.5 pointer-events-none shadow-sm">
+        <span className="font-instr text-[10px] uppercase tracking-[0.18em] text-stratum-muted">
+          按住 <kbd className="font-instr text-[10px] text-stratum-ink bg-stratum-surface-low border border-stratum-line rounded px-1.5 py-0.5 mx-1">SPACE</kbd> 拖动 · 滚轮缩放 · ⌘<kbd className="font-instr text-[10px] text-stratum-ink bg-stratum-surface-low border border-stratum-line rounded px-1.5 py-0.5 mx-1">Z</kbd>撤销
         </span>
       </div>
     </main>

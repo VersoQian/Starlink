@@ -125,19 +125,18 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
         style={{
           width: 8,
           height: 8,
-          background: '#2A2826',
-          border: '0.5px solid rgba(244,240,232,0.4)'
+          background: '#FFFFFF',
+          border: '1px solid rgba(19,27,46,0.18)'
         }}
       />
 
       <div
-        className="group relative w-[360px] overflow-hidden border-[1px] border-ink-ash3/30 bg-ink-ash1 transition-colors hover:border-ink-ash2/60"
-        style={{ boxShadow: `inset 3px 0 0 0 ${config.edgeHex}` }}
+        className="group relative w-[360px] overflow-hidden rounded-xl border border-stratum-line bg-white shadow-md transition-shadow hover:shadow-lg"
+        style={{ boxShadow: `inset 4px 0 0 0 ${config.edgeHex}, 0 4px 12px rgba(19,27,46,0.06)` }}
       >
-        {/* 头部 — Fraunces 字母 byline + 名称 */}
-        <div className="relative border-b-[0.5px] border-ink-ash3/30 px-4 py-3">
+        {/* Header — Fraunces glyph + name */}
+        <div className="relative border-b border-stratum-line px-4 py-3">
           <div className="flex items-center gap-3">
-            {/* Single display-serif glyph in lieu of emoji avatar */}
             <span
               aria-hidden="true"
               className={`shrink-0 font-display font-[700] text-[28px] leading-none ${config.tintClass}`}
@@ -146,10 +145,10 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
             </span>
 
             <div className="min-w-0 flex-1">
-              <h3 className="font-display font-[700] text-[15px] tracking-[0.02em] text-paper truncate">
+              <h3 className="font-display font-[700] text-[15px] tracking-tight text-stratum-navy truncate">
                 {config.name}
               </h3>
-              <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 mt-0.5">
+              <p className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-blue mt-0.5">
                 {config.description}
               </p>
             </div>
@@ -157,10 +156,10 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
             {isInteractive && (
               <button
                 onClick={() => setIsChatOpen(!isChatOpen)}
-                className={`flex h-7 w-7 items-center justify-center transition-colors ${
+                className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
                   isChatOpen
-                    ? 'bg-ink-ash2/40 text-paper'
-                    : 'text-ink-ash4 hover:bg-ink-ash2/40 hover:text-paper'
+                    ? 'bg-stratum-navy text-white'
+                    : 'text-stratum-muted hover:bg-stratum-surface-low hover:text-stratum-navy'
                 }`}
                 aria-label={isChatOpen ? '关闭对话' : '打开对话'}
               >
@@ -174,18 +173,17 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
           </div>
         </div>
 
-        {/* 对话界面 */}
+        {/* Chat */}
         {isChatOpen && (
           <div className="relative">
-            {/* 消息区域 */}
-            <div className="h-56 space-y-3 overflow-y-auto bg-ink/40 p-4">
+            <div className="h-56 space-y-3 overflow-y-auto bg-stratum-surface p-4">
               {chatMessages.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center">
                   <Sparkles className={`h-5 w-5 mb-2 ${config.tintClass}`} strokeWidth={1.5} />
-                  <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
+                  <p className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-muted">
                     向我提问关于
                   </p>
-                  <p className="mt-1 font-display font-[700] text-[13px] text-paper">
+                  <p className="mt-1 font-display font-[700] text-[13px] text-stratum-navy">
                     {config.description}
                   </p>
                 </div>
@@ -198,16 +196,16 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
                     <span
                       aria-hidden="true"
                       className={`shrink-0 flex h-6 w-6 items-center justify-center font-display font-[700] text-[14px] leading-none ${
-                        msg.role === 'agent' ? config.tintClass : 'text-ink-ash4'
+                        msg.role === 'agent' ? config.tintClass : 'text-stratum-muted'
                       }`}
                     >
                       {msg.role === 'agent' ? config.glyph : 'U'}
                     </span>
                     <div
-                      className={`max-w-[78%] border-[0.5px] px-3 py-2 font-body text-[12px] leading-[1.5] ${
+                      className={`max-w-[78%] rounded-lg px-3 py-2 font-body text-[12px] leading-[1.5] ${
                         msg.role === 'agent'
-                          ? 'border-ink-ash3/30 bg-ink-ash2/30 text-paper/85'
-                          : 'border-paper/20 bg-paper/[0.04] text-paper'
+                          ? 'bg-white border border-stratum-line text-stratum-ink shadow-sm'
+                          : 'bg-stratum-navy text-white shadow-sm'
                       }`}
                     >
                       <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -217,8 +215,7 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
               )}
             </div>
 
-            {/* 输入区域 */}
-            <div className="border-t-[0.5px] border-ink-ash3/30 bg-ink/40 p-3">
+            <div className="border-t border-stratum-line bg-white p-3">
               <div className="flex items-end gap-2">
                 <textarea
                   value={inputMessage}
@@ -230,7 +227,7 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
                     }
                   }}
                   placeholder="输入你的问题…"
-                  className="flex-1 resize-none border-[0.5px] border-ink-ash3/40 bg-ink/60 px-3 py-2 font-body text-[12px] text-paper outline-none transition-colors placeholder:text-ink-ash4 focus:border-paper/40"
+                  className="flex-1 resize-none rounded-lg border border-stratum-line bg-stratum-surface-low px-3 py-2 font-body text-[12px] text-stratum-navy outline-none transition-colors placeholder:text-stratum-muted focus:border-stratum-blue focus:ring-1 focus:ring-stratum-blue/30"
                   rows={2}
                   disabled={isProcessing}
                 />
@@ -238,7 +235,7 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
                   type="button"
                   onClick={handleSendMessage}
                   disabled={!inputMessage.trim() || isProcessing}
-                  className="flex h-9 w-9 items-center justify-center bg-paper text-ink transition-colors disabled:opacity-30 hover:bg-paper-ash2"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-stratum-navy text-white transition-colors disabled:opacity-30 hover:bg-stratum-navy-soft"
                   aria-label="发送"
                 >
                   {isProcessing ? (
@@ -259,8 +256,8 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
         style={{
           width: 8,
           height: 8,
-          background: '#2A2826',
-          border: '0.5px solid rgba(244,240,232,0.4)'
+          background: '#FFFFFF',
+          border: '1px solid rgba(19,27,46,0.18)'
         }}
       />
     </>

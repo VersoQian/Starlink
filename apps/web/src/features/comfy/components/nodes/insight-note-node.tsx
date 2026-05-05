@@ -20,7 +20,7 @@ import { Edit3, Check, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
 const HANDLE_BASE =
-  'h-2 w-2 !border-[0.5px] !border-paper/40 !bg-ink-ash2'
+  'h-2 w-2 !border-[0.5px] !border-stratum-blue/60 !bg-stratum-surface-low'
 
 const CONFIDENCE_BAND: Record<'high' | 'medium' | 'low', string> = {
   high:   '100%',
@@ -58,11 +58,11 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
       <Handle type="target" position={Position.Left} className={HANDLE_BASE} />
 
       <article
-        className="relative w-[360px] bg-ink-ash1 border-[1px] border-ink-ash3/30 hover:border-ink-ash2/60 transition-colors"
+        className="relative w-[360px] bg-white border-[1px] border-stratum-line hover:border-stratum-blue/40 transition-colors"
         style={{ boxShadow: 'inset 3px 0 0 0 #6B6B7C' /* synthesizer byline edge */ }}
       >
         {/* Header — synthesizer glyph + agent + edit/save buttons */}
-        <header className="flex items-baseline gap-3 px-4 pt-3 pb-2 border-b-[0.5px] border-ink-ash3/30">
+        <header className="flex items-baseline gap-3 px-4 pt-3 pb-2 border-b-[0.5px] border-stratum-line">
           <span
             aria-hidden="true"
             className="font-display font-[700] text-[20px] leading-none text-byline-synthesizer shrink-0"
@@ -74,17 +74,17 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
               type="text"
               value={editedLabel}
               onChange={(e) => setEditedLabel(e.target.value)}
-              className="flex-1 font-display font-[700] text-[15px] tracking-[0.02em] bg-ink-ash2/40 px-2 py-1 border-[1px] border-paper/30 focus:outline-none focus:border-paper/60 text-paper placeholder:text-ink-ash4"
+              className="flex-1 font-display font-[700] text-[15px] tracking-[0.02em] bg-stratum-surface-low px-2 py-1 border-[1px] border-stratum-blue/40 focus:outline-none focus:border-stratum-blue text-stratum-navy placeholder:text-stratum-muted"
               placeholder="洞察标题"
               autoFocus
             />
           ) : (
             <div className="flex-1 min-w-0">
-              <h3 className="font-display font-[700] text-[15px] tracking-[0.02em] text-paper truncate">
+              <h3 className="font-display font-[700] text-[15px] tracking-[0.02em] text-stratum-navy truncate">
                 {nodeData?.label || '洞察便签'}
               </h3>
               {nodeData?.metadata?.agent_signature ? (
-                <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 mt-0.5">
+                <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mt-0.5">
                   来自 <span className="text-byline-synthesizer">{nodeData.metadata.agent_signature}</span>
                 </p>
               ) : null}
@@ -95,7 +95,7 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
             {!isEditing ? (
               <button
                 onClick={() => setIsEditing(true)}
-                className="flex h-7 w-7 items-center justify-center text-ink-ash4 transition-colors hover:bg-ink-ash2/40 hover:text-paper"
+                className="flex h-7 w-7 items-center justify-center text-stratum-muted transition-colors hover:bg-stratum-surface-low hover:text-stratum-navy"
                 aria-label="编辑"
               >
                 <Edit3 className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -104,14 +104,14 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
               <>
                 <button
                   onClick={handleSave}
-                  className="flex h-7 w-7 items-center justify-center text-paper transition-colors hover:bg-paper/10"
+                  className="flex h-7 w-7 items-center justify-center text-stratum-navy transition-colors hover:bg-stratum-navy/10"
                   aria-label="保存"
                 >
                   <Check className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
                 <button
                   onClick={handleCancel}
-                  className="flex h-7 w-7 items-center justify-center text-ink-ash4 transition-colors hover:bg-ink-ash2/40 hover:text-paper"
+                  className="flex h-7 w-7 items-center justify-center text-stratum-muted transition-colors hover:bg-stratum-surface-low hover:text-stratum-navy"
                   aria-label="取消"
                 >
                   <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -128,10 +128,10 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
               placeholder="输入洞察内容（支持 Markdown）..."
-              className="block h-40 w-full resize-none bg-ink-ash2/30 border-[1px] border-paper/30 px-3 py-2 font-body text-[13px] leading-[1.5] text-paper placeholder:text-ink-ash4 outline-none focus:border-paper/60"
+              className="block h-40 w-full resize-none bg-stratum-surface-low border-[1px] border-stratum-blue/40 px-3 py-2 font-body text-[13px] leading-[1.5] text-stratum-navy placeholder:text-stratum-muted outline-none focus:border-stratum-blue"
             />
           ) : (
-            <div className="prose prose-sm prose-invert font-body text-[13px] leading-[1.55] text-paper/85 max-w-measure-cell max-h-64 min-h-[80px] overflow-y-auto">
+            <div className="prose prose-sm font-body text-[13px] leading-[1.55] text-stratum-ink max-w-measure-cell max-h-64 min-h-[80px] overflow-y-auto">
               <ReactMarkdown>
                 {nodeData?.content || '*这里将展示 AI 生成的洞察和建议*'}
               </ReactMarkdown>
@@ -140,23 +140,23 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
 
           {/* Confidence */}
           {confidence ? (
-            <div className="flex items-center gap-2 font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
-              <span className="text-paper-ash3">CONF</span>
-              <div className="flex-1 h-1 bg-ink-ash2/40 overflow-hidden">
+            <div className="flex items-center gap-2 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
+              <span className="text-stratum-muted">CONF</span>
+              <div className="flex-1 h-1 bg-stratum-surface-low overflow-hidden">
                 <div
                   className="h-full bg-byline-synthesizer transition-all"
                   style={{ width: CONFIDENCE_BAND[confidence] }}
                 />
               </div>
-              <span className="text-paper-ash3">{confidence}</span>
+              <span className="text-stratum-muted">{confidence}</span>
             </div>
           ) : null}
 
           {/* Source */}
           {nodeData?.metadata?.source ? (
-            <div className="font-instr text-[10px] text-paper-ash3 border-l-[1.5px] border-ink-ash3/40 px-2 py-1">
-              <span className="uppercase tracking-kicker text-ink-ash4">SOURCE</span>
-              <span className="ml-2 text-paper">{nodeData.metadata.source}</span>
+            <div className="font-instr text-[10px] text-stratum-muted border-l-[1.5px] border-stratum-line px-2 py-1">
+              <span className="uppercase tracking-kicker text-stratum-muted">SOURCE</span>
+              <span className="ml-2 text-stratum-navy">{nodeData.metadata.source}</span>
             </div>
           ) : null}
 
@@ -166,7 +166,7 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
               {nodeData.metadata.tags.map((tag, idx) => (
                 <span
                   key={idx}
-                  className="border-[0.5px] border-ink-ash3/40 px-1.5 py-0.5 font-instr text-[10px] uppercase tracking-kicker text-paper-ash3"
+                  className="border-[0.5px] border-stratum-line px-1.5 py-0.5 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted"
                 >
                   {tag}
                 </span>

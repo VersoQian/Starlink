@@ -91,7 +91,7 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
     <aside
       className={cn(
         'fixed right-4 top-20 bottom-8 z-40 w-[min(420px,calc(100vw-2rem))]',
-        'bg-ink-ash1 border-[1.5px] border-paper/30',
+        'bg-white border-[1.5px] border-stratum-line',
         'flex flex-col overflow-hidden animate-editorial-publish',
         className
       )}
@@ -100,31 +100,31 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
       aria-label="Evidence detail"
     >
       {/* Header — kicker EVIDENCE + Fraunces 标题 + close */}
-      <header className="flex items-start justify-between border-b-[1px] border-ink-ash3/30 px-5 py-4 shrink-0">
+      <header className="flex items-start justify-between border-b-[1px] border-stratum-line px-5 py-4 shrink-0">
         <div className="flex items-baseline gap-3 min-w-0">
-          <FileText className="h-3.5 w-3.5 text-paper-ash3 shrink-0 self-center" strokeWidth={1.5} />
+          <FileText className="h-3.5 w-3.5 text-stratum-muted shrink-0 self-center" strokeWidth={1.5} />
           <div className="min-w-0">
-            <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+            <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
               EVIDENCE · 证据来源
             </p>
             <h3
-              className="mt-1 font-display font-[700] text-[15px] tracking-[0.02em] text-paper truncate"
+              className="mt-1 font-display font-[700] text-[15px] tracking-[0.02em] text-stratum-navy truncate"
               title={title}
             >
               {title}
             </h3>
-            <p className="mt-1 font-instr text-[10px] tabular-nums text-ink-ash4">
-              <span className="text-paper-ash3">DOC</span> {docId}
+            <p className="mt-1 font-instr text-[10px] tabular-nums text-stratum-muted">
+              <span className="text-stratum-muted">DOC</span> {docId}
               {snippetId ? (
                 <>
                   {' · '}
-                  <span className="text-paper-ash3">CHUNK</span> {snippetId}
+                  <span className="text-stratum-muted">CHUNK</span> {snippetId}
                 </>
               ) : null}
               {typeof score === 'number' ? (
                 <>
                   {' · '}
-                  <span className="text-paper-ash3">REL</span> {score.toFixed(2)}
+                  <span className="text-stratum-muted">REL</span> {score.toFixed(2)}
                 </>
               ) : null}
             </p>
@@ -136,7 +136,7 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
             clearHighlight()
             closeDrawer()
           }}
-          className="shrink-0 p-1.5 border-[0.5px] border-ink-ash3/40 text-paper-ash3 hover:border-paper/40 hover:text-paper transition-colors"
+          className="shrink-0 p-1.5 border-[0.5px] border-stratum-line text-stratum-muted hover:border-stratum-blue/40 hover:text-stratum-navy transition-colors"
           aria-label="关闭"
         >
           <X className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -147,12 +147,12 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
       <section className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
         {/* Snippet */}
         <div>
-          <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 mb-2">
+          <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mb-2">
             原文片段 · ORIGINAL SNIPPET
           </p>
-          <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-3 font-body text-[13px] leading-[1.6] text-paper/85 max-w-measure-body">
+          <div className="border-[0.5px] border-stratum-line bg-stratum-surface-low px-4 py-3 font-body text-[13px] leading-[1.6] text-stratum-ink max-w-measure-body">
             {snippetText || (
-              <span className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
+              <span className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
                 — 该 evidence 原文在当前会话中不可见 —
               </span>
             )}
@@ -161,42 +161,42 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
 
         {/* Reverse lookup — which BMC cards reference this evidence */}
         <div>
-          <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 mb-2">
+          <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mb-2">
             反向查询 · CARDS CITING THIS
           </p>
-          <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-3 font-instr text-[11px] uppercase tracking-kicker">
+          <div className="border-[0.5px] border-stratum-line bg-stratum-surface-low px-4 py-3 font-instr text-[11px] uppercase tracking-kicker">
             {isLoading ? (
-              <span className="text-ink-ash4">查询中...</span>
+              <span className="text-stratum-muted">查询中...</span>
             ) : referenceCount > 0 ? (
-              <span className="text-paper">
-                <span className="tabular-nums text-press">{referenceCount}</span>{' '}
-                <span className="text-paper-ash3">张卡片引用此证据</span>
+              <span className="text-stratum-navy">
+                <span className="tabular-nums text-stratum-danger">{referenceCount}</span>{' '}
+                <span className="text-stratum-muted">张卡片引用此证据</span>
               </span>
             ) : (
-              <span className="text-ink-ash4">尚未发现引用此证据的卡片</span>
+              <span className="text-stratum-muted">尚未发现引用此证据的卡片</span>
             )}
           </div>
         </div>
       </section>
 
       {/* Footer — primary CTA paper-on-ink */}
-      <footer className="border-t-[1px] border-ink-ash3/30 px-5 py-4 shrink-0">
+      <footer className="border-t-[1px] border-stratum-line px-5 py-4 shrink-0">
         <button
           type="button"
           onClick={handleLocateCards}
           disabled={!referencingCardIds || referencingCardIds.length === 0}
           className={cn(
             'flex w-full items-center justify-center gap-2',
-            'bg-paper text-ink px-4 py-2',
+            'bg-stratum-navy text-white px-4 py-2',
             'font-instr text-[10px] uppercase tracking-kicker',
-            'hover:bg-paper-ash2 transition-colors',
-            'disabled:opacity-30 disabled:cursor-not-allowed disabled:bg-ink-ash2/40 disabled:text-ink-ash4'
+            'hover:bg-stratum-navy-soft transition-colors',
+            'disabled:opacity-30 disabled:cursor-not-allowed disabled:bg-stratum-surface-low disabled:text-stratum-muted'
           )}
         >
           <Target className="h-3.5 w-3.5" strokeWidth={1.75} />
           定位相关卡片
           {drawer.highlightedCardIds.length > 0 ? (
-            <span className="text-press tabular-nums">· 已高亮</span>
+            <span className="text-stratum-danger tabular-nums">· 已高亮</span>
           ) : null}
         </button>
       </footer>

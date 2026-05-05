@@ -30,9 +30,9 @@ const SEVERITY_LABEL = {
 } as const
 
 const SEVERITY_BORDER = {
-  high:   'border-[1.5px] border-press',
-  medium: 'border-[1px]   border-press/70',
-  low:    'border-[0.5px] border-press/40',
+  high:   'border-2   border-stratum-danger',
+  medium: 'border     border-stratum-danger/70',
+  low:    'border     border-stratum-danger/40',
 } as const
 
 const CONFLICT_TYPE_LABELS: Record<NonNullable<MacraNodeData['conflictType']>, string> = {
@@ -43,7 +43,7 @@ const CONFLICT_TYPE_LABELS: Record<NonNullable<MacraNodeData['conflictType']>, s
 }
 
 const HANDLE_BASE =
-  'h-2 w-2 !border-[0.5px] !border-paper/40 !bg-ink-ash2'
+  'h-2 w-2 !border !border-stratum-line !bg-white'
 
 export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: NodeProps) {
   const macraNode = useComfyStore((state) => state.macraNodes.get(id))
@@ -59,19 +59,20 @@ export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: N
 
       <article
         className={[
-          'relative w-[320px] bg-ink-ash1 font-body text-paper',
-          'transition-[border-color,opacity] duration-100 ease-out',
+          'relative w-[320px] rounded-xl bg-white font-body text-stratum-navy shadow-md',
+          'transition-shadow duration-100 ease-out hover:shadow-lg',
           SEVERITY_BORDER[severity],
         ].join(' ')}
+        style={{ boxShadow: 'inset 4px 0 0 0 #BA1A1A, 0 4px 12px rgba(186,26,26,0.08)' }}
       >
-        {/* Header — press kicker + label + conflict type */}
-        <header className="flex items-baseline gap-2 px-4 pt-3 pb-2 border-b-[0.5px] border-ink-ash3/30">
-          <AlertTriangle className="h-3.5 w-3.5 text-press shrink-0" strokeWidth={1.75} />
-          <span className="font-instr text-[10px] uppercase tracking-kicker text-press">
+        {/* Header — danger kicker + label + conflict type */}
+        <header className="flex items-baseline gap-2 px-4 pt-3 pb-2 border-b border-stratum-line">
+          <AlertTriangle className="h-3.5 w-3.5 text-stratum-danger shrink-0" strokeWidth={2} fill="#FFDAD6" />
+          <span className="font-body text-[10px] font-bold uppercase tracking-[0.18em] text-stratum-danger">
             CONFLICT · {SEVERITY_LABEL[severity]}
           </span>
           {conflictLabel ? (
-            <span className="ml-auto font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 truncate">
+            <span className="ml-auto font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-muted truncate">
               {conflictLabel}
             </span>
           ) : null}
@@ -80,7 +81,7 @@ export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: N
         {/* Title — Fraunces */}
         <div className="px-4 pt-3 pb-2">
           <h3
-            className="font-display font-[700] text-[15px] tracking-[0.02em] leading-tight text-paper"
+            className="font-display font-[700] text-[15px] tracking-tight leading-tight text-stratum-navy"
             title={nodeData?.label || ''}
           >
             {nodeData?.label || '冲突警示'}
@@ -88,16 +89,16 @@ export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: N
         </div>
 
         {/* Body — markdown content */}
-        <div className="px-4 pb-3 border-t-[1px] border-ink-ash2/40">
-          <div className="prose prose-sm prose-invert font-body text-[12px] leading-[1.55] text-paper/85 max-h-52 max-w-measure-cell overflow-y-auto pt-3">
+        <div className="px-4 pb-3 border-t border-stratum-line">
+          <div className="prose prose-sm font-body text-[12px] leading-[1.55] text-stratum-ink max-h-52 max-w-measure-cell overflow-y-auto pt-3">
             <ReactMarkdown>{nodeData?.content || '*暂无冲突详情*'}</ReactMarkdown>
           </div>
         </div>
 
         {/* Footer — detected by */}
         {nodeData?.metadata?.agent_signature ? (
-          <footer className="flex items-baseline gap-2 px-4 pt-2 pb-2 border-t-[0.5px] border-ink-ash3/30 font-instr text-[10px] uppercase tracking-kicker">
-            <span className="text-ink-ash4">DETECTED BY</span>
+          <footer className="flex items-baseline gap-2 px-4 pt-2 pb-2 border-t border-stratum-line font-body text-[10px] font-semibold uppercase tracking-[0.18em]">
+            <span className="text-stratum-muted">DETECTED BY</span>
             <span className="text-byline-critic">{nodeData.metadata.agent_signature}</span>
           </footer>
         ) : null}

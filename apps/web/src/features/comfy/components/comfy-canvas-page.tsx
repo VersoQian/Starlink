@@ -1,12 +1,23 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Node } from 'reactflow'
+import type { Node, Edge } from 'reactflow'
 import { useComfyStore } from '../store'
+import { buildConflictEdges } from '../store/build-conflict-edges'
 import { CCBMCDetailDrawer } from './cc-bmc-detail-drawer'
+import { ReportDetailDrawer } from './report-detail-drawer'
 import { CanvasHeader } from './canvas-header'
 import { CanvasFlow } from './canvas'
 import { CanvasTutorialDialog } from './canvas-tutorial-dialog'
+import { CanvasPerspectiveToggle } from './canvas-perspective-toggle'
+import { CanvasChatDock } from './canvas-chat-dock'
+import { CanvasCitationPanel } from './canvas-citation-panel'
+import { CanvasHitlBanner } from './canvas-hitl-banner'
+import { CanvasPromptDialog } from './canvas-prompt-dialog'
+import { CanvasThinkingOverlay } from './canvas-thinking-overlay'
+import { EvidenceDrawer } from './evidence-drawer'
+import { KbUploadModal } from './kb-upload-modal'
+import { Database } from 'lucide-react'
 import { WorkspaceShell } from './workspace-shell'
 import type { PendingDecisionRequest } from './workspace-shell-context'
 import './panels/register-default-panels'
@@ -50,7 +61,6 @@ export function CanvasPage({
   const callCritic = useComfyStore((state) => state.callCritic)
   const setWorkspaceId = useComfyStore((state) => state.setWorkspaceId)
   const appendChatMessage = useComfyStore((state) => state.appendChatMessage)
-  const setChatInput = useComfyStore((state) => state.setChatInput)
   const approveDecision = useComfyStore((state) => state.approveDecision)
   const macraNodes = useComfyStore((state) => state.macraNodes)
   const openDetailPanel = useComfyStore((state) => state.openDetailPanel)
@@ -114,6 +124,25 @@ export function CanvasPage({
   const [showTutorial, setShowTutorial] = useState(false)
   const [tutorialStep, setTutorialStep] = useState(0)
   const [isAnimating, setIsAnimating] = useState(true)
+  const [showPromptDialog, setShowPromptDialog] = useState(false)
+  // Default both side panels CLOSED so the canvas is the visual focus on
+  // entry. User clicks the floating chat / book icon to expand. Avoids
+  // a "panels eat 680/800px → ReactFlow fitView shrinks nodes to 14%
+  // scale → user sees an empty canvas" misperception.
+  const [chatOpen, setChatOpen] = useState(false)
+  const [citationOpen, setCitationOpen] = useState(false)
+  const [kbModalOpen, setKbModalOpen] = useState(false)
+  // Conflict highlight is now driven by the store's focusedConflictId so
+  // both the canvas (edge click) and the renderer chips
+  // ([[critic:conflictId]] in report-writer output) can request the same
+  // panel-state change. Reading from the store also keeps this state
+  // available across drawer re-mounts.
+  const focusedConflictId = useComfyStore((s) => s.focusedConflictId)
+  const setFocusedConflictId = useComfyStore((s) => s.setFocusedConflictId)
+  // Whenever a chip / edge sets a conflict id, auto-open the citation panel.
+  useEffect(() => {
+    if (focusedConflictId) setCitationOpen(true)
+  }, [focusedConflictId])
   const structuredNodes = useMemo(
     () =>
       Array.from(macraNodes.values()).filter((node): node is MacraNodeData =>
@@ -124,6 +153,44 @@ export function CanvasPage({
   const conflictAlertCount = useMemo(
     () => Array.from(macraNodes.values()).filter((node) => node.type === 'conflict-alert').length,
     [macraNodes]
+  )
+
+  // Hide conflict-alert nodes from canvas — they're rendered as edges instead.
+  const nodesWithoutConflicts = useMemo(
+    () => nodes.filter((n) => !n.id?.startsWith('conflict-')),
+    [nodes]
+  )
+
+  // Detail-drawer routing: BMC nodes get CCBMCDetailDrawer (with quiz / edit / etc tabs);
+  // report-card nodes get the dedicated ReportDetailDrawer (TOC + sections, no tabs).
+  // Other types fall through to BMC drawer (which gracefully degrades).
+  const detailNodeId = useComfyStore((state) => state.detailPanel?.nodeId)
+  const focusedDrawerKind = useMemo<'report' | 'bmc'>(() => {
+    if (!detailNodeId) return 'bmc'
+    const node = macraNodes.get(detailNodeId)
+    return node?.type === 'report-card' ? 'report' : 'bmc'
+  }, [detailNodeId, macraNodes])
+
+  // Augment edges with synthetic conflict edges (red dashed) connecting
+  // each conflict's BMC cell pair. Use the conflictType / relatedAgents
+  // mapping from buildConflictEdges. presentNodeIds gates against
+  // missing cells so we never produce dangling edges.
+  const edgesWithConflicts = useMemo<Edge[]>(() => {
+    const presentIds = new Set(nodesWithoutConflicts.map((n) => n.id))
+    const conflictEdges = buildConflictEdges(macraNodes, presentIds)
+    return [...edges, ...conflictEdges]
+  }, [edges, macraNodes, nodesWithoutConflicts])
+
+  // Click a conflict edge → open Insight Panel + switch to 审查 tab +
+  // auto-expand that conflict for inline detail reading.
+  const handleEdgeClick = useCallback(
+    (_event: React.MouseEvent, edge: Edge) => {
+      const data = edge.data as { conflictId?: string } | undefined
+      if (!data?.conflictId) return
+      setFocusedConflictId(data.conflictId)
+      // useEffect above will open the panel
+    },
+    [setFocusedConflictId]
   )
 
   useEffect(() => {
@@ -217,23 +284,171 @@ export function CanvasPage({
     }
   }, [appendChatMessage, callLangGraph, isOrchestratorProcessing, seedInput])
 
+  const handlePromptSubmit = useCallback(
+    async (seed: string) => {
+      if (isOrchestratorProcessing) return
+      setShowPromptDialog(false)
+      appendChatMessage({ role: 'user', content: seed })
+      try {
+        await callLangGraph(seed, 'seed')
+        appendChatMessage({
+          role: 'assistant',
+          content: `已为你生成基于"${seed}"的初始画布。继续对话来完善它。`,
+        })
+      } catch (error) {
+        console.error('种子生成失败:', error)
+        appendChatMessage({
+          role: 'assistant',
+          content: '抱歉，AI 生成失败，请稍后再试。',
+        })
+      }
+    },
+    [appendChatMessage, callLangGraph, isOrchestratorProcessing]
+  )
+
+  // Resume hydration: when user lands on /canvas/<conversationId> from
+  // /chat homepage (or via rail click), pull the existing conversation's
+  // graph + evidence from server so the canvas paints immediately. If
+  // the URL param turns out NOT to be a conversation (e.g. legacy
+  // /canvas/proj-001 path), the hydrate returns null and we keep the
+  // fresh-canvas behaviour. Standalone-only — the shell route runs its
+  // own seed flow via WorkspaceShell.
+  const hydrateFromConversation = useComfyStore((state) => state.hydrateFromConversation)
+  const reflectOnChatStore = useComfyStore((state) => state.reflectOnChat)
+  const setStoreChatInput = useComfyStore((state) => state.setChatInput)
+  const [hydrateAttempted, setHydrateAttempted] = useState(false)
+  useEffect(() => {
+    if (!standalone || hydrateAttempted) return
+    setHydrateAttempted(true)
+    ;(async () => {
+      await hydrateFromConversation(workspaceId).catch(() => null)
+      // Phase 1 (Socratic exploration) trigger: if /chat homepage
+      // stashed a seed in sessionStorage, fire ONE coach reflection on
+      // it now. The user message gets appended to chat (handled inside
+      // reflectOnChat), and the coach replies with a why/how/so-what
+      // question. The agent BMC pipeline does NOT fire here — that's
+      // what AI Synthesis button is for once user is ready to graduate.
+      if (typeof window === 'undefined') return
+      const pendingSeed = window.sessionStorage.getItem('starlink_pending_seed')
+      if (pendingSeed && pendingSeed.trim()) {
+        window.sessionStorage.removeItem('starlink_pending_seed')
+        setChatOpen(true)
+        // Pre-fill seed input so AI Synthesis prompt dialog shows it
+        // when the user is ready to generate the BMC.
+        setSeedInput(pendingSeed)
+        setStoreChatInput('')
+        await reflectOnChatStore(pendingSeed).catch((err) => {
+          console.warn('[canvas] initial Socratic reflect failed', err)
+        })
+      }
+
+      // Mode B path: ?kb=<id> from /knowledge — directly fire BMC pipeline
+      // with KB as RAG source. Bypasses Socratic exploration since the
+      // user has already curated their materials.
+      const url = new URL(window.location.href)
+      const kbParam = url.searchParams.get('kb')
+      if (kbParam) {
+        url.searchParams.delete('kb')
+        window.history.replaceState({}, '', url.toString())
+        const langGraph = useComfyStore.getState().callLangGraph
+        await langGraph(
+          '基于已上传的资料生成 BMC 商业画布，使用 RAG 检索关键证据',
+          'seed',
+          kbParam
+        ).catch((err) => console.warn('[canvas] kb auto-trigger failed', err))
+      }
+    })()
+  }, [standalone, hydrateAttempted, workspaceId, hydrateFromConversation, reflectOnChatStore, setStoreChatInput])
+
+  // Chat dock send goes through the Socratic coach (reflectOnIdeation),
+  // NOT the BMC generator pipeline. The coach reads current canvas state
+  // and recent chat history, returns one scaffold-typed reflective
+  // question (why / how / so_what / evidence_needed / meta). To trigger
+  // the BMC generator instead, use AI Synthesis in the action bar →
+  // CanvasPromptDialog (which routes to callLangGraph).
+  const reflectOnChat = useComfyStore((state) => state.reflectOnChat)
   const handleSendChat = useCallback(async () => {
-    const { chatInput } = useComfyStore.getState()
-    if (!chatInput.trim() || isOrchestratorProcessing) return
+    const { chatInput, chatReflecting, mentionAgent: mention, setChatInput, setChatMessages } = useComfyStore.getState()
+    const trimmed = chatInput.trim()
+    if (!trimmed || isOrchestratorProcessing || chatReflecting) return
 
-    appendChatMessage({ role: 'user', content: chatInput })
-
-    try {
-      await callLangGraph(chatInput, 'general')
-      appendChatMessage({
-        role: 'assistant',
-        content: '已根据你的问题更新画布。',
-      })
-      setChatInput('')
-    } catch (error) {
-      console.error('对话失败:', error)
+    // Slash commands (2026-05-04). Intercepted before mention parsing.
+    //   /clear   — clear chat history (keeps welcome bubble)
+    //   /agents  — print all 11 agents with their @-ids and shortDescription
+    if (trimmed.startsWith('/')) {
+      const cmd = trimmed.slice(1).split(/\s+/)[0]?.toLowerCase()
+      if (cmd === 'clear') {
+        setChatInput('')
+        setChatMessages([
+          {
+            role: 'assistant',
+            content: '对话已清空。继续提问或 @ 唤起 agent。',
+            timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            source: 'scripted'
+          }
+        ])
+        return
+      }
+      if (cmd === 'agents') {
+        setChatInput('')
+        // Lazy import to keep this resolver light. listAgents() returns
+        // descriptors in stable order — same as @ popup.
+        const { listAgents } = await import('../registries/agent-registry')
+        const lines = listAgents().map(a => `- **@${a.id}** (${a.displayName}) — ${a.shortDescription}`).join('\n')
+        setChatMessages([
+          ...useComfyStore.getState().chatMessages,
+          {
+            role: 'user',
+            content: '/agents',
+            timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+          },
+          {
+            role: 'assistant',
+            content: `## 当前可用的 11 个 agent\n\n${lines}\n\n用 \`@<id> 你的问题\` 唤起其中之一。`,
+            timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            source: 'scripted'
+          }
+        ])
+        return
+      }
+      // Unknown command — fall through and let it look like a message.
     }
-  }, [appendChatMessage, callLangGraph, isOrchestratorProcessing, setChatInput])
+
+    // @-mention path: if the message starts with `@<agent-id> <body>`,
+    // route directly to the agent via mentionAgent (no Socratic coach,
+    // no BMC pipeline). Pattern: id can contain alphanumerics + dashes.
+    const mentionMatch = trimmed.match(/^@([a-z][a-z0-9-]+)\s+([\s\S]+)$/i)
+    if (mentionMatch) {
+      const [, agentId, body] = mentionMatch
+      setChatInput('')
+      try {
+        await mention(agentId, body)
+      } catch (error) {
+        console.error('@-mention 失败:', error)
+      }
+      return
+    }
+
+    await reflectOnChat(chatInput)
+  }, [reflectOnChat, isOrchestratorProcessing])
+
+  // Mode A graduation — user clicks the meta-check CTA after AI deems
+  // the conversation has explored enough dimensions. Stitches the seed
+  // (original /chat input) + last 12 chat turns into a single BMC seed
+  // and fires the 8-agent pipeline.
+  const handleGraduateToBmc = useCallback(async () => {
+    if (isOrchestratorProcessing) return
+    const { chatMessages: msgs } = useComfyStore.getState()
+    const stitched = msgs
+      .slice(-12)
+      .map((m) => `${m.role === 'user' ? '用户' : '教练'}：${m.content}`)
+      .join('\n\n')
+    const baseSeed = seedInput.trim() || '探索阶段已完成，根据下方对话历史生成 BMC'
+    const fullSeed = `${baseSeed}\n\n## 探索阶段对话\n${stitched}`
+    await callLangGraph(fullSeed, 'seed').catch((err) => {
+      console.error('[graduate] BMC pipeline failed', err)
+    })
+  }, [callLangGraph, isOrchestratorProcessing, seedInput])
 
   const handleRunCritic = useCallback(async () => {
     try {
@@ -319,47 +534,44 @@ export function CanvasPage({
   // mono kicker stats, no cyan/amber blur orbs, no glass cards.
   const bmcGridContent = (
     <main
-      className={`relative flex-1 overflow-hidden bg-ink ${
+      className={`relative flex-1 overflow-hidden bg-stratum-surface ${
         isAnimating ? 'opacity-0' : 'animate-fade-in-up'
       }`}
       style={{ animationDelay: '0.3s' }}
     >
-      {/* Paper grain overlay so the empty BMC view doesn't look like a void */}
-      <div aria-hidden="true" className="absolute inset-0 z-0 pointer-events-none bg-grain-ink" />
-
       <div className="relative z-[1] flex h-full flex-col px-6 pb-6 pt-5">
-        {/* Mast — section kicker + stats readouts */}
-        <header className="mb-4 flex items-baseline justify-between gap-6 border-b-[1.5px] border-paper/30 pb-3">
+        {/* Mast — kicker + Manrope-style title + readout stats */}
+        <header className="mb-4 flex items-baseline justify-between gap-6 border-b border-stratum-line pb-3">
           <div className="flex flex-col gap-1 min-w-0">
-            <div className="flex items-baseline gap-2">
-              <LayoutGrid className="h-3.5 w-3.5 text-paper-ash3 self-center" strokeWidth={1.5} />
-              <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+            <div className="flex items-center gap-2">
+              <LayoutGrid className="h-3.5 w-3.5 text-stratum-blue self-center" strokeWidth={1.75} />
+              <span className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-blue">
                 STRUCTURED BUSINESS MODEL · 九宫格
               </span>
             </div>
-            <h2 className="font-display font-[700] text-[20px] tracking-[0.02em] text-paper truncate">
+            <h2 className="font-display font-[700] text-[20px] tracking-tight text-stratum-navy truncate">
               CC-BMC 结构化输出视图
             </h2>
-            <p className="font-body text-[12px] leading-[1.55] text-paper/70 max-w-measure-body">
+            <p className="font-body text-[12px] leading-[1.55] text-stratum-muted max-w-measure-body">
               用于答辩演示、结构化审阅和维度冲突检查。自由画布负责推演，九宫格负责归档表达。
             </p>
           </div>
-          <div className="flex items-stretch gap-0 shrink-0 border-[1px] border-paper/30">
-            <div className="flex flex-col items-center justify-center px-4 py-2 border-r-[1px] border-paper/20 min-w-[80px]">
-              <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+          <div className="flex items-stretch gap-0 shrink-0 bg-white border border-stratum-line rounded-xl shadow-sm overflow-hidden">
+            <div className="flex flex-col items-center justify-center px-4 py-2 border-r border-stratum-line min-w-[88px]">
+              <span className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-muted">
                 BMC NODES
               </span>
-              <span className="font-display font-[700] text-[20px] tabular-nums text-paper leading-none mt-1">
+              <span className="font-display font-[700] text-[22px] tabular-nums text-stratum-navy leading-none mt-1">
                 {String(structuredNodes.length).padStart(2, '0')}
               </span>
             </div>
-            <div className="flex flex-col items-center justify-center px-4 py-2 min-w-[80px]">
-              <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+            <div className="flex flex-col items-center justify-center px-4 py-2 min-w-[88px]">
+              <span className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-muted">
                 CONFLICTS
               </span>
               <span
-                className={`font-display font-[700] text-[20px] tabular-nums leading-none mt-1 ${
-                  conflictAlertCount > 0 ? 'text-press' : 'text-paper'
+                className={`font-display font-[700] text-[22px] tabular-nums leading-none mt-1 ${
+                  conflictAlertCount > 0 ? 'text-stratum-danger' : 'text-stratum-navy'
                 }`}
               >
                 {String(conflictAlertCount).padStart(2, '0')}
@@ -369,7 +581,7 @@ export function CanvasPage({
         </header>
 
         {/* Grid surface */}
-        <div className="relative min-h-0 flex-1 border-[1px] border-ink-ash3/30 bg-ink-ash1">
+        <div className="relative min-h-0 flex-1 rounded-2xl border border-stratum-line bg-white shadow-sm overflow-hidden">
           {structuredNodes.length > 0 ? (
             <BmcGrid
               nodes={structuredNodes}
@@ -378,12 +590,12 @@ export function CanvasPage({
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-6">
-              <PanelsTopLeft className="h-8 w-8 text-paper-ash3" strokeWidth={1.25} />
+              <PanelsTopLeft className="h-8 w-8 text-stratum-blue/60" strokeWidth={1.25} />
               <div className="space-y-2">
-                <h3 className="font-display font-[700] text-[15px] tracking-[0.02em] text-paper">
+                <h3 className="font-display font-[700] text-[15px] tracking-tight text-stratum-navy">
                   还没有可展示的 BMC 结构节点
                 </h3>
-                <p className="font-body text-[12px] leading-[1.55] text-paper/70 max-w-measure-cell">
+                <p className="font-body text-[12px] leading-[1.55] text-stratum-muted max-w-measure-cell">
                   先在自由画布中运行多智能体分析或补充业务节点，系统会把带有商业维度的结果自动归入九宫格视图。
                 </p>
               </div>
@@ -396,11 +608,16 @@ export function CanvasPage({
 
   const freeformContent = (
     <CanvasFlow
-      nodes={nodes}
-      edges={edges}
+      // Conflict-alert nodes are not rendered on canvas. Instead, each
+      // conflict is shown as a red dashed edge between the two BMC
+      // cells it implicates (see buildConflictEdges). Click an edge →
+      // open Insight Panel · 审查 tab + auto-expand the conflict.
+      nodes={nodesWithoutConflicts}
+      edges={edgesWithConflicts}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      onEdgeClick={handleEdgeClick}
       isAnimating={isAnimating}
     />
   )
@@ -409,7 +626,7 @@ export function CanvasPage({
   // header segmented control doesn't suddenly summon WorkspaceShell.
   if (standalone) {
     return (
-      <div className="h-screen w-screen flex flex-col bg-ink overflow-hidden">
+      <div className="h-screen w-screen flex flex-col bg-stratum-surface overflow-hidden">
         <CanvasHeader
           isAnimating={isAnimating}
           onOpenTutorial={() => setShowTutorial(true)}
@@ -418,9 +635,50 @@ export function CanvasPage({
           workflowStage={workflowStage}
           onExportCanvas={handleExportCanvas}
           onImportCanvas={handleImportCanvas}
+          onRecalculate={handleRunCritic}
+          isRecalculating={isOrchestratorProcessing}
         />
-        <div className="flex-1 relative">
+        <div className="flex-1 relative flex flex-col min-h-0">
           {viewMode === 'freeform' ? freeformContent : bmcGridContent}
+          {viewMode === 'freeform' ? (
+            <>
+              {!chatOpen && !citationOpen ? <CanvasPerspectiveToggle /> : null}
+              <CanvasThinkingOverlay
+                visible={isOrchestratorProcessing || workflowStage === 'thinking' || workflowStage === 'revising'}
+                workflowStage={workflowStage}
+              />
+              <CanvasHitlBanner
+                visible={!!pendingDecisionRequest}
+                onAutoRevise={handleApproveAutoRevise}
+                onAcceptCurrent={handleAcceptCurrentDecision}
+              />
+              <CanvasChatDock
+                open={chatOpen}
+                onToggle={() => setChatOpen((prev) => !prev)}
+                onSend={handleSendChat}
+                onGraduate={handleGraduateToBmc}
+                workspaceId={workspaceId}
+              />
+              <CanvasCitationPanel
+                open={citationOpen}
+                onToggle={() => setCitationOpen((prev) => !prev)}
+                workspaceId={workspaceId}
+                highlightedConflictId={focusedConflictId}
+              />
+              {/* Floating KB button — Mode B entry point on canvas. Sits
+                  bottom-left so it doesn't collide with chat dock when
+                  open (chat takes top-left), nor the action bar (center). */}
+              <button
+                type="button"
+                onClick={() => setKbModalOpen(true)}
+                className="absolute bottom-6 left-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
+                aria-label="打开 KB 资料"
+              >
+                <Database className="h-4 w-4" strokeWidth={1.75} />
+                <span className="font-body text-[11px] font-semibold">资料 · KB</span>
+              </button>
+            </>
+          ) : null}
         </div>
         <CanvasTutorialDialog
           open={showTutorial}
@@ -428,7 +686,28 @@ export function CanvasPage({
           onClose={handleCloseTutorial}
           onNext={handleNextStep}
         />
-        <CCBMCDetailDrawer />
+        <CanvasPromptDialog
+          open={showPromptDialog}
+          initialValue={seedInput}
+          isSubmitting={isOrchestratorProcessing}
+          onClose={() => setShowPromptDialog(false)}
+          onSubmit={handlePromptSubmit}
+        />
+        <KbUploadModal
+          open={kbModalOpen}
+          workspaceId={workspaceId}
+          onClose={() => setKbModalOpen(false)}
+          onAnalyze={(kbId) => {
+            // Trigger BMC pipeline with this KB as RAG source
+            void callLangGraph(
+              '基于已上传的资料生成 BMC 商业画布，使用 RAG 检索关键证据',
+              'seed',
+              kbId
+            ).catch((err) => console.warn('[canvas] kb-analyze failed', err))
+          }}
+        />
+        {focusedDrawerKind === 'report' ? <ReportDetailDrawer /> : <CCBMCDetailDrawer />}
+        <EvidenceDrawer conversationId={workspaceId} />
       </div>
     )
   }
@@ -445,6 +724,8 @@ export function CanvasPage({
           workflowStage={workflowStage}
           onExportCanvas={handleExportCanvas}
           onImportCanvas={handleImportCanvas}
+          onRecalculate={handleRunCritic}
+          isRecalculating={isOrchestratorProcessing}
         />
       }
       main={viewMode === 'freeform' ? freeformContent : bmcGridContent}
@@ -456,7 +737,7 @@ export function CanvasPage({
             onClose={handleCloseTutorial}
             onNext={handleNextStep}
           />
-          <CCBMCDetailDrawer />
+          {focusedDrawerKind === 'report' ? <ReportDetailDrawer /> : <CCBMCDetailDrawer />}
         </>
       }
     />

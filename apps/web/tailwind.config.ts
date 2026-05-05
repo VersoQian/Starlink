@@ -1,7 +1,6 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
-  darkMode: ['class'],
   content: [
     './app/**/*.{js,ts,jsx,tsx}',
     './components/**/*.{js,ts,jsx,tsx}',
@@ -114,6 +113,28 @@ const config: Config = {
           critic:      '#8C6E6E',
           synthesizer: '#6B6B7C',
         },
+        // Stratum Engine — light-theme strategy canvas palette. Used
+        // by /canvas/* surfaces (light dot-grid, white agent cards,
+        // navy/sky-blue accents). Does NOT replace ink/paper anywhere
+        // else; v2 surfaces (drawers, dialogs, dashboards) keep ink.
+        stratum: {
+          surface:        '#F7F9FB',
+          'surface-low':  '#F2F4F6',
+          'surface-raised':'#FFFFFF',
+          panel:          '#EEF2F6',
+          ink:            '#191C1E',
+          muted:          '#6B7280',
+          line:           'rgba(19, 27, 46, 0.08)',
+          navy:           '#131B2E',
+          'navy-soft':    '#1E2A44',
+          blue:           '#008CC7',
+          sky:            '#89CEFF',
+          ok:             '#1F8E5A',
+          'ok-wash':      '#DCEFE3',
+          warn:           '#C26A1F',
+          danger:         '#BA1A1A',
+          'danger-wash':  '#FFDAD6',
+        },
       },
       fontFamily: {
         // v2 font roles. Use via `font-display` / `font-body` /
@@ -121,7 +142,7 @@ const config: Config = {
         // next/font configs in src/shared/design-system/typography.ts
         // and are bound on <html> in app/layout.tsx.
         display: ['var(--font-fraunces)',       'ui-serif', 'Georgia', 'serif'],
-        body:    ['var(--font-geist)',          'ui-sans-serif', 'system-ui', 'sans-serif'],
+        body:    ['var(--font-geist-sans)',     'ui-sans-serif', 'system-ui', 'sans-serif'],
         instr:   ['var(--font-jetbrains-mono)', 'ui-monospace', 'monospace'],
       },
       backgroundImage: {

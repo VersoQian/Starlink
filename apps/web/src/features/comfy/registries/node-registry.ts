@@ -1,7 +1,6 @@
 import type { ComponentType } from 'react'
 import type { NodeProps } from 'reactflow'
 import { AgentAvatarNode } from '../components/nodes/agent-avatar-node'
-import { AgentNode } from '../components/nodes/agent-node'
 import { CanvasImageNode } from '../components/nodes/canvas-image-node'
 import { CanvasNoteNode } from '../components/nodes/canvas-note-node'
 import { CCBMCCardNode } from '../components/nodes/cc-bmc-card-node'
@@ -9,8 +8,7 @@ import { ConflictAlertNode } from '../components/nodes/conflict-alert-node'
 import { DataSourceNode } from '../components/nodes/data-source-node'
 import { InsightNoteNode } from '../components/nodes/insight-note-node'
 import { PlanNode } from '../components/nodes/plan-node'
-import { ResourceNode } from '../components/nodes/resource-node'
-import { ResultNode } from '../components/nodes/result-node'
+import { ReportCardNode } from '../components/nodes/report-card-node'
 import { createRegistry } from './base-registry'
 
 type NodePaletteCategory = 'bmc' | 'agent' | 'data' | 'insight' | 'misc'
@@ -37,30 +35,6 @@ function registerNode(descriptor: Omit<NodeDescriptor, 'id'>) {
     id: descriptor.type
   })
 }
-
-registerNode({
-  type: 'resource',
-  label: '资源',
-  icon: '📁',
-  component: ResourceNode,
-  palette: {
-    gradient: 'from-slate-400 to-slate-500',
-    description: '文档或数据源',
-    category: 'data'
-  }
-})
-
-registerNode({
-  type: 'agent',
-  label: 'Agent',
-  component: AgentNode
-})
-
-registerNode({
-  type: 'result',
-  label: '结果',
-  component: ResultNode
-})
 
 registerNode({
   type: 'agent-avatar',
@@ -141,6 +115,18 @@ registerNode({
   type: 'canvas-note',
   label: '画布便签',
   component: CanvasNoteNode
+})
+
+registerNode({
+  type: 'report-card',
+  label: '整份报告',
+  icon: '📋',
+  component: ReportCardNode,
+  palette: {
+    gradient: 'from-slate-700 to-slate-900',
+    description: 'report-writer 输出的整份商业报告',
+    category: 'insight'
+  }
 })
 
 registerNode({

@@ -25,7 +25,7 @@
  */
 
 import { useRef } from 'react'
-import { Download, LayoutGrid, PanelsTopLeft, Upload, Zap } from 'lucide-react'
+import { Download, LayoutGrid, PanelsTopLeft, RefreshCw, Upload, Zap } from 'lucide-react'
 import { WORKFLOW_STAGE_LABELS, type WorkflowStage } from '../store/workflow-stage'
 
 type CanvasHeaderProps = {
@@ -33,21 +33,23 @@ type CanvasHeaderProps = {
   onOpenTutorial: () => void
   viewMode?: 'freeform' | 'bmc'
   onViewModeChange?: (mode: 'freeform' | 'bmc') => void
+  onRecalculate?: () => void
+  isRecalculating?: boolean
   workflowStage: WorkflowStage
   onExportCanvas?: () => void
   onImportCanvas?: (file: File) => void
 }
 
 const SEG_BASE =
-  'inline-flex items-center gap-1.5 px-2.5 py-1 font-instr text-[10px] uppercase tracking-kicker transition-colors'
-const SEG_ACTIVE = 'bg-paper text-ink'
-const SEG_IDLE   = 'bg-transparent text-paper-ash3 hover:text-paper'
+  'inline-flex items-center gap-1.5 px-3 py-1.5 font-body text-[11px] font-medium tracking-[0.02em] transition-colors'
+const SEG_ACTIVE = 'bg-stratum-navy text-white'
+const SEG_IDLE   = 'bg-transparent text-stratum-muted hover:text-stratum-navy'
 
 const BTN_GHOST =
-  'inline-flex items-center gap-1.5 border-[0.5px] border-ink-ash3/40 px-2.5 py-1 font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 hover:border-paper/40 hover:text-paper transition-colors disabled:opacity-30 disabled:cursor-not-allowed'
+  'inline-flex items-center gap-1.5 border border-stratum-line bg-white rounded-full px-3 py-1.5 font-body text-[11px] font-medium text-stratum-muted hover:text-stratum-navy hover:border-stratum-blue/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-sm'
 
 const BTN_PRIMARY =
-  'inline-flex items-center gap-1.5 bg-paper text-ink px-3 py-1 font-instr text-[10px] uppercase tracking-kicker hover:bg-paper-ash2 transition-colors'
+  'inline-flex items-center gap-1.5 bg-stratum-navy text-white rounded-full px-3.5 py-1.5 font-body text-[11px] font-semibold hover:bg-stratum-navy-soft transition-colors shadow-sm'
 
 export function CanvasHeader({
   isAnimating,
@@ -56,7 +58,9 @@ export function CanvasHeader({
   onViewModeChange,
   workflowStage,
   onExportCanvas,
-  onImportCanvas
+  onImportCanvas,
+  onRecalculate,
+  isRecalculating
 }: CanvasHeaderProps) {
   const importInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -73,67 +77,64 @@ export function CanvasHeader({
 
   return (
     <header
-      className={`relative z-20 flex items-center justify-between gap-4 px-6 py-3 bg-ink border-b-[1.5px] border-paper/30 ${
+      className={`relative z-20 flex items-center justify-between gap-4 px-6 py-3 bg-white border-b border-stratum-line ${
         isAnimating ? 'opacity-0' : 'animate-fade-in-up'
       }`}
       style={{ animationDelay: '0.1s' }}
     >
-      {/* Brand — Fraunces title + mono kicker, no gradient block */}
-      <div className="flex items-baseline gap-3 min-w-0">
+      {/* Brand — Manrope-styled headline + sky-blue kicker */}
+      <div className="flex items-center gap-3 min-w-0">
         <span
           aria-hidden="true"
-          className="font-display font-[700] text-paper text-[18px] leading-none shrink-0"
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-stratum-navy text-white text-[18px] leading-none shrink-0"
         >
           ◇
         </span>
         <div className="flex flex-col leading-tight min-w-0">
-          <h1 className="font-display font-[700] text-paper text-[16px] tracking-[0.02em] leading-tight truncate">
-            无限画布 · CANVAS
+          <h1 className="font-display font-[700] text-stratum-navy text-[17px] tracking-tight leading-tight truncate">
+            智绘画布 · Strategy Canvas
           </h1>
-          <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 truncate">
+          <p className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-blue truncate">
             MACRA · BUSINESS INTELLIGENCE
           </p>
         </div>
       </div>
 
-      {/* Vertical rule */}
-      <span aria-hidden="true" className="h-8 w-px bg-paper/20 shrink-0" />
-
       {/* Right cluster */}
       <div className="flex items-center gap-3 shrink-0">
-        {/* STAGE — mono kicker + paper-tinted value */}
-        <div className="flex items-baseline gap-1.5 whitespace-nowrap">
-          <span className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+        {/* STAGE pill */}
+        <div className="hidden sm:flex items-center gap-2 bg-stratum-surface-low border border-stratum-line rounded-full px-3 py-1 whitespace-nowrap">
+          <span className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-muted">
             STAGE
           </span>
-          <span className="font-instr text-[10px] uppercase tracking-kicker text-paper">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-stratum-blue" />
+          <span className="font-body text-[11px] font-medium text-stratum-navy">
             {WORKFLOW_STAGE_LABELS[workflowStage]}
           </span>
         </div>
 
-        {/* View-mode segmented control — brutalist 1px paper border */}
+        {/* View-mode segmented control — pill on white */}
         <div
-          className="flex items-stretch border-[1px] border-paper/30"
+          className="flex items-stretch bg-stratum-surface-low border border-stratum-line rounded-full p-0.5"
           role="group"
           aria-label="Canvas view"
         >
           <button
             type="button"
             onClick={() => onViewModeChange?.('freeform')}
-            className={`${SEG_BASE} ${viewMode === 'freeform' ? SEG_ACTIVE : SEG_IDLE}`}
+            className={`${SEG_BASE} rounded-full ${viewMode === 'freeform' ? SEG_ACTIVE : SEG_IDLE}`}
             aria-pressed={viewMode === 'freeform'}
           >
-            <PanelsTopLeft className="h-3 w-3" strokeWidth={1.5} />
+            <PanelsTopLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
             自由
           </button>
-          <span aria-hidden="true" className="w-px bg-paper/20" />
           <button
             type="button"
             onClick={() => onViewModeChange?.('bmc')}
-            className={`${SEG_BASE} ${viewMode === 'bmc' ? SEG_ACTIVE : SEG_IDLE}`}
+            className={`${SEG_BASE} rounded-full ${viewMode === 'bmc' ? SEG_ACTIVE : SEG_IDLE}`}
             aria-pressed={viewMode === 'bmc'}
           >
-            <LayoutGrid className="h-3 w-3" strokeWidth={1.5} />
+            <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.75} />
             九宫格
           </button>
         </div>
@@ -146,7 +147,7 @@ export function CanvasHeader({
           className={BTN_GHOST}
           aria-label="导入画布"
         >
-          <Upload className="h-3 w-3" strokeWidth={1.5} />
+          <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
           导入
         </button>
         <input
@@ -165,9 +166,26 @@ export function CanvasHeader({
           className={BTN_GHOST}
           aria-label="导出画布"
         >
-          <Download className="h-3 w-3" strokeWidth={1.5} />
+          <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
           导出
         </button>
+
+        {/* Re-Calculate — re-run critic conflict scan */}
+        {onRecalculate ? (
+          <button
+            type="button"
+            onClick={onRecalculate}
+            disabled={isRecalculating}
+            className={BTN_GHOST}
+            aria-label="重新检测冲突"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${isRecalculating ? 'animate-spin' : ''}`}
+              strokeWidth={1.75}
+            />
+            {isRecalculating ? '检测中…' : 'Re-Calc'}
+          </button>
+        ) : null}
 
         {/* Primary CTA — paper-on-ink press style */}
         <button
@@ -175,7 +193,7 @@ export function CanvasHeader({
           onClick={onOpenTutorial}
           className={BTN_PRIMARY}
         >
-          <Zap className="h-3 w-3" strokeWidth={2} />
+          <Zap className="h-3.5 w-3.5" strokeWidth={2} fill="#89CEFF" />
           快速入门
         </button>
       </div>

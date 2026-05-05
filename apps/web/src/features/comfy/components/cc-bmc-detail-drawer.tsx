@@ -18,6 +18,33 @@ import { useComfyStore } from '../store'
 import { X, FileText, MessageSquare, Edit3, Link2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { QuizPanel, type QuizQuestion } from './quiz-panel'
+import { renderAgentOutput } from '../registries/agent-output-renderer-registry'
+
+/**
+ * Map a node's `metadata.agent_signature` (e.g. 'Market_Agent',
+ * 'Adversarial_Critic') to the kebab-case agentId the renderer
+ * registry uses (e.g. 'market-agent', 'critic-agent'). Returns
+ * undefined for unknown signatures — the registry then falls back
+ * to default markdown.
+ */
+function agentSignatureToId(sig: string | undefined): string | undefined {
+  if (!sig) return undefined
+  const s = sig.toLowerCase()
+  if (s === 'market_agent' || s === 'market-agent' || s === 'market') return 'market-agent'
+  if (s === 'product_agent' || s === 'product-agent' || s === 'product') return 'product-agent'
+  if (s === 'finance_agent' || s === 'finance-agent' || s === 'finance') return 'finance-agent'
+  if (s.includes('critic')) return 'critic-agent'
+  if (s.includes('synthesi')) return 'synthesizer'
+  if (s.includes('moderator')) return 'moderator'
+  if (s.includes('opponent')) {
+    if (s.includes('market')) return 'market-opponent'
+    if (s.includes('product')) return 'product-opponent'
+    if (s.includes('finance')) return 'finance-opponent'
+  }
+  if (s.includes('research')) return 'deep-research'
+  if (s.includes('general') || s.includes('responder')) return 'general-responder'
+  return undefined
+}
 
 type TabType = 'overview' | 'quiz' | 'edit' | 'resources'
 
@@ -38,8 +65,8 @@ const BYLINE_BY_DOMAIN: Record<string, { glyph: string; tint: string }> = {
 
 const TAB_BASE =
   'inline-flex items-center gap-1.5 px-3 py-1.5 font-instr text-[10px] uppercase tracking-kicker transition-colors'
-const TAB_ACTIVE = 'bg-paper text-ink'
-const TAB_IDLE   = 'bg-transparent text-paper-ash3 hover:text-paper'
+const TAB_ACTIVE = 'bg-stratum-navy text-ink'
+const TAB_IDLE   = 'bg-transparent text-stratum-muted hover:text-stratum-navy'
 
 export function CCBMCDetailDrawer() {
   const detailPanel = useComfyStore((state) => state.detailPanel)
@@ -61,7 +88,36 @@ export function CCBMCDetailDrawer() {
   }
 
   const fullContent = nodeWithDetails?.fullContent || nodeData.content || ''
-  const summary = nodeWithDetails?.summary || nodeData.content || ''
+  // Derive summary: prefer agent-supplied meta.summary, else extract the
+  // first complete sentence from the first paragraph (terminated by 。！？.!?).
+  // Single-sentence summary is more useful than a 280-char prefix, which
+  // duplicates the start of the detail body verbatim.
+  const derivedSummary = (() => {
+    if (typeof nodeWithDetails?.summary === 'string' && nodeWithDetails.summary.trim().length > 0) {
+      return nodeWithDetails.summary
+    }
+    if (!fullContent) return ''
+    const firstPara = fullContent.split(/\n\s*\n/)[0]?.trim() ?? ''
+    if (!firstPara) return ''
+    // Prefer the first complete sentence (CN/EN punctuation) over a raw slice
+    const sentenceMatch = firstPara.match(/^[\s\S]+?[。！？.!?](?=\s|$)/)
+    const candidate = sentenceMatch?.[0]?.trim() ?? firstPara
+    return candidate.length > 200 ? candidate.slice(0, 200).trimEnd() + '…' : candidate
+  })()
+  // Hide summary section when:
+  //   (a) the derived summary equals the fullContent (single paragraph case)
+  //   (b) the fullContent is short (< 480 chars) — adding a summary above a
+  //       compact body just creates visual repetition
+  const trimmedFull = fullContent.trim()
+  const trimmedSummary = derivedSummary.replace(/[…\s]+$/, '')
+  const isSinglePara = !fullContent.includes('\n\n')
+  const isShortContent = fullContent.length < 480
+  const showSummary = Boolean(
+    derivedSummary &&
+    trimmedSummary !== trimmedFull &&
+    !(isSinglePara && isShortContent)
+  )
+  const summary = derivedSummary
   const byline = nodeData.domain ? BYLINE_BY_DOMAIN[nodeData.domain] : undefined
 
   // Quiz 生成处理函数 - 调用真实的 AI API
@@ -140,18 +196,18 @@ export function CCBMCDetailDrawer() {
     <>
       {/* 遮罩层 — ink at 70% */}
       <div
-        className="fixed inset-0 bg-ink/70 z-40 animate-editorial-swap"
+        className="fixed inset-0 bg-stratum-navy/40 z-40 animate-editorial-swap"
         onClick={closeDetailPanel}
       />
 
       {/* 抽屉主体 — brutalist 1.5px 边，无阴影无圆角 */}
       <aside
-        className="fixed right-0 top-0 bottom-0 w-[500px] max-w-[100vw] bg-ink-ash1 border-l-[1.5px] border-paper/30 z-50 flex flex-col animate-editorial-publish"
+        className="fixed right-0 top-0 bottom-0 w-[500px] max-w-[100vw] bg-white border-l-[1.5px] border-stratum-line z-50 flex flex-col animate-editorial-publish"
         role="dialog"
         aria-modal="true"
       >
         {/* 头部 — byline glyph + Fraunces 标题 + mono 维度 kicker */}
-        <header className="flex items-start justify-between gap-3 px-6 py-4 border-b-[1.5px] border-paper/30 shrink-0">
+        <header className="flex items-start justify-between gap-3 px-6 py-4 border-b-[1.5px] border-stratum-line shrink-0">
           <div className="flex items-baseline gap-3 min-w-0">
             {byline ? (
               <span
@@ -162,11 +218,11 @@ export function CCBMCDetailDrawer() {
               </span>
             ) : null}
             <div className="min-w-0">
-              <p className="font-instr text-[10px] uppercase tracking-kicker text-paper-ash3">
+              <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
                 {nodeData.domain || 'BMC CELL'}
               </p>
               <h2
-                className="font-display font-[700] text-[20px] tracking-[0.02em] text-paper truncate mt-0.5"
+                className="font-display font-[700] text-[20px] tracking-[0.02em] text-stratum-navy truncate mt-0.5"
                 title={nodeData.label}
               >
                 {nodeData.label}
@@ -175,7 +231,7 @@ export function CCBMCDetailDrawer() {
           </div>
           <button
             onClick={closeDetailPanel}
-            className="shrink-0 p-1.5 border-[0.5px] border-ink-ash3/40 text-paper-ash3 hover:border-paper/40 hover:text-paper transition-colors"
+            className="shrink-0 p-1.5 border-[0.5px] border-stratum-line text-stratum-muted hover:border-stratum-blue/40 hover:text-stratum-navy transition-colors"
             aria-label="关闭"
           >
             <X className="w-4 h-4" strokeWidth={1.5} />
@@ -183,8 +239,8 @@ export function CCBMCDetailDrawer() {
         </header>
 
         {/* 标签栏 — brutalist 1px paper 边的 segmented */}
-        <div className="px-6 py-3 border-b-[0.5px] border-ink-ash3/30 shrink-0">
-          <div className="flex items-stretch border-[1px] border-paper/30 w-fit">
+        <div className="px-6 py-3 border-b-[0.5px] border-stratum-line shrink-0">
+          <div className="flex items-stretch border-[1px] border-stratum-line w-fit">
             {tabs.map((tab, idx) => (
               <button
                 key={tab.id}
@@ -192,7 +248,7 @@ export function CCBMCDetailDrawer() {
                 className={[
                   TAB_BASE,
                   activeTab === tab.id ? TAB_ACTIVE : TAB_IDLE,
-                  idx > 0 ? 'border-l-[1px] border-paper/20' : '',
+                  idx > 0 ? 'border-l-[1px] border-stratum-line' : '',
                 ].join(' ')}
                 aria-pressed={activeTab === tab.id}
               >
@@ -207,17 +263,38 @@ export function CCBMCDetailDrawer() {
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {activeTab === 'overview' && (
             <>
-              {/* 摘要 */}
-              <Section label="核心摘要" sublabel="SUMMARY">
-                <div className="prose prose-sm prose-invert max-w-measure-body font-body text-[13px] leading-[1.55] text-paper/85">
-                  <ReactMarkdown>{summary}</ReactMarkdown>
-                </div>
-              </Section>
+              {/* 摘要 — only shown when distinct from fullContent (avoid
+                  the previous visual bug where both sections rendered the
+                  same paragraph because the schema had no separate summary
+                  field). Derived client-side as the first paragraph (≤280
+                  chars). */}
+              {showSummary ? (
+                <Section label="核心摘要" sublabel="SUMMARY">
+                  <div className="prose prose-sm max-w-measure-body font-body text-[13px] leading-[1.55] text-stratum-ink italic">
+                    <ReactMarkdown>{summary}</ReactMarkdown>
+                  </div>
+                </Section>
+              ) : null}
 
-              {/* 完整内容 */}
+              {/* 详细分析 — routed through the renderer registry so each
+                  agent's output gets its tailored treatment in the drawer
+                  surface (citations / severity / kind chips / etc). */}
               <Section label="详细分析" sublabel="DETAILED ANALYSIS">
-                <div className="prose prose-sm prose-invert max-w-measure-body font-body text-[13px] leading-[1.6] text-paper/85">
-                  <ReactMarkdown>{fullContent}</ReactMarkdown>
+                <div className="max-w-measure-body">
+                  {renderAgentOutput({
+                    surface: 'drawer',
+                    content: fullContent,
+                    agentId: agentSignatureToId(nodeData.metadata?.agent_signature as string | undefined),
+                    macraType: nodeData.type,
+                    // MacraNodeData uses 'medium' but the renderer-registry
+                    // context expects the legacy 'moderate'. Normalize inline.
+                    severity: nodeData.severity === 'medium' ? 'moderate' : nodeData.severity,
+                    domain: nodeData.domain,
+                    metadata: {
+                      conflictType: nodeData.conflictType,
+                      relatedAgents: (nodeData as { relatedAgents?: unknown }).relatedAgents,
+                    },
+                  })}
                 </div>
               </Section>
 
@@ -227,30 +304,30 @@ export function CCBMCDetailDrawer() {
                   <dl className="space-y-2.5 font-instr text-[11px] uppercase tracking-kicker">
                     {nodeData.metadata.agent_signature && (
                       <div className="flex items-baseline justify-between gap-3">
-                        <dt className="text-paper-ash3">CREATED BY</dt>
-                        <dd className={byline?.tint ?? 'text-paper'}>
+                        <dt className="text-stratum-muted">CREATED BY</dt>
+                        <dd className={byline?.tint ?? 'text-stratum-navy'}>
                           {nodeData.metadata.agent_signature}
                         </dd>
                       </div>
                     )}
                     {nodeData.metadata.confidence && (
                       <div className="flex items-baseline justify-between gap-3">
-                        <dt className="text-paper-ash3">CONF</dt>
-                        <dd className="text-paper">{nodeData.metadata.confidence}</dd>
+                        <dt className="text-stratum-muted">CONF</dt>
+                        <dd className="text-stratum-navy">{nodeData.metadata.confidence}</dd>
                       </div>
                     )}
                     {nodeData.metadata.source && (
                       <div className="space-y-1.5">
-                        <dt className="text-paper-ash3">SOURCE</dt>
-                        <dd className="font-instr text-[11px] tabular-nums text-paper border-l-[1.5px] border-ink-ash3/40 px-2 py-1 normal-case tracking-normal">
+                        <dt className="text-stratum-muted">SOURCE</dt>
+                        <dd className="font-instr text-[11px] tabular-nums text-stratum-navy border-l-[1.5px] border-stratum-line px-2 py-1 normal-case tracking-normal">
                           {nodeData.metadata.source}
                         </dd>
                       </div>
                     )}
                     {nodeData.metadata.cultural_context && (
                       <div className="space-y-1.5">
-                        <dt className="text-paper-ash3">CULTURAL CONTEXT</dt>
-                        <dd className="font-instr text-[11px] text-paper border-l-[1.5px] border-ink-ash3/40 px-2 py-1 normal-case tracking-normal">
+                        <dt className="text-stratum-muted">CULTURAL CONTEXT</dt>
+                        <dd className="font-instr text-[11px] text-stratum-navy border-l-[1.5px] border-stratum-line px-2 py-1 normal-case tracking-normal">
                           {nodeData.metadata.cultural_context}
                         </dd>
                       </div>
@@ -272,7 +349,7 @@ export function CCBMCDetailDrawer() {
 
           {activeTab === 'edit' && (
             <Placeholder
-              icon={<Edit3 className="w-6 h-6 text-paper-ash3" strokeWidth={1.25} />}
+              icon={<Edit3 className="w-6 h-6 text-stratum-muted" strokeWidth={1.25} />}
               title="编辑功能即将推出"
               detail="您将能够直接修改节点内容和属性"
             />
@@ -280,7 +357,7 @@ export function CCBMCDetailDrawer() {
 
           {activeTab === 'resources' && (
             <Placeholder
-              icon={<Link2 className="w-6 h-6 text-paper-ash3" strokeWidth={1.25} />}
+              icon={<Link2 className="w-6 h-6 text-stratum-muted" strokeWidth={1.25} />}
               title="资源链接功能即将推出"
               detail="相关研究资料和参考链接将显示在此处"
             />
@@ -302,15 +379,15 @@ function Section({
 }) {
   return (
     <section>
-      <header className="flex items-baseline justify-between mb-2.5 pb-1.5 border-b-[0.5px] border-ink-ash3/30">
-        <h3 className="font-display font-[700] text-[13px] tracking-[0.04em] uppercase text-paper">
+      <header className="flex items-baseline justify-between mb-2.5 pb-1.5 border-b-[0.5px] border-stratum-line">
+        <h3 className="font-display font-[700] text-[13px] tracking-[0.04em] uppercase text-stratum-navy">
           {label}
         </h3>
-        <span className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
+        <span className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
           {sublabel}
         </span>
       </header>
-      <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-3">
+      <div className="border-[0.5px] border-stratum-line bg-stratum-surface-low px-4 py-3">
         {children}
       </div>
     </section>
@@ -327,10 +404,10 @@ function Placeholder({
   detail: string
 }) {
   return (
-    <div className="border-[0.5px] border-ink-ash3/30 bg-ink-ash2/20 px-4 py-8 text-center">
+    <div className="border-[0.5px] border-stratum-line bg-stratum-surface-low px-4 py-8 text-center">
       <div className="flex justify-center mb-3">{icon}</div>
-      <p className="font-display font-[700] text-[14px] text-paper">{title}</p>
-      <p className="font-instr text-[10px] uppercase tracking-kicker text-ink-ash4 mt-2">
+      <p className="font-display font-[700] text-[14px] text-stratum-navy">{title}</p>
+      <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mt-2">
         {detail}
       </p>
     </div>

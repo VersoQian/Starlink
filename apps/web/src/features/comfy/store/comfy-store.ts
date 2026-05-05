@@ -3,6 +3,7 @@ import { addEdge, applyEdgeChanges, applyNodeChanges } from 'reactflow'
 import type { Node, Edge, Connection, NodeChange, EdgeChange } from 'reactflow'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import { watchConversation } from '@/shared/lib/conversation-sync-engine'
+import { applyCanvasLayout } from './canvas-layout-registry'
 import { fetchWorkspaceGraphSnapshot } from '@/features/workspace/hooks/use-workspace-graph'
 import type {
   MacraNodeData,
@@ -18,7 +19,24 @@ import {
 } from './workflow-stage'
 
 // Chat 消息类型
-type ChatMessage = { role: 'user' | 'assistant'; content: string; timestamp: string }
+type ChatScaffold = 'why' | 'how' | 'so_what' | 'evidence_needed' | 'meta'
+type ChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+  /** Set on assistant turns produced by the Socratic coach (reflectOnIdeation).
+   *  Empty / undefined for plain BMC-generator responses. */
+  scaffold?: ChatScaffold
+  /** llm / scripted / error — provenance from the coach pipeline. */
+  source?: 'llm' | 'scripted' | 'error'
+  /** True for meta-check turns (auto-fired every N user messages). The
+   *  chat-dock renders these with a "graduate to BMC" CTA so the user
+   *  can transition from exploration → generation when AI deems the
+   *  conversation has covered enough dimensions. */
+  isMetaCheck?: boolean
+}
+
+const META_CHECK_INTERVAL = 3
 
 // Undo / redo: a snapshot is a tuple of the four canvas-level slots
 // that user actions can mutate. We deliberately exclude streaming /
@@ -160,12 +178,26 @@ const APPROVE_DECISION_MUTATION = /* GraphQL */ `
   }
 `
 
+const MENTION_AGENT_MUTATION = /* GraphQL */ `
+  mutation MentionAgent($input: MentionAgentInput!) {
+    mentionAgent(input: $input) {
+      agentId
+      reply
+      refused
+      refusalReason
+      appendedNodes { id }
+      appendedEdges { id }
+    }
+  }
+`
+
 const MACRA_NODE_TYPES = new Set([
   'agent-avatar',
   'cc-bmc-card',
   'insight-note',
   'conflict-alert',
-  'data-source'
+  'data-source',
+  'report-card',
 ])
 
 const mapCanvasNodeToReactFlow = (node: CanvasNode): Node => {
@@ -241,6 +273,16 @@ interface MacraState {
 
   // AI 状态
   isOrchestratorProcessing: boolean
+  /** True only while a Socratic chat reflection is in flight. Separate
+   *  from isOrchestratorProcessing so the full-canvas thinking overlay
+   *  doesn't pop for a single-turn coach reply (lighter typing-dots in
+   *  chat dock are enough). isOrchestratorProcessing remains reserved
+   *  for the BMC 8-agent pipeline. */
+  chatReflecting: boolean
+  /** Counts user messages since last meta-check fire. Used to throttle
+   *  the auto-meta-check that lets the AI itself decide when the user
+   *  has explored enough to graduate to BMC generation. */
+  socraticTurnCounter: number
   isCriticProcessing: boolean
   lastCriticRun: number | null
 
@@ -254,6 +296,18 @@ interface MacraState {
     isOpen: boolean
     nodeId: string | null
   }
+
+  /**
+   * Focused conflict id for the Insight Panel · 审查 tab.
+   *
+   * Set by report-writer renderer chips ([[critic:conflict-xxx]]) so the
+   * Insight Panel can auto-switch to the 审查 tab and inline-expand the
+   * matching row. Canvas page subscribes to this and pipes it down to
+   * CanvasCitationPanel via prop. Cleared when the panel closes (or
+   * when the user manually picks a different conflict).
+   */
+  focusedConflictId: string | null
+  setFocusedConflictId: (id: string | null) => void
 
   // 知识库证据
   knowledgeEvidence: KnowledgeEvidence[]
@@ -343,6 +397,24 @@ interface MacraState {
   // Business LangGraph 调用（通过 GraphQL startConversation）
   callLangGraph: (userPrompt: string, mode?: 'seed' | 'completion' | 'general', kbId?: string) => Promise<void>
 
+  // 通过 conversationId 从 server 拉回已有会话状态（resume 流程：用户从
+  // /chat 主页进 /canvas 后，画布需要从 GraphQL 把 server 已生成的节点 +
+  // 历史消息 + KB evidence + citations 全部填回前端 store。
+  // 找不到 conversation 时静默返回，调用方按 fresh canvas 处理）。
+  hydrateFromConversation: (conversationId: string) => Promise<{ workspaceId: string } | null>
+
+  // 苏格拉底式反问 - 调 server reflectOnIdeation，把当前 canvas snapshot
+  // + 最近 chat 历史 + 用户新消息打包发过去，返回单条 scaffold 类型的反问
+  // (why / how / so_what / evidence_needed / meta)。和 callLangGraph 区
+  // 别：那个是触发 8-agent BMC 生成 pipeline；这个是单轮反思教练，不动节点。
+  reflectOnChat: (userMessage: string) => Promise<void>
+
+  // @-mention agent (2026-05-04). Routes a chat message to a specific
+  // agent via GraphQL mentionAgent mutation; updates chat + canvas with
+  // the result. Refusals (e.g. critic without BMC) come back as
+  // assistant messages with refused=true and no canvas mutation.
+  mentionAgent: (agentId: string, message: string) => Promise<void>
+
   // AI Critic 调用（通过 GraphQL 后端自动触发，前端保留手动触发接口）
   callCritic: () => Promise<void>
 
@@ -374,6 +446,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   executingNodeId: null,
   executionQueue: [],
   isOrchestratorProcessing: false,
+  chatReflecting: false,
+  socraticTurnCounter: 0,
   isCriticProcessing: false,
   lastCriticRun: null,
   roundNumber: 0,
@@ -402,6 +476,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     isOpen: false,
     nodeId: null
   },
+  focusedConflictId: null,
   setKnowledgeEvidence: (evidence) => {
     if (get().knowledgeEvidence === evidence) return
     set({ knowledgeEvidence: evidence })
@@ -1072,6 +1147,408 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     }
   },
 
+  // ============== Resume from existing conversation ==============
+  // Called by /canvas/<conversationId> on mount when user lands from
+  // /chat homepage. Pulls server-side state (graph, evidence, citations
+  // and chat history) into the local store so the canvas renders the
+  // conversation's already-generated nodes instead of an empty surface.
+  // Returns null if the id isn't a valid conversation (caller treats
+  // the URL param as a workspaceId and shows a fresh canvas).
+  hydrateFromConversation: async (conversationId: string) => {
+    if (!conversationId) return null
+    try {
+      const client = getGraphQLClient()
+      type ConversationPayload = {
+        conversation: {
+          metadata: { id: string; status?: string }
+          graph: WorkspaceGraphResponse & { workspaceId: string }
+          knowledgeEvidence?: unknown[]
+          citations?: unknown[]
+        } | null
+      }
+      const data = await client.request<ConversationPayload>(
+        /* GraphQL */ `
+          query HydrateConversation($id: ID!) {
+            conversation(id: $id) {
+              metadata { id status }
+              graph {
+                workspaceId
+                nodes {
+                  id type position { x y }
+                  data
+                }
+                edges { id source target label }
+              }
+              knowledgeEvidence { docId snippet score metadata }
+              citations { cardId fieldName spans { textStart textEnd refs { evidenceId docId snippetId } } }
+            }
+          }
+        `,
+        { id: conversationId }
+      )
+
+      const conv = data.conversation
+      if (!conv) {
+        // Fallback: id wasn't a conversation — try treating it as a
+        // workspaceId and load the workspace's canonical canvas snapshot.
+        // /canvas/<workspaceId> URLs (legacy + standalone) hit this path
+        // so an existing BMC from a prior conversation paints on mount.
+        try {
+          const graph = await fetchWorkspaceGraphSnapshot(conversationId)
+          if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
+            return null
+          }
+          const wsMacraMap = new Map<string, MacraNodeData>()
+          graph.nodes.forEach((node) => {
+            const cn = node as unknown as CanvasNode
+            const dataObj = (cn.data ?? {}) as Record<string, unknown>
+            const meta = dataObj.meta as Record<string, unknown> | undefined
+            if (!meta) return
+            wsMacraMap.set(cn.id, {
+              id: cn.id,
+              type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
+              label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
+              content: typeof dataObj.content === 'string' ? dataObj.content : '',
+              summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+              fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+              domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
+              metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+              agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
+              severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
+              conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
+              isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
+              position: cn.position,
+            } as MacraNodeData)
+          })
+          const wsLayoutNodes = applyCanvasLayout('bmc-9-grid', graph.nodes.map(mapCanvasNodeToReactFlow))
+          set({
+            nodes: wsLayoutNodes,
+            edges: graph.edges.map(mapCanvasEdgeToReactFlow),
+            macraNodes: wsMacraMap,
+          })
+          return { workspaceId: graph.workspaceId }
+        } catch {
+          return null
+        }
+      }
+
+      // Build macra map mirror the same shape extractMacraNodeData uses
+      // in callLangGraph — kept inline so this action can stand alone.
+      const macraNodesMap = new Map<string, MacraNodeData>()
+      conv.graph.nodes.forEach((node) => {
+        const cn = node as unknown as CanvasNode
+        const dataObj = (cn.data ?? {}) as Record<string, unknown>
+        const meta = dataObj.meta as Record<string, unknown> | undefined
+        if (!meta) return
+        macraNodesMap.set(cn.id, {
+          id: cn.id,
+          type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
+          label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
+          content: typeof dataObj.content === 'string' ? dataObj.content : '',
+          summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+          fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+          domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
+          metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+          agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
+          severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
+          conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
+          isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
+          position: cn.position,
+        } as MacraNodeData)
+      })
+
+      const layoutNodes = applyCanvasLayout('bmc-9-grid', conv.graph.nodes.map(mapCanvasNodeToReactFlow))
+
+      set({
+        currentConversationId: conv.metadata.id,
+        nodes: layoutNodes,
+        edges: conv.graph.edges.map(mapCanvasEdgeToReactFlow),
+        macraNodes: macraNodesMap,
+        knowledgeEvidence: (conv.knowledgeEvidence as KnowledgeEvidence[]) ?? [],
+      })
+
+      return { workspaceId: conv.graph.workspaceId }
+    } catch (err) {
+      console.warn('[hydrateFromConversation] failed', err)
+      return null
+    }
+  },
+
+  // ============== Socratic Coach (reflectOnIdeation) ==============
+  reflectOnChat: async (userMessage: string) => {
+    const trimmed = userMessage.trim()
+    if (!trimmed) return
+
+    const state = get()
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: trimmed,
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    }
+    state.setChatMessages([...state.chatMessages, userMsg])
+    set({ chatInput: '', chatReflecting: true })
+
+    // Build canvas snapshot for coach context. Map MacraNodes → the
+    // shape coach expects: { id, kind, label, content }. nodeCountByKind
+    // helps the coach prioritise which dimensions need more reflection.
+    const nodeArray = Array.from(state.macraNodes.values())
+    const canvasNodes = nodeArray.map((n) => ({
+      id: n.id,
+      kind: n.type ?? 'cc-bmc-card',
+      label: n.label ?? '',
+      content: typeof n.content === 'string' ? n.content : '',
+    }))
+    const nodeCountByKind: Record<string, number> = {}
+    for (const n of nodeArray) {
+      const k = n.type ?? 'unknown'
+      nodeCountByKind[k] = (nodeCountByKind[k] ?? 0) + 1
+    }
+
+    // Last 6 chat turns (excluding the just-appended user message we want
+    // to reflect on; coach reads it from event.label instead).
+    const recentChat = state.chatMessages
+      .slice(-6)
+      .map((m) => ({ role: m.role === 'user' ? 'user' : 'ai', content: m.content }))
+
+    try {
+      const client = getGraphQLClient()
+      const response = await client.request<{
+        reflectOnIdeation: { scaffold: ChatScaffold; content: string; source: 'llm' | 'scripted' | 'error'; latencyMs?: number }
+      }>(
+        /* GraphQL */ `
+          mutation Reflect($input: ReflectOnIdeationInput!) {
+            reflectOnIdeation(input: $input) {
+              scaffold content source latencyMs
+            }
+          }
+        `,
+        {
+          input: {
+            event: {
+              type: 'user-message',
+              kind: 'chat',
+              label: trimmed,
+            },
+            canvas: {
+              nodes: canvasNodes,
+              edgeCount: state.edges.length,
+              nodeCountByKind,
+            },
+            recentChat,
+            firedMetaIds: [],
+            workspaceId: state.workspaceId,
+          },
+        }
+      )
+
+      const reply = response.reflectOnIdeation
+      const aiMsg: ChatMessage = {
+        role: 'assistant',
+        content: reply.content,
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        scaffold: reply.scaffold,
+        source: reply.source,
+      }
+      get().setChatMessages([...get().chatMessages, aiMsg])
+
+      // Auto meta-check: every META_CHECK_INTERVAL user turns, ask the
+      // coach to evaluate whether the conversation has covered enough
+      // dimensions to graduate to BMC generation. The response is rendered
+      // in the chat dock as a special card with "✦ 开始生成 BMC" CTA.
+      const nextCounter = state.socraticTurnCounter + 1
+      set({ socraticTurnCounter: nextCounter })
+      if (nextCounter % META_CHECK_INTERVAL === 0) {
+        try {
+          const metaResponse = await client.request<{
+            reflectOnIdeation: { scaffold: ChatScaffold; content: string; source: 'llm' | 'scripted' | 'error' }
+          }>(
+            /* GraphQL */ `
+              mutation MetaCheck($input: ReflectOnIdeationInput!) {
+                reflectOnIdeation(input: $input) {
+                  scaffold content source
+                }
+              }
+            `,
+            {
+              input: {
+                event: { type: 'meta-check' },
+                canvas: {
+                  nodes: canvasNodes,
+                  edgeCount: state.edges.length,
+                  nodeCountByKind,
+                },
+                recentChat,
+                firedMetaIds: [],
+                workspaceId: state.workspaceId,
+              },
+            }
+          )
+          const meta = metaResponse.reflectOnIdeation
+          const metaMsg: ChatMessage = {
+            role: 'assistant',
+            content: meta.content,
+            timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            scaffold: meta.scaffold,
+            source: meta.source,
+            isMetaCheck: true,
+          }
+          get().setChatMessages([...get().chatMessages, metaMsg])
+        } catch (err) {
+          // Meta-check failure is non-fatal — the regular reflection
+          // already landed; user can manually graduate via wizard or KB.
+          console.warn('[reflectOnChat] meta-check failed', err)
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const errMsg: ChatMessage = {
+        role: 'assistant',
+        content: `（教练响应失败：${msg.slice(0, 160)}）`,
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        scaffold: 'meta',
+        source: 'error',
+      }
+      get().setChatMessages([...get().chatMessages, errMsg])
+    } finally {
+      set({ chatReflecting: false })
+    }
+  },
+
+  // ============== @-mention agent (2026-05-04) ==============
+  // Routes a chat message to a specific agent via GraphQL mentionAgent.
+  // The mutation runs server-side: builds minimal BusinessState, calls
+  // the agent's subgraph (or LlmDebateInvoker for debate/judge agents),
+  // and persists any appended canvas nodes. We just paint the reply +
+  // refresh the canvas if nodes changed.
+  mentionAgent: async (agentId, message) => {
+    const trimmed = message.trim()
+    if (!trimmed) return
+    const workspaceId = get().workspaceId
+    if (!workspaceId) {
+      get().setChatMessages([
+        ...get().chatMessages,
+        {
+          role: 'assistant',
+          content: 'workspaceId 未设置，无法 @ 唤起 agent',
+          timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          source: 'error'
+        }
+      ])
+      return
+    }
+    // Optimistic user message (the @ call as typed) so chat shows it immediately.
+    get().setChatMessages([
+      ...get().chatMessages,
+      {
+        role: 'user',
+        content: `@${agentId} ${trimmed}`,
+        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+    ])
+    set({ chatReflecting: true })
+
+    try {
+      const client = getGraphQLClient()
+      const data = await client.request<{
+        mentionAgent: {
+          agentId: string
+          reply: string
+          refused: boolean
+          refusalReason: string | null
+          appendedNodes: Array<{ id: string }>
+          appendedEdges: Array<{ id: string }>
+        }
+      }>(MENTION_AGENT_MUTATION, {
+        input: { workspaceId, agentId, message: trimmed }
+      })
+
+      const m = data.mentionAgent
+      // Append assistant reply. Use 'mention' source so chat dock can
+      // render it with the agent's byline + glyph (see canvas-chat-dock.tsx).
+      // Cast through `as` because mentionedAgent / refused fields are
+      // additions that the existing ChatMessage type doesn't yet declare —
+      // the chat dock reads them via a runtime cast.
+      get().setChatMessages([
+        ...get().chatMessages,
+        {
+          role: 'assistant',
+          content: m.reply || (m.refused ? (m.refusalReason ?? '已拒绝') : '(空响应)'),
+          timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          source: m.refused ? 'error' : 'llm',
+          // @ts-expect-error — extension fields for mention rendering
+          mentionedAgent: m.agentId,
+          // @ts-expect-error — extension field for mention rendering
+          refused: m.refused
+        }
+      ])
+
+      // If canvas was mutated, re-hydrate the workspace snapshot so the
+      // BMC / 9-grid views update without requiring a full pipeline run.
+      if (!m.refused && (m.appendedNodes.length > 0 || m.appendedEdges.length > 0)) {
+        try {
+          const fresh = await fetchWorkspaceGraphSnapshot(workspaceId)
+          if (fresh && Array.isArray(fresh.nodes)) {
+            const layoutNodes = applyCanvasLayout(
+              'bmc-9-grid',
+              fresh.nodes.map(mapCanvasNodeToReactFlow)
+            )
+            const macraMap = new Map<string, MacraNodeData>()
+            fresh.nodes.forEach((node) => {
+              const cn = node as unknown as CanvasNode
+              const dataObj = (cn.data ?? {}) as Record<string, unknown>
+              const meta = dataObj.meta as Record<string, unknown> | undefined
+              if (!meta) return
+              macraMap.set(cn.id, {
+                id: cn.id,
+                type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
+                label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
+                content: typeof dataObj.content === 'string' ? dataObj.content : '',
+                domain: typeof meta.domain === 'string'
+                  ? (meta.domain as MacraNodeData['domain'])
+                  : undefined,
+                metadata: ((meta.metadata as Record<string, unknown> | undefined) ?? {}) as MacraNodeData['metadata'],
+                agentType: typeof meta.agentType === 'string'
+                  ? (meta.agentType as MacraNodeData['agentType'])
+                  : undefined,
+                severity: typeof meta.severity === 'string'
+                  ? (meta.severity as MacraNodeData['severity'])
+                  : undefined,
+                conflictType: typeof meta.conflictType === 'string'
+                  ? (meta.conflictType as MacraNodeData['conflictType'])
+                  : undefined,
+                isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined
+              } as MacraNodeData)
+            })
+            set({
+              nodes: layoutNodes,
+              edges: fresh.edges.map(mapCanvasEdgeToReactFlow),
+              macraNodes: macraMap
+            })
+          }
+        } catch (err) {
+          console.warn('[mentionAgent] hydrate after append failed', err)
+        }
+      }
+    } catch (err) {
+      console.error('@-mention failed', err)
+      get().setChatMessages([
+        ...get().chatMessages,
+        {
+          role: 'assistant',
+          content: `@${agentId} 调用失败：${err instanceof Error ? err.message : String(err)}`,
+          timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          source: 'error',
+          // @ts-expect-error — extension fields for mention rendering
+          mentionedAgent: agentId,
+          // @ts-expect-error — extension field for mention rendering
+          refused: true
+        }
+      ])
+    } finally {
+      set({ chatReflecting: false })
+    }
+  },
+
   // ============== AI Critic 调用 ==============
   callCritic: async () => {
     const { nodes, macraNodes, lastCriticRun } = get()
@@ -1202,6 +1679,10 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         nodeId
       }
     })
+  },
+
+  setFocusedConflictId: (id) => {
+    set({ focusedConflictId: id })
   },
 
   closeDetailPanel: () => {
@@ -1354,7 +1835,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       detailPanel: {
         isOpen: false,
         nodeId: null
-      }
+      },
+      focusedConflictId: null
     })
   }
 }))

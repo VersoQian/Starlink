@@ -66,6 +66,7 @@ export type NodeType =
   | 'insight-note'      // 洞察便签
   | 'data-source'       // 数据源节点
   | 'plan-node'         // 语义确认节点
+  | 'report-card'       // 商业报告整合产物（report-writer agent）
 
 // ============== 置信度级别 ==============
 export type ConfidenceLevel = 'high' | 'medium' | 'low'

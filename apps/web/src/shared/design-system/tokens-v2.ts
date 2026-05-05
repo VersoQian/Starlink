@@ -141,11 +141,21 @@ export const grid = {
 // colors, not decoration.
 
 export const bylineAccent = {
-  market:        '#9B8E70',  // warm brown — market/customers
-  product:       '#7A8B7E',  // sage — product/value
-  finance:       '#6E7A8C',  // slate-blue — finance/numbers
-  critic:        '#8C6E6E',  // muted brick — critic
-  synthesizer:   '#6B6B7C',  // warm gray — synthesis/integration
+  market:             '#9B8E70',  // warm brown — market/customers
+  product:            '#7A8B7E',  // sage — product/value
+  finance:            '#6E7A8C',  // slate-blue — finance/numbers
+  critic:             '#8C6E6E',  // muted brick — critic
+  synthesizer:        '#6B6B7C',  // warm gray — synthesis/integration
+  // Mention system additions (agent-mention-system 2026-05-04):
+  // 4 debate participants + general / research. Opponent variants are
+  // deeper / more saturated than their proponent counterparts to read
+  // as "challenging" without using press-red (reserved for HITL).
+  'market-opponent':  '#7A4A40',  // deep brick-brown — market challenger
+  'product-opponent': '#4A5C50',  // deep moss — product challenger
+  'finance-opponent': '#3F4A5C',  // deep slate — finance challenger
+  moderator:          '#5C5C6E',  // cool neutral gray-blue — judge
+  general:            '#7C7C7C',  // neutral mid gray — general responder
+  research:           '#5E6F6F',  // dark teal — deep research
 } as const
 
 export type AgentByline = keyof typeof bylineAccent

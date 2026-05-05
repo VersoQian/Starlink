@@ -119,7 +119,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
       />
 
       <div
-        className={`group relative w-[340px] overflow-hidden border-[1px] border-ink-ash3/30 bg-ink-ash1 transition-colors hover:border-ink-ash2/60 ${highlightClass}`}
+        className={`group relative w-[340px] overflow-hidden border-[1px] border-stratum-line bg-white transition-colors hover:border-stratum-blue/40 ${highlightClass}`}
         style={{
           // 3px left edge in muted byline color — semantic at-a-glance
           // owner cue (M/P/F) without the 9-color rainbow.
@@ -127,7 +127,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
         }}
       >
         {/* 顶部栏 — Fraunces 标题 + 单字母 byline glyph */}
-        <div className="relative border-b-[0.5px] border-ink-ash3/30 px-4 py-3">
+        <div className="relative border-b-[0.5px] border-stratum-line px-4 py-3">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3 flex-1 min-w-0">
               {/* Display-serif byline glyph replaces the 9 emoji icons.
@@ -143,13 +143,13 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                   type="text"
                   value={editedLabel}
                   onChange={(e) => setEditedLabel(e.target.value)}
-                  className="flex-1 font-display font-[700] text-[15px] tracking-[0.02em] bg-ink-ash2/40 px-3 py-2 border-[1px] border-paper/30 focus:outline-none focus:border-paper/60 text-paper placeholder-ink-ash4"
+                  className="flex-1 font-display font-[700] text-[15px] tracking-[0.02em] bg-stratum-surface-low px-3 py-2 border-[1px] border-stratum-blue/40 focus:outline-none focus:border-stratum-blue text-stratum-navy placeholder-stratum-muted"
                   placeholder="标题"
                   autoFocus
                 />
               ) : (
                 <h3
-                  className="flex-1 font-display font-[700] text-[15px] tracking-[0.02em] text-paper uppercase truncate"
+                  className="flex-1 font-display font-[700] text-[15px] tracking-[0.02em] text-stratum-navy uppercase truncate"
                   title={nodeData?.label || ''}
                 >
                   {nodeData?.label || '未命名'}
@@ -162,14 +162,14 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                 <>
                   <button
                     onClick={() => setShowMetadata(!showMetadata)}
-                    className="flex h-7 w-7 items-center justify-center text-ink-ash4 transition-colors hover:bg-ink-ash2/40 hover:text-paper"
+                    className="flex h-7 w-7 items-center justify-center text-stratum-muted transition-colors hover:bg-stratum-surface-low hover:text-stratum-navy"
                     aria-label="切换元信息"
                   >
                     <Info className="h-3.5 w-3.5" strokeWidth={1.5} />
                   </button>
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="flex h-7 w-7 items-center justify-center text-ink-ash4 transition-colors hover:bg-ink-ash2/40 hover:text-paper"
+                    className="flex h-7 w-7 items-center justify-center text-stratum-muted transition-colors hover:bg-stratum-surface-low hover:text-stratum-navy"
                     aria-label="编辑卡片"
                   >
                     <Edit3 className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -179,14 +179,14 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                 <>
                   <button
                     onClick={handleSave}
-                    className="flex h-7 w-7 items-center justify-center text-paper transition-colors hover:bg-paper/10"
+                    className="flex h-7 w-7 items-center justify-center text-stratum-navy transition-colors hover:bg-stratum-blue/10"
                     aria-label="保存"
                   >
                     <Check className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
                   <button
                     onClick={handleCancel}
-                    className="flex h-7 w-7 items-center justify-center text-ink-ash4 transition-colors hover:bg-ink-ash2/40 hover:text-paper"
+                    className="flex h-7 w-7 items-center justify-center text-stratum-muted transition-colors hover:bg-stratum-surface-low hover:text-stratum-navy"
                     aria-label="取消"
                   >
                     <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -200,21 +200,21 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
           <div className="relative">
             <button
               onClick={() => setShowDomainSelector(!showDomainSelector)}
-              className={`flex w-full items-center justify-between border-[0.5px] border-ink-ash3/40 bg-ink-ash2/30 px-3 py-1.5 font-instr text-[10px] uppercase tracking-kicker transition-colors hover:border-paper/40 ${byline.tintClass}`}
+              className={`flex w-full items-center justify-between border-[0.5px] border-stratum-line bg-stratum-surface-low px-3 py-1.5 font-instr text-[10px] uppercase tracking-kicker transition-colors hover:border-stratum-blue/60 ${byline.tintClass}`}
             >
               <span>{domain}</span>
               <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.5} />
             </button>
 
             {showDomainSelector && (
-              <div className="absolute top-full left-0 right-0 mt-1 z-50 max-h-72 overflow-y-auto bg-ink-ash1 border-[1px] border-paper/30">
+              <div className="absolute top-full left-0 right-0 mt-1 z-50 max-h-72 overflow-y-auto bg-white border-[1px] border-stratum-blue/40">
                 {Object.values(CC_BMC_DOMAINS).map((d) => {
                   const dByline = DOMAIN_TO_BYLINE[d]
                   return (
                     <button
                       key={d}
                       onClick={() => handleDomainChange(d)}
-                      className="w-full px-3 py-2 text-left transition-colors flex items-center gap-3 hover:bg-ink-ash2/40 border-b-[0.5px] border-ink-ash3/20 last:border-0"
+                      className="w-full px-3 py-2 text-left transition-colors flex items-center gap-3 hover:bg-stratum-surface-low border-b-[0.5px] border-stratum-line last:border-0"
                     >
                       <span
                         aria-hidden="true"
@@ -222,11 +222,11 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                       >
                         {dByline.glyph}
                       </span>
-                      <span className="flex-1 font-instr text-[10px] uppercase tracking-kicker text-paper">
+                      <span className="flex-1 font-instr text-[10px] uppercase tracking-kicker text-stratum-navy">
                         {d}
                       </span>
                       {d === domain && (
-                        <Check className="w-3.5 h-3.5 text-paper" strokeWidth={1.5} />
+                        <Check className="w-3.5 h-3.5 text-stratum-navy" strokeWidth={1.5} />
                       )}
                     </button>
                   )
@@ -243,22 +243,22 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
               placeholder="输入内容（支持 Markdown）"
-              className="w-full h-36 bg-ink-ash2/30 border-[1px] border-paper/30 px-3 py-2 font-body text-[13px] resize-none focus:outline-none focus:border-paper/60 placeholder-ink-ash4 text-paper"
+              className="w-full h-36 bg-stratum-surface-low border-[1px] border-stratum-blue/40 px-3 py-2 font-body text-[13px] resize-none focus:outline-none focus:border-stratum-blue placeholder-stratum-muted text-stratum-navy"
             />
           ) : (
             <>
               <div
-                className={`prose prose-sm prose-invert max-w-measure-cell font-body text-[13px] leading-[1.55] text-paper/85 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-none' : 'max-h-32'}`}
+                className={`prose prose-sm max-w-measure-cell font-body text-[13px] leading-[1.55] text-stratum-ink overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-none' : 'max-h-32'}`}
               >
                 <ReactMarkdown>{isExpanded ? fullContent : summary || '*暂无内容*'}</ReactMarkdown>
               </div>
 
               {(contentCitation || noRefCount > 0 || typeof groundingRate === 'number') && (
                 <div
-                  className="mt-3 flex flex-wrap items-center gap-2 border-t-[0.5px] border-ink-ash3/30 pt-2 font-instr text-[10px] text-ink-ash4"
+                  className="mt-3 flex flex-wrap items-center gap-2 border-t-[0.5px] border-stratum-line pt-2 font-instr text-[10px] text-stratum-muted"
                   data-testid="citation-footer"
                 >
-                  <span className="uppercase tracking-kicker text-paper-ash3">
+                  <span className="uppercase tracking-kicker text-stratum-muted">
                     REFS
                   </span>
                   {contentCitation?.spans.map((span, i) => {
@@ -281,14 +281,14 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                     )
                   })}
                   {noRefCount > 0 && (
-                    <span className="inline-flex items-center gap-1 border-[0.5px] border-press/40 px-1.5 py-0.5 font-instr text-[9px] tabular-nums text-press">
+                    <span className="inline-flex items-center gap-1 border-[0.5px] border-stratum-danger/40 px-1.5 py-0.5 font-instr text-[9px] tabular-nums text-stratum-danger">
                       <CitationBadge variant="no-ref" className="mx-0 h-3 w-3" />
                       <span>{noRefCount} 无引用</span>
                     </span>
                   )}
                   {typeof groundingRate === 'number' && (
                     <span className="ml-auto font-instr text-[9px] tabular-nums uppercase tracking-kicker">
-                      <span className="text-paper-ash3">GROUNDING</span>{' '}
+                      <span className="text-stratum-muted">GROUNDING</span>{' '}
                       {(groundingRate * 100).toFixed(0)}%
                     </span>
                   )}
@@ -299,7 +299,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
               {hasExtendedContent && (
                 <button
                   onClick={() => setIsExpanded(!isExpanded)}
-                  className="mt-3 inline-flex items-center gap-1.5 border-[0.5px] border-ink-ash3/30 px-2 py-1 font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 transition-colors hover:border-paper/40 hover:text-paper"
+                  className="mt-3 inline-flex items-center gap-1.5 border-[0.5px] border-stratum-line px-2 py-1 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted transition-colors hover:border-stratum-blue/60 hover:text-stratum-navy"
                 >
                   {isExpanded ? (
                     <>
@@ -319,10 +319,10 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
 
           {/* 元数据 — 单色 + mono + brutalist 进度条 */}
           {showMetadata && nodeData?.metadata && (
-            <div className="mt-3 pt-3 border-t-[0.5px] border-ink-ash3/30 space-y-2.5">
+            <div className="mt-3 pt-3 border-t-[0.5px] border-stratum-line space-y-2.5">
               {nodeData.metadata.agent_signature && (
-                <div className="flex items-baseline gap-2 font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
-                  <span className="text-paper-ash3 shrink-0">CREATED BY</span>
+                <div className="flex items-baseline gap-2 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
+                  <span className="text-stratum-muted shrink-0">CREATED BY</span>
                   <span className={`font-instr ${byline.tintClass}`}>
                     {nodeData.metadata.agent_signature}
                   </span>
@@ -330,9 +330,9 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
               )}
 
               {nodeData.metadata.confidence && (
-                <div className="flex items-center gap-2 font-instr text-[10px] uppercase tracking-kicker text-ink-ash4">
-                  <span className="text-paper-ash3 shrink-0">CONF</span>
-                  <div className="flex-1 h-1 bg-ink-ash2/40 overflow-hidden">
+                <div className="flex items-center gap-2 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
+                  <span className="text-stratum-muted shrink-0">CONF</span>
+                  <div className="flex-1 h-1 bg-stratum-surface-low overflow-hidden">
                     <div
                       className="h-full transition-all"
                       style={{
@@ -346,9 +346,9 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
               )}
 
               {nodeData.metadata.source && (
-                <div className="font-instr text-[10px] text-paper-ash3 border-l-[1.5px] border-ink-ash3/40 px-2 py-1">
-                  <span className="uppercase tracking-kicker text-ink-ash4">SOURCE</span>
-                  <span className="ml-2 text-paper">{nodeData.metadata.source}</span>
+                <div className="font-instr text-[10px] text-stratum-muted border-l-[1.5px] border-stratum-line px-2 py-1">
+                  <span className="uppercase tracking-kicker text-stratum-muted">SOURCE</span>
+                  <span className="ml-2 text-stratum-navy">{nodeData.metadata.source}</span>
                 </div>
               )}
             </div>
@@ -356,16 +356,16 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
         </div>
 
         {/* 底部署名栏 */}
-        <div className="flex items-baseline justify-between border-t-[0.5px] border-ink-ash3/30 px-4 py-2">
+        <div className="flex items-baseline justify-between border-t-[0.5px] border-stratum-line px-4 py-2">
           {/* Agent 署名 */}
           <div className="flex min-w-0 items-baseline gap-2 font-instr text-[10px] uppercase tracking-kicker">
-            <span className="text-ink-ash4">BY</span>
+            <span className="text-stratum-muted">BY</span>
             <span className={byline.tintClass}>
               {nodeData?.metadata?.agent_signature || 'AI Agent'}
             </span>
             {nodeData?.metadata?.confidence && (
-              <span className="text-ink-ash4">
-                · CONF <span className="text-paper-ash3">{nodeData.metadata.confidence}</span>
+              <span className="text-stratum-muted">
+                · CONF <span className="text-stratum-muted">{nodeData.metadata.confidence}</span>
               </span>
             )}
           </div>
@@ -373,7 +373,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
           {/* 查看详情按钮 */}
           <button
             onClick={() => openDetailPanel(id)}
-            className="inline-flex items-center gap-1 border-[0.5px] border-ink-ash3/30 px-2 py-0.5 font-instr text-[10px] uppercase tracking-kicker text-paper-ash3 transition-colors hover:border-paper/40 hover:text-paper"
+            className="inline-flex items-center gap-1 border-[0.5px] border-stratum-line px-2 py-0.5 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted transition-colors hover:border-stratum-blue/60 hover:text-stratum-navy"
           >
             <Maximize2 className="h-3 w-3" strokeWidth={1.5} />
             详情

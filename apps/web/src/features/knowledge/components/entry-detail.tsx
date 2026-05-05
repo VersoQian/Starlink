@@ -1,6 +1,53 @@
 'use client'
 
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { InsightLog, KnowledgeEntry } from '@/types/knowledge'
+
+/**
+ * Lightweight markdown renderer for knowledge-entry summaries and
+ * insight-log bodies. Knowledge content is often AI-summarised and
+ * may include lists, inline emphasis, or GFM tables (competitor
+ * comparison / metric tables). Reuses the wizard-page rhythm but
+ * keeps the slate-tinted palette of the legacy knowledge page.
+ */
+const KNOWLEDGE_MD = {
+  p: ({ children }: { children?: React.ReactNode }) => (
+    <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>
+  ),
+  ul: ({ children }: { children?: React.ReactNode }) => (
+    <ul className="my-2 list-disc pl-5 space-y-0.5">{children}</ul>
+  ),
+  ol: ({ children }: { children?: React.ReactNode }) => (
+    <ol className="my-2 list-decimal pl-5 space-y-0.5">{children}</ol>
+  ),
+  strong: ({ children }: { children?: React.ReactNode }) => (
+    <strong className="font-semibold text-slate-900">{children}</strong>
+  ),
+  em: ({ children }: { children?: React.ReactNode }) => (
+    <em className="italic">{children}</em>
+  ),
+  code: ({ children }: { children?: React.ReactNode }) => (
+    <code className="font-mono text-[12px] bg-[#F5F3FF] text-[#4338CA] px-1 py-0.5 border border-[#E3E6FF] rounded-[2px]">{children}</code>
+  ),
+  table: ({ children }: { children?: React.ReactNode }) => (
+    <div className="my-3 overflow-x-auto rounded-[2px] border border-[#E3E6FF] bg-white">
+      <table className="w-full border-collapse text-[12px] leading-[1.55] tabular-nums">{children}</table>
+    </div>
+  ),
+  thead: ({ children }: { children?: React.ReactNode }) => (
+    <thead className="bg-[#F8F9FF] border-b-[1.5px] border-[#4338CA]">{children}</thead>
+  ),
+  tr: ({ children }: { children?: React.ReactNode }) => (
+    <tr className="border-b-[0.5px] border-[#E3E6FF] last:border-b-0 hover:bg-[#F8F9FF]/60 transition-colors">{children}</tr>
+  ),
+  th: ({ children }: { children?: React.ReactNode }) => (
+    <th className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#4338CA] text-left px-2.5 py-1.5 whitespace-nowrap">{children}</th>
+  ),
+  td: ({ children }: { children?: React.ReactNode }) => (
+    <td className="px-2.5 py-1.5 text-slate-700 align-top">{children}</td>
+  ),
+}
 
 type KnowledgeEntryDetailProps = {
   entry: KnowledgeEntry | null
@@ -60,7 +107,11 @@ export function KnowledgeEntryDetail({ entry, insightLogs }: KnowledgeEntryDetai
 
       <section className="mt-6 space-y-2 rounded-2xl border border-[#E3E6FF] bg-white/90 p-4">
         <h3 className="text-sm font-semibold text-slate-900">摘要与标签</h3>
-        <p className="text-sm leading-relaxed text-slate-600">{entry.summary}</p>
+        <div className="text-sm leading-relaxed text-slate-600">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={KNOWLEDGE_MD}>
+            {entry.summary}
+          </ReactMarkdown>
+        </div>
         <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
           {entry.tags.map((tag) => (
             <span key={`${entry.id}-detail-tag-${tag}`} className="rounded-full bg-[#F5F3FF] px-2 py-0.5 text-[#6D28D9]">
@@ -100,7 +151,11 @@ export function KnowledgeEntryDetail({ entry, insightLogs }: KnowledgeEntryDetai
             {relatedInsights.map((log) => (
               <li key={log.id} className="rounded-xl border border-[#E3E6FF] bg-[#F9FAFF] px-3 py-3">
                 <p className="text-[11px] uppercase tracking-widest text-[#4338CA]">{log.generatedAt}</p>
-                <p className="mt-2 text-sm text-slate-600">{log.summary}</p>
+                <div className="mt-2 text-sm text-slate-600">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={KNOWLEDGE_MD}>
+                    {log.summary}
+                  </ReactMarkdown>
+                </div>
                 {log.actions.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-[#6366F1]">
                     {log.actions.map((action, index) => (
