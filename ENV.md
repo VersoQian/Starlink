@@ -22,11 +22,11 @@
 │   ├── .env.example          ← canonical reference: 全部 env 的解释 + 默认值
 │   ├── .env.pg-local         ← 切换 profile: 本地 Postgres.app:5431
 │   └── .env.supabase         ← 切换 profile: Supabase 后端
-├── apps/web/
-│   └── .env.local.example    ← 前端 env 模板（NEXT_PUBLIC_GRAPHQL_URL 等）
-└── backend/                  ← LEGACY 目录，新代码不再使用
-    └── .env / .env.supabase.example  ← 不要再改这里
+└── apps/web/
+    └── .env.local.example    ← 前端 env 模板（NEXT_PUBLIC_GRAPHQL_URL 等）
 ```
+
+> 历史的 `backend/` legacy 目录已在 P9 cleanup 中删除（新代码全在 packages/server）。
 
 ## 启动顺序（从 0 到能跑）
 
@@ -67,5 +67,4 @@ NEXT_PUBLIC_DEFAULT_USER_ID=lead-alex   # 开发时模拟登录用户
 ## 特别注意
 
 - **`.env`** 全部 `.gitignore`，密钥不会泄漏。**`.env.example`** 才是会被 commit 的模板。
-- **`backend/`** 目录下的 env 是上一代项目结构的遗留，**新代码请用 `packages/server/`**。
 - **当我新增一个 env 变量时**：必须同时更新 `.env.example` + 这份 `ENV.md`，否则下次切机器就找不到该填啥。
