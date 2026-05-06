@@ -378,15 +378,37 @@ export function CanvasPage({
   // CanvasPromptDialog (which routes to callLangGraph).
   const reflectOnChat = useComfyStore((state) => state.reflectOnChat)
   const handleSendChat = useCallback(async () => {
-    const { chatInput, chatReflecting, mentionAgent: mention, setChatInput, setChatMessages } = useComfyStore.getState()
+    const {
+      chatInput,
+      chatReflecting,
+      mentionAgent: mention,
+      setChatInput,
+      setChatMessages,
+      wizardChat,
+      startWizardInChat,
+      endWizardInChat,
+      submitWizardChatAnswer
+    } = useComfyStore.getState()
     const trimmed = chatInput.trim()
     if (!trimmed || isOrchestratorProcessing || chatReflecting) return
 
     // Slash commands (2026-05-04). Intercepted before mention parsing.
     //   /clear   — clear chat history (keeps welcome bubble)
     //   /agents  — print all 11 agents with their @-ids and shortDescription
+    //   /wizard  — start the in-chat 7-step structured wizard
+    //   /cancel  — exit the wizard mid-flow
     if (trimmed.startsWith('/')) {
       const cmd = trimmed.slice(1).split(/\s+/)[0]?.toLowerCase()
+      if (cmd === 'wizard') {
+        setChatInput('')
+        startWizardInChat()
+        return
+      }
+      if (cmd === 'cancel' && wizardChat.active) {
+        setChatInput('')
+        endWizardInChat()
+        return
+      }
       if (cmd === 'clear') {
         setChatInput('')
         setChatMessages([
@@ -424,6 +446,15 @@ export function CanvasPage({
       // Unknown command — fall through and let it look like a message.
     }
 
+    // Wizard mode: regular chat input → wizard answer pipeline.
+    // We intercept BEFORE @-mention so accidental @ inside an answer
+    // doesn't break the wizard flow.
+    if (wizardChat.active) {
+      setChatInput('')
+      await submitWizardChatAnswer(workspaceId, trimmed)
+      return
+    }
+
     // @-mention path: if the message starts with `@<agent-id> <body>`,
     // route directly to the agent via mentionAgent (no Socratic coach,
     // no BMC pipeline). Pattern: id can contain alphanumerics + dashes.
@@ -440,7 +471,7 @@ export function CanvasPage({
     }
 
     await reflectOnChat(chatInput)
-  }, [reflectOnChat, isOrchestratorProcessing])
+  }, [reflectOnChat, isOrchestratorProcessing, workspaceId])
 
   // Mode A graduation — user clicks the meta-check CTA after AI deems
   // the conversation has explored enough dimensions. Stitches the seed
@@ -761,7 +792,15 @@ export function CanvasPage({
         {!wizardOpen ? (
           <CanvasLiveCoach
             workspaceId={workspaceId}
-            onOpenWizard={() => setWizardOpen(true)}
+            onOpenWizard={() => {
+              // Primary path: in-chat wizard (one continuous thread,
+              // user sees BMC nodes appear as they answer). The
+              // side-drawer wizard is still available via its own
+              // floating button for users who prefer dedicated UI.
+              const { startWizardInChat } = useComfyStore.getState()
+              setChatOpen(true)
+              startWizardInChat()
+            }}
             onOpenKb={() => setKbModalOpen(true)}
             onShowConflicts={() => {
               setCitationOpen(true)

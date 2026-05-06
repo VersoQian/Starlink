@@ -34,9 +34,63 @@ type ChatMessage = {
    *  can transition from exploration → generation when AI deems the
    *  conversation has covered enough dimensions. */
   isMetaCheck?: boolean
+  /** True for in-chat wizard turns (start / step / completion). The chat
+   *  dock renders a "STEP N/7" kicker and the entry-point start message
+   *  shows a Cancel CTA so the user can opt out. */
+  isWizard?: boolean
+}
+
+/** In-chat wizard state. When `active=true`, regular chat send routes
+ *  to processIdeationWizardStep (instead of reflectOnChat) and each
+ *  reply advances the step counter. After step 7 completes, the
+ *  startConversation pipeline auto-fires. */
+export interface WizardChatState {
+  active: boolean
+  stepIndex: number
+  history: Array<{
+    step: string
+    question: string
+    answer: string
+    extractedLabel: string | null
+  }>
 }
 
 const META_CHECK_INTERVAL = 3
+
+// In-chat 7-step structured wizard. Mirrors the standalone /wizard
+// page but bakes the questions into the chat dock so the user sees
+// their canvas grow without changing surface.
+const WIZARD_CHAT_STEPS: ReadonlyArray<{
+  id: 'core-idea' | 'customer-pain' | 'value-angle' | 'hypothesis' | 'validation' | 'revenue' | 'risk'
+  label: string
+  description: string
+}> = [
+  { id: 'core-idea',     label: '核心想法',  description: '一句话讲清你想做什么。' },
+  { id: 'customer-pain', label: '客户痛点',  description: '谁在为什么具体的问题挣扎？描述一个具体场景。' },
+  { id: 'value-angle',   label: '价值切入',  description: '你独特的价值是什么、为什么是你来做？' },
+  { id: 'hypothesis',    label: '关键假设',  description: '验证之前必须先成立的前提是什么？' },
+  { id: 'validation',    label: '验证渠道',  description: '怎么以最小成本验证假设是真的？' },
+  { id: 'revenue',       label: '收入模式',  description: '钱从哪来，最早愿付费的一种人是谁？' },
+  { id: 'risk',          label: '主要风险',  description: '最可能让这事失败的 1-2 件事是什么？' }
+]
+
+const WIZARD_CHAT_MUTATION = /* GraphQL */ `
+  mutation ProcessWizardStepFromChat($input: ProcessIdeationWizardStepInput!) {
+    processIdeationWizardStep(input: $input) {
+      extracted { kind label content }
+      nextQuestion
+      nextStep
+    }
+  }
+`
+
+const WIZARD_CHAT_START_CONVERSATION = /* GraphQL */ `
+  mutation StartConversationFromChatWizard($workspaceId: ID!, $question: String!) {
+    startConversation(workspaceId: $workspaceId, question: $question) {
+      conversationId
+    }
+  }
+`
 
 // Undo / redo: a snapshot is a tuple of the four canvas-level slots
 // that user actions can mutate. We deliberately exclude streaming /
@@ -355,6 +409,24 @@ interface MacraState {
   setChatMessages: (messages: ChatMessage[] | ((msgs: ChatMessage[]) => ChatMessage[])) => void
   appendChatMessage: (message: Omit<ChatMessage, 'timestamp'>) => void
 
+  /** In-chat 7-step wizard state. See WizardChatState comments. */
+  wizardChat: WizardChatState
+  /** Open the in-chat wizard: appends an opening assistant message
+   *  and flips wizardChat.active so subsequent sends route through
+   *  submitWizardChatAnswer. */
+  startWizardInChat: () => void
+  /** Cancel the wizard mid-flow (chat returns to normal mode). */
+  endWizardInChat: () => void
+  /** Submit the user's answer for the current wizard step. Calls the
+   *  GraphQL processIdeationWizardStep mutation, appends both the user
+   *  message + the AI's next-question reply, drops an insight node
+   *  onto the canvas, and advances stepIndex. After step 7 completes,
+   *  fires startConversation to launch the 8-agent pipeline.
+   *
+   *  workspaceId is needed to scope the mutation + the kick-off seed.
+   */
+  submitWizardChatAnswer: (workspaceId: string, answer: string) => Promise<void>
+
   setWorkspaceId: (workspaceId: string) => void
 
   // 操作方法
@@ -472,6 +544,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   toolRunStates: {},
   chatInput: '',
   chatMessages: createInitialChatMessages(),
+  wizardChat: { active: false, stepIndex: 0, history: [] },
   detailPanel: {
     isOpen: false,
     nodeId: null
@@ -597,6 +670,163 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       }
     ])
+  },
+
+  startWizardInChat: () => {
+    if (get().wizardChat.active) return
+    set({ wizardChat: { active: true, stepIndex: 0, history: [] } })
+    const firstStep = WIZARD_CHAT_STEPS[0]
+    get().appendChatMessage({
+      role: 'assistant',
+      content: `**STEP 1/${WIZARD_CHAT_STEPS.length} · ${firstStep.label}**
+
+${firstStep.description}
+
+> 直接在下面输入答案，详细一点说，多两句话比一句话好；输入 \`/cancel\` 退出向导。`,
+      source: 'scripted',
+      isWizard: true
+    })
+  },
+
+  endWizardInChat: () => {
+    if (!get().wizardChat.active) return
+    set({ wizardChat: { active: false, stepIndex: 0, history: [] } })
+    get().appendChatMessage({
+      role: 'assistant',
+      content: '✗ 已退出向导。继续 @ agent 自由提问，或重新输入 `/wizard` 开始 7 步引导。',
+      source: 'scripted'
+    })
+  },
+
+  submitWizardChatAnswer: async (workspaceId, answer) => {
+    const { wizardChat, appendChatMessage, createMacraNode } = get()
+    if (!wizardChat.active) return
+    const trimmed = answer.trim()
+    if (!trimmed) return
+    const currentStep = WIZARD_CHAT_STEPS[wizardChat.stepIndex]
+    if (!currentStep) return
+
+    // 1. user message in chat
+    appendChatMessage({
+      role: 'user',
+      content: trimmed
+    })
+
+    try {
+      const recentChat = wizardChat.history.flatMap((h) => [
+        { role: 'ai', content: h.question },
+        { role: 'user', content: h.answer }
+      ])
+      const canvasNodes = wizardChat.history
+        .filter((h) => h.extractedLabel)
+        .map((h) => ({ id: `${h.step}-prev`, kind: h.step, label: h.extractedLabel ?? '', content: h.answer }))
+
+      const { getGraphQLClient } = await import('@/shared/lib/graphql-client')
+      const client = getGraphQLClient()
+      const response = await client.request<{
+        processIdeationWizardStep: {
+          extracted: { kind: string; label: string; content: string } | null
+          nextQuestion: string
+          nextStep: string
+        }
+      }>(WIZARD_CHAT_MUTATION, {
+        input: {
+          step: currentStep.id,
+          userAnswer: trimmed,
+          canvas: { nodes: canvasNodes, edgeCount: 0 },
+          recentChat,
+          workspaceId
+        }
+      })
+      const result = response.processIdeationWizardStep
+      const extracted = result?.extracted ?? null
+
+      // 2. Drop the extracted insight onto the canvas (live).
+      if (extracted) {
+        const nodeId = `insight-wizard-${currentStep.id}-${Date.now().toString(36)}`
+        createMacraNode({
+          id: nodeId,
+          type: 'insight-note',
+          label: extracted.label,
+          content: extracted.content,
+          summary: extracted.content.slice(0, 120),
+          fullContent: extracted.content,
+          metadata: {
+            source: 'ideation-wizard-chat',
+            wizardStep: currentStep.id,
+            wizardKind: extracted.kind
+          }
+        } as MacraNodeData)
+      }
+
+      // 3. Update wizard state — record this step's history
+      const nextHistory = [
+        ...wizardChat.history,
+        {
+          step: currentStep.id,
+          question: currentStep.description,
+          answer: trimmed,
+          extractedLabel: extracted?.label ?? null
+        }
+      ]
+      const nextIndex = wizardChat.stepIndex + 1
+      const isLast = nextIndex >= WIZARD_CHAT_STEPS.length
+
+      if (isLast) {
+        // 7 steps done — auto-graduate to BMC pipeline.
+        set({ wizardChat: { active: false, stepIndex: 0, history: [] } })
+        const summary = nextHistory
+          .map((h, i) => `${i + 1}. ${WIZARD_CHAT_STEPS[i]?.label ?? h.step}：${h.answer}`)
+          .join('\n')
+        appendChatMessage({
+          role: 'assistant',
+          content: `✓ 7 步采集完成。已抽 ${nextHistory.filter((h) => h.extractedLabel).length} 条线索到画布。
+
+**下一步**：8 个 agent 开始协作生成完整 BMC，画布会逐步浮现内容。`,
+          source: 'scripted',
+          isWizard: true
+        })
+        // Kick off the BMC pipeline with stitched answers.
+        const seed = `用户已通过 7 步向导描述了商业想法，请基于以下结构化输入生成完整 BMC：\n\n${summary}`
+        try {
+          const startMod = await import('@/shared/lib/graphql-client')
+          await startMod.getGraphQLClient().request(WIZARD_CHAT_START_CONVERSATION, {
+            workspaceId,
+            question: seed
+          })
+        } catch (kickErr) {
+          appendChatMessage({
+            role: 'assistant',
+            content: `⚠ BMC pipeline 启动失败：${kickErr instanceof Error ? kickErr.message : String(kickErr)}`,
+            source: 'error'
+          })
+        }
+      } else {
+        // Advance to next step.
+        const nextStep = WIZARD_CHAT_STEPS[nextIndex]
+        set({ wizardChat: { ...wizardChat, stepIndex: nextIndex, history: nextHistory } })
+        const extractedLine = extracted
+          ? `✓ 抽到「${extracted.label}」→ 已加到画布\n\n`
+          : ''
+        appendChatMessage({
+          role: 'assistant',
+          content: `${extractedLine}**STEP ${nextIndex + 1}/${WIZARD_CHAT_STEPS.length} · ${nextStep.label}**
+
+${result?.nextQuestion ?? nextStep.description}
+
+> 输入 \`/cancel\` 退出向导。`,
+          source: extracted ? 'llm' : 'scripted',
+          isWizard: true
+        })
+      }
+    } catch (err) {
+      appendChatMessage({
+        role: 'assistant',
+        content: `⚠ 向导第 ${wizardChat.stepIndex + 1} 步失败：${err instanceof Error ? err.message : String(err)}\n\n输入 \`/cancel\` 退出，或再答一次试试。`,
+        source: 'error',
+        isWizard: true
+      })
+    }
   },
 
   setWorkspaceId: (workspaceId) => {

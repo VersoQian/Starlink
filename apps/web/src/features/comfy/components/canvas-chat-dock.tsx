@@ -175,6 +175,9 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
                   <span className="font-bold text-stratum-navy">@</span> 唤起特定 agent
                 </p>
                 <p className="font-mono text-[10px] text-stratum-muted">
+                  <span className="font-bold text-stratum-navy">/wizard</span> 7 步结构化引导
+                </p>
+                <p className="font-mono text-[10px] text-stratum-muted">
                   <span className="font-bold text-stratum-navy">/clear</span> 清空对话
                 </p>
                 <p className="font-mono text-[10px] text-stratum-muted">
@@ -190,6 +193,7 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
               scaffold?: 'why' | 'how' | 'so_what' | 'evidence_needed' | 'meta'
               source?: string
               isMetaCheck?: boolean
+              isWizard?: boolean
             }
             const scaffoldLabel: Record<string, string> = {
               why: 'WHY · 为什么',
@@ -280,6 +284,11 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
                       {scaffoldLabel[m.scaffold] ?? m.scaffold}
                       {m.source === 'scripted' ? <span className="ml-0.5 opacity-60">· 脚手架</span> : null}
                       {m.source === 'error' ? <span className="ml-0.5 text-stratum-danger">· 错误</span> : null}
+                    </span>
+                  ) : !isUser && m.isWizard ? (
+                    <span className="mb-1 inline-flex items-center gap-1 bg-stratum-navy text-white px-2 py-0.5 font-body text-[9px] font-bold uppercase tracking-[0.18em]">
+                      WIZARD · 7 步引导
+                      {m.source === 'error' ? <span className="ml-0.5 text-stratum-sky">· 错误</span> : null}
                     </span>
                   ) : null}
                   <div
