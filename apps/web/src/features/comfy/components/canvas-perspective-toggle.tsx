@@ -14,10 +14,13 @@ import { useState } from 'react'
 
 type Perspective = 'perspectives' | 'timeline' | 'heatmap'
 
+// P10.3 · shortened labels per user request "tab 太长了 短一点".
+// Original: Perspectives / Timeline / Heatmap (~280px wide)
+// Now:      视图 / 时序 / 热度 (~140px wide, halves footprint)
 const TABS: ReadonlyArray<{ id: Perspective; label: string }> = [
-  { id: 'perspectives', label: 'Perspectives' },
-  { id: 'timeline',     label: 'Timeline' },
-  { id: 'heatmap',      label: 'Heatmap' },
+  { id: 'perspectives', label: '视图' },
+  { id: 'timeline',     label: '时序' },
+  { id: 'heatmap',      label: '热度' },
 ]
 
 export function CanvasPerspectiveToggle() {
@@ -38,7 +41,7 @@ export function CanvasPerspectiveToggle() {
             role="tab"
             aria-selected={isActive}
             onClick={() => setActive(tab.id)}
-            className={`px-4 py-1.5 rounded-full font-body text-[11px] font-semibold tracking-tight transition-colors ${
+            className={`px-3 py-1 rounded-full font-body text-[11px] font-semibold tracking-tight transition-colors ${
               isActive
                 ? 'bg-stratum-navy text-white'
                 : 'text-stratum-muted hover:text-stratum-navy'
