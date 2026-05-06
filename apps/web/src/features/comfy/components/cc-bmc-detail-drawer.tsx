@@ -104,19 +104,13 @@ export function CCBMCDetailDrawer() {
     const candidate = sentenceMatch?.[0]?.trim() ?? firstPara
     return candidate.length > 200 ? candidate.slice(0, 200).trimEnd() + '…' : candidate
   })()
-  // Hide summary section when:
-  //   (a) the derived summary equals the fullContent (single paragraph case)
-  //   (b) the fullContent is short (< 480 chars) — adding a summary above a
-  //       compact body just creates visual repetition
-  const trimmedFull = fullContent.trim()
-  const trimmedSummary = derivedSummary.replace(/[…\s]+$/, '')
-  const isSinglePara = !fullContent.includes('\n\n')
-  const isShortContent = fullContent.length < 480
-  const showSummary = Boolean(
-    derivedSummary &&
-    trimmedSummary !== trimmedFull &&
-    !(isSinglePara && isShortContent)
-  )
+  // P10.5 · per user request, drawer ALWAYS shows both 摘要 + 详细内容
+  // sections. Previous behaviour suppressed 摘要 when it equalled the
+  // start of fullContent (to avoid visual repetition), but user wants
+  // the two-section structure to be unconditional — the 摘要 read is
+  // useful even when redundant, and the visual hierarchy of "结论 →
+  // 论证" is more important than avoiding the repetition.
+  const showSummary = Boolean(derivedSummary && derivedSummary.trim().length > 0)
   const summary = derivedSummary
   const byline = nodeData.domain ? BYLINE_BY_DOMAIN[nodeData.domain] : undefined
 
@@ -263,14 +257,12 @@ export function CCBMCDetailDrawer() {
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {activeTab === 'overview' && (
             <>
-              {/* 摘要 — only shown when distinct from fullContent (avoid
-                  the previous visual bug where both sections rendered the
-                  same paragraph because the schema had no separate summary
-                  field). Derived client-side as the first paragraph (≤280
-                  chars). */}
+              {/* P10.5 · 摘要段（一句话核心结论）— always shown when
+                  there's any summary content. Visually distinct from
+                  详细分析 via italic + slightly muted ink. */}
               {showSummary ? (
                 <Section label="核心摘要" sublabel="SUMMARY">
-                  <div className="prose prose-sm max-w-measure-body font-body text-[13px] leading-[1.55] text-stratum-ink italic">
+                  <div className="prose prose-sm max-w-measure-body font-body text-[14px] leading-[1.55] text-stratum-navy font-medium border-l-2 border-stratum-blue/40 pl-4">
                     <ReactMarkdown>{summary}</ReactMarkdown>
                   </div>
                 </Section>
