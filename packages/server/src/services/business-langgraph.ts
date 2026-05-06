@@ -2134,8 +2134,11 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 - type: "cc-bmc-card"
 - domain: "客户细分" | "渠道通路" | "客户关系"
 - label: 简短标题（10 字以内）
-- content: 详细分析（Markdown 格式，包含数据、趋势、建议）
+- summary: **核心摘要 markdown**（120-200 字，覆盖全部关键判断的浓缩段落 / 短列表；用于详情抽屉的"摘要"段，让人 5 秒读完核心结论）
+- content: **详细分析 markdown**（300-800 字完整论证，含数据、趋势、子项、案例、建议；这是抽屉"详细分析"段渲染的原始内容）
 - metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+
+**关键约束**：summary 必须是 content 的浓缩，而不是首段或单一标题。两者**都用 markdown**，前端会做完整渲染（含 GFM 表格、列表、引用）。
 
 示例：
 [
@@ -2144,7 +2147,8 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     "type": "cc-bmc-card",
     "domain": "客户细分",
     "label": "目标客户群体",
-    "content": "## 核心客户\\n1. **城市中产家庭** (35-50岁)\\n   - 环保意识强\\n   - 占比 45%\\n2. **商用车队运营商**\\n   - 注重 TCO\\n   - 占比 30%",
+    "summary": "**两类核心客群**：\\n- 城市中产家庭（45%，环保意识驱动）\\n- 商用车队（30%，TCO 敏感）\\n首年聚焦 B2C，第 2 年扩 B2B。",
+    "content": "## 核心客户群体\\n\\n基于中汽协 2024 年度报告 + 12 城调研：\\n\\n1. **城市中产家庭** (35-50 岁，占比 45%)\\n   - 家庭年收入 ¥30-80W\\n   - 环保意识强，看重充电便利\\n   - 决策周期 2-3 月\\n\\n2. **商用车队运营商** (B2B，占比 30%)\\n   - 注重 TCO（5 年总持有成本）\\n   - 决策由财务+车队主管联动\\n   - 单笔订单 50+ 辆\\n\\n3. **早期采纳者** (科技从业者，占比 25%)\\n   - 关注智能化体验\\n   - 价格敏感度低\\n\\n**优先级建议**：首年聚焦 B2C 中产，第 2 年扩展 B2B 车队（需要建立专属销售团队）。",
     "metadata": {
       "agent_signature": "Market_Agent",
       "confidence": "high",
@@ -2283,10 +2287,11 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 - type: "cc-bmc-card"
 - domain: "价值主张" | "核心资源" | "关键业务" | "重要合作"
 - label: 简短标题（5-8 字）
-- content: 简洁分析（Markdown 格式，3-5 个要点，每个要点 1 行，总计 100 字以内）
+- summary: **核心摘要 markdown**（80-150 字，把要点都覆盖到的浓缩段落 / 短列表；详情抽屉的"摘要"段渲染）
+- content: **详细分析 markdown**（200-500 字完整论证，含子项 / 数据 / 案例；详情抽屉"详细分析"段渲染原始 markdown）
 - metadata: { agent_signature: "Product_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 
-**重要**：content 必须简洁，避免过长描述。
+**关键**：summary 是 content 的浓缩，不是首段或单一标题。两者都用 markdown，前端做完整渲染（含 GFM 表格、列表）。
 
 示例：
 [
@@ -2295,7 +2300,8 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     "type": "cc-bmc-card",
     "domain": "价值主张",
     "label": "智能驾驶",
-    "content": "## 核心价值\\n- L2+ 自动驾驶\\n- OTA 升级\\n- 零排放低成本",
+    "summary": "**3 个核心价值点**：L2+ 自动驾驶、OTA 升级、零排放低成本。三者叠加形成对传统燃油车的代差优势。",
+    "content": "## 核心价值\\n\\n基于市场对比 + 用户调研，3 个差异化价值：\\n\\n1. **L2+ 自动驾驶**：高速 NOA、自动泊车，覆盖 80% 通勤场景\\n2. **OTA 升级**：每季度新功能下发，车不会过时\\n3. **零排放低成本**：百公里电费 ¥10 vs 油费 ¥60\\n\\n**叠加效应**：单一价值无法对抗燃油车，但三者组合形成代差。\\n\\n**风险**：竞品（特斯拉 / 蔚来）也具备相似能力，护城河需通过软件迭代速度建立。",
     "metadata": {
       "agent_signature": "Product_Agent",
       "confidence": "high",
@@ -2431,8 +2437,11 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 - type: "cc-bmc-card"
 - domain: "收入来源" | "成本结构"
 - label: 简短标题（10 字以内）
-- content: 详细分析（Markdown 格式，包含数据、趋势、建议）
+- summary: **核心摘要 markdown**（100-180 字，浓缩占比 / 关键数字 / 主要判断；详情抽屉的"摘要"段渲染）
+- content: **详细分析 markdown**（300-600 字完整数字论证，含 % / 单价 / 趋势 / 风险 / 敏感性；详情抽屉"详细分析"段渲染原始 markdown）
 - metadata: { agent_signature: "Finance_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+
+**关键**：summary 是 content 的浓缩，前端两段都做 markdown 渲染（含 GFM 表格 / 列表）。
 
 示例：
 [
@@ -2441,7 +2450,8 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     "type": "cc-bmc-card",
     "domain": "收入来源",
     "label": "多元收入模式",
-    "content": "## 收入结构\\n1. **车辆销售** (70%)\\n   - 平均售价 25万\\n2. **增值服务** (20%)\\n   - FSD 订阅\\n3. **充电网络** (10%)",
+    "summary": "**3 部分构成**：车辆销售 70% + 增值服务 20% + 充电网络 10%。订阅类（FSD）边际成本接近 0，是利润放大器。",
+    "content": "## 收入结构\\n\\n基于现有 EV 公司财报对比：\\n\\n1. **车辆销售** (70%)\\n   - 平均售价 ¥25 万，毛利 18%\\n   - 年销 5 万辆 → 营收 ¥125 亿\\n\\n2. **增值服务** (20%)\\n   - FSD 订阅 ¥6.4 万 / 5 年\\n   - 边际成本接近 0，毛利 90%+\\n\\n3. **充电网络** (10%)\\n   - 自建桩月毛利 ¥800 / 桩\\n   - 给非自家品牌开放后多 30% 收入\\n\\n**敏感性**：FSD 渗透率从 15% → 30% 时，整体毛利从 22% → 35%。",
     "metadata": {
       "agent_signature": "Finance_Agent",
       "confidence": "high",

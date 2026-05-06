@@ -35,7 +35,10 @@ export const MacraNodeDataSchema = z.object({
    * content body. Drawer's 摘要 section reads this; if missing, drawer
    * derives from content's first sentence.
    */
-  summary: z.string().max(240).optional(),
+  // P11.2 · bumped from 240 → 600 to accommodate the new "summary as
+  // condensed markdown 段落+短列表" requirement (80-200 字 + markdown
+  // syntax + line breaks easily exceeds 240 chars).
+  summary: z.string().max(600).optional(),
   /**
    * Issue C fix · explicit full body (markdown) when agent splits
    * summary vs detail. When set, takes precedence over `content` for

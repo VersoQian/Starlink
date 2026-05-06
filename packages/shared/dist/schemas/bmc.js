@@ -43,7 +43,10 @@ export const bmcAnalysisCardSchema = z.object({
      * outputs that only emit content; the drawer derives summary from
      * content's first sentence when missing.
      */
-    summary: z.string().max(120).optional(),
+    // P11.2 · 120 was too tight (originally for one-line summary).
+    // New spec: summary is a condensed markdown 段 / 短列表 covering all
+    // key points, 80-200 字 + markdown overhead → cap at 600.
+    summary: z.string().max(600).optional(),
     /**
      * Detailed analysis (3-6 paragraphs / 200-600 chars). Drawer's full
      * detail section. May be empty when the agent only has a 1-sentence
