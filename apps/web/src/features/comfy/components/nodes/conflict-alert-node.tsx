@@ -22,6 +22,7 @@ import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
 import { AlertTriangle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const SEVERITY_LABEL = {
   high:   'HIGH',
@@ -91,7 +92,7 @@ export const ConflictAlertNode = memo(function ConflictAlertNode({ id, data }: N
         {/* Body — markdown content */}
         <div className="px-4 pb-3 border-t border-stratum-line">
           <div className="prose prose-sm font-body text-[12px] leading-[1.55] text-stratum-ink max-h-52 max-w-measure-cell overflow-y-auto pt-3">
-            <ReactMarkdown>{nodeData?.content || '*暂无冲突详情*'}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{nodeData?.content || '*暂无冲突详情*'}</ReactMarkdown>
           </div>
         </div>
 

@@ -6,6 +6,7 @@ import { useComfyStore } from '../../store'
 import { CC_BMC_DOMAINS, type CCBMCDomain, type MacraNodeData } from '@/types/macra'
 import { Edit3, Check, X, Info, ChevronDown, Maximize2, Minimize2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { CitationBadge } from '../citation-badge'
 import { useCardHighlightClass } from '../../hooks/use-citation-highlight'
 
@@ -250,7 +251,7 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
               <div
                 className={`prose prose-sm max-w-measure-cell font-body text-[13px] leading-[1.55] text-stratum-ink overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-none' : 'max-h-32'}`}
               >
-                <ReactMarkdown>{isExpanded ? fullContent : summary || '*暂无内容*'}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{isExpanded ? fullContent : summary || '*暂无内容*'}</ReactMarkdown>
               </div>
 
               {(contentCitation || noRefCount > 0 || typeof groundingRate === 'number') && (

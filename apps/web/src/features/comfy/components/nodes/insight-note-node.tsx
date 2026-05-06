@@ -18,6 +18,7 @@ import { useComfyStore } from '../../store'
 import { type MacraNodeData } from '@/types/macra'
 import { Edit3, Check, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const HANDLE_BASE =
   'h-2 w-2 !border-[0.5px] !border-stratum-blue/60 !bg-stratum-surface-low'
@@ -132,7 +133,7 @@ export const InsightNoteNode = memo(function InsightNoteNode({ id, data }: NodeP
             />
           ) : (
             <div className="prose prose-sm font-body text-[13px] leading-[1.55] text-stratum-ink max-w-measure-cell max-h-64 min-h-[80px] overflow-y-auto">
-              <ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {nodeData?.content || '*这里将展示 AI 生成的洞察和建议*'}
               </ReactMarkdown>
             </div>

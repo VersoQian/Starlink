@@ -91,6 +91,15 @@ export class BusinessCanvasBuilder {
           severity: macraNode.severity,
           conflictType: macraNode.conflictType,
           isInteractive: macraNode.isInteractive,
+          // P9 Block 1 fix · pass summary + fullContent through to the
+          // canvas meta so the BMC drawer can render two distinct
+          // sections (摘要 vs 详细内容). Without these, frontend's
+          // extractMacraNodeData falls back to data.content for both,
+          // collapsing them into the same string. The bmc-renderer.tool
+          // path was already fixed in commit f9107ae but the orchestrator
+          // path (this addMacraNode → main BMC pipeline) was missed.
+          summary: macraNode.summary || '',
+          fullContent: macraNode.fullContent || '',
           metadata: macraNode.metadata
         }
       }
