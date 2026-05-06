@@ -1533,27 +1533,46 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         removedNodeIds?: string[]
         removedEdgeIds?: string[]
       }) => {
-        const nodeUpdates = delta.nodes?.map(mapCanvasNodeToReactFlow)
-        const edgeUpdates = delta.edges?.map(mapCanvasEdgeToReactFlow)
+        // P9 Block 4b · validate delta shape — server contract drift or
+        // payload corruption could send non-array fields; silently
+        // ignoring the bad slice is better than throwing mid-stream.
+        const validNodes = Array.isArray(delta.nodes) ? delta.nodes : undefined
+        const validEdges = Array.isArray(delta.edges) ? delta.edges : undefined
+        const validRemovedNodes = Array.isArray(delta.removedNodeIds) ? delta.removedNodeIds : undefined
+        const validRemovedEdges = Array.isArray(delta.removedEdgeIds) ? delta.removedEdgeIds : undefined
+
+        const nodeUpdates = validNodes?.map(mapCanvasNodeToReactFlow)
+        const edgeUpdates = validEdges?.map(mapCanvasEdgeToReactFlow)
+        // P9 Block 3a · pre-compute removed-id sets OUTSIDE the set()
+        // setter to avoid the race where multiple graph/diff events
+        // arriving < 100ms apart can have inconsistent intermediate
+        // state. The previous filter inside set() referenced
+        // state.nodes which could already be mid-merge.
+        const removedNodeSet = validRemovedNodes ? new Set(validRemovedNodes) : null
+        const removedEdgeSet = validRemovedEdges ? new Set(validRemovedEdges) : null
 
         set((state) => {
           const newMacraNodes = new Map(state.macraNodes)
           let detectedRound = state.roundNumber
           let detectedAgent: string | null = state.currentAgent
 
-          delta.removedNodeIds?.forEach((nodeId) => {
+          removedNodeSet?.forEach((nodeId) => {
             newMacraNodes.delete(nodeId)
           })
 
           // 同时更新 macraNodes Map 并检测轮次
-          delta.nodes?.forEach(node => {
+          validNodes?.forEach(node => {
             const macraData = extractMacraNodeData(node)
             if (macraData) {
               newMacraNodes.set(node.id, macraData)
               // 从 metadata.tags 中检测轮次 (round-N)
-              const tags = macraData.metadata?.tags as string[] | undefined
-              if (tags) {
-                for (const tag of tags) {
+              // P9 Block 3b · Array.isArray guard — without it a
+              // server bug sending tags as object/string would silently
+              // iterate over keys/chars, corrupting roundNumber.
+              const rawTags = macraData.metadata?.tags
+              if (Array.isArray(rawTags)) {
+                for (const tag of rawTags) {
+                  if (typeof tag !== 'string') continue
                   const match = tag.match(/^round-(\d+)$/)
                   if (match) {
                     const round = Number(match[1])
@@ -1562,8 +1581,6 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
                 }
               }
               // Sprint 3.3 · capture most-recent emitting agent for Coach.
-              // agentType is the AGENT_TYPES enum value (e.g. 'Market_Agent');
-              // Coach maps this to display name.
               if (typeof macraData.agentType === 'string' && macraData.agentType.length > 0) {
                 detectedAgent = macraData.agentType
               }
@@ -1572,11 +1589,11 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
 
           return {
             nodes: mergeById(
-              delta.removedNodeIds ? state.nodes.filter((node) => !delta.removedNodeIds?.includes(node.id)) : state.nodes,
+              removedNodeSet ? state.nodes.filter((node) => !removedNodeSet.has(node.id)) : state.nodes,
               nodeUpdates
             ),
             edges: mergeById(
-              delta.removedEdgeIds ? state.edges.filter((edge) => !delta.removedEdgeIds?.includes(edge.id)) : state.edges,
+              removedEdgeSet ? state.edges.filter((edge) => !removedEdgeSet.has(edge.id)) : state.edges,
               edgeUpdates
             ),
             macraNodes: newMacraNodes,
@@ -1951,6 +1968,9 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       const ok = data.cancelStaleSession?.status === 'failed'
       // Local-side cleanup regardless: the watcher will hit status='failed'
       // and tear itself, but Coach should reflect the cancel immediately.
+      // P9 Block 3c · also clear pendingInterrupt — without this, an
+      // interrupt from the cancelled run could fire on the next session,
+      // dropping a stale conflict-alert onto a fresh canvas.
       set((state) => ({
         currentConversationId: null,
         isOrchestratorProcessing: false,
@@ -1961,6 +1981,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           lastTransitionReason: 'user-cancelled',
         },
         currentAgent: null,
+        pendingInterrupt: null,
         lastCompletionAt: Date.now(),
       }))
       return ok
