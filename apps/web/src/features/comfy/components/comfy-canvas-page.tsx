@@ -71,6 +71,7 @@ export function CanvasPage({
   const setWorkflowStage = useComfyStore((state) => state.setWorkflowStage)
   const exportCanvasJson = useComfyStore((state) => state.exportCanvasJson)
   const importCanvasJson = useComfyStore((state) => state.importCanvasJson)
+  const reattachToActiveSession = useComfyStore((state) => state.reattachToActiveSession)
 
   const handleExportCanvas = useCallback((): void => {
     const json = exportCanvasJson()
@@ -211,6 +212,26 @@ export function CanvasPage({
   useEffect(() => {
     setWorkspaceId(workspaceId)
   }, [setWorkspaceId, workspaceId])
+
+  // Sprint 1.4 · Active-session reconnect.
+  // If a previous tab kicked off a pipeline that is still running on the
+  // server (e.g. the user navigated away mid-run, or refreshed), this
+  // probes for a live ConversationSession on mount and re-subscribes
+  // to its progress stream. Idempotent — silently no-ops when nothing
+  // is running. Runs once per workspaceId change.
+  useEffect(() => {
+    if (!workspaceId) return
+    let cancelled = false
+    void reattachToActiveSession(workspaceId).then((conversationId) => {
+      if (cancelled) return
+      if (conversationId) {
+        console.info(`[canvas] reattached to running session ${conversationId}`)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [reattachToActiveSession, workspaceId])
 
   useEffect(() => {
     if (pendingDecisionRequest) {

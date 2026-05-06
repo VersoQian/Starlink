@@ -286,12 +286,34 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                       <span>{noRefCount} 无引用</span>
                     </span>
                   )}
-                  {typeof groundingRate === 'number' && (
-                    <span className="ml-auto font-instr text-[9px] tabular-nums uppercase tracking-kicker">
-                      <span className="text-stratum-muted">GROUNDING</span>{' '}
-                      {(groundingRate * 100).toFixed(0)}%
-                    </span>
-                  )}
+                  {typeof groundingRate === 'number' && (() => {
+                    // Sprint 3.1 · grounding rate gate.
+                    // < 30% = red (low evidence — likely speculation or
+                    // out-of-KB claims); 30-60% = amber; >= 60% = neutral.
+                    const isLow = groundingRate < 0.3
+                    const isMid = !isLow && groundingRate < 0.6
+                    const tone = isLow
+                      ? 'text-stratum-danger'
+                      : isMid
+                      ? 'text-stratum-warn'
+                      : 'text-stratum-muted'
+                    return (
+                      <span
+                        className={`ml-auto font-instr text-[9px] tabular-nums uppercase tracking-kicker ${tone}`}
+                        title={
+                          isLow
+                            ? '证据率偏低 (<30%) — 这条断言主要靠模型推理，建议补充 KB 资料或核对'
+                            : isMid
+                            ? '证据率中等 — 部分断言已引用'
+                            : '证据率良好 — 多数断言已引用 KB'
+                        }
+                      >
+                        <span className="text-stratum-muted">GROUNDING</span>{' '}
+                        {(groundingRate * 100).toFixed(0)}%
+                        {isLow && <span className="ml-1">⚠</span>}
+                      </span>
+                    )
+                  })()}
                 </div>
               )}
 

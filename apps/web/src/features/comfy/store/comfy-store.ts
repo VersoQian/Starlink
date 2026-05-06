@@ -529,6 +529,19 @@ interface MacraState {
   // 找不到 conversation 时静默返回，调用方按 fresh canvas 处理）。
   hydrateFromConversation: (conversationId: string) => Promise<{ workspaceId: string } | null>
 
+  /**
+   * Sprint 1.4 · Active-session reconnect.
+   *
+   * On canvas page mount, if a previous browser tab kicked off a pipeline
+   * that's still running on the server (e.g. user navigated away mid-run
+   * or refreshed), re-attach the live subscription so progress resumes
+   * streaming into this tab. Idempotent — no-ops when no running session
+   * is found, or when the store already has a current conversation.
+   *
+   * Returns the conversationId we reattached to, or null.
+   */
+  reattachToActiveSession: (workspaceId: string) => Promise<string | null>
+
   // 苏格拉底式反问 - 调 server reflectOnIdeation，把当前 canvas snapshot
   // + 最近 chat 历史 + 用户新消息打包发过去，返回单条 scaffold 类型的反问
   // (why / how / so_what / evidence_needed / meta)。和 callLangGraph 区
@@ -1704,6 +1717,165 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       return { workspaceId: conv.graph.workspaceId }
     } catch (err) {
       console.warn('[hydrateFromConversation] failed', err)
+      return null
+    }
+  },
+
+  // ============== Sprint 1.4 · Active-session reconnect ==============
+  reattachToActiveSession: async (workspaceId: string) => {
+    if (!workspaceId) return null
+    const state = get()
+    // Already attached or actively running locally — don't double-attach.
+    if (state.currentConversationId) return null
+    if (state.isOrchestratorProcessing) return null
+    try {
+      const client = getGraphQLClient()
+      type SessionsPayload = {
+        conversationSessions: Array<{
+          id: string
+          status: string
+          updatedAt: string
+          heartbeatAt: string | null
+        }>
+      }
+      const data = await client.request<SessionsPayload>(
+        /* GraphQL */ `
+          query ActiveSessions($workspaceId: ID!) {
+            conversationSessions(workspaceId: $workspaceId, limit: 5) {
+              id
+              status
+              updatedAt
+              heartbeatAt
+            }
+          }
+        `,
+        { workspaceId }
+      )
+
+      const running = (data.conversationSessions ?? []).find(
+        (s) => s.status === 'running'
+      )
+      if (!running) return null
+
+      // Heartbeat sanity check — server's reaper marks stale sessions
+      // failed within 75s, but we add a softer client-side gate to avoid
+      // re-attaching to a session that's about to be reaped.
+      if (running.heartbeatAt) {
+        const ageMs = Date.now() - new Date(running.heartbeatAt).getTime()
+        if (ageMs > 90_000) {
+          console.warn(
+            `[reattachToActiveSession] skip stale session ${running.id} (heartbeat ${Math.round(ageMs / 1000)}s ago)`
+          )
+          return null
+        }
+      }
+
+      // Found a live session — set currentConversationId, paint the
+      // latest server-side graph snapshot, and start a watcher for
+      // future deltas. workflowStage stays in whatever the page derives
+      // from isOrchestratorProcessing; we don't force 'thinking' so the
+      // user isn't surprised by a "live" badge if the session is just
+      // about to complete.
+      set({ currentConversationId: running.id })
+
+      try {
+        const graph = await fetchWorkspaceGraphSnapshot(workspaceId)
+        if (graph && Array.isArray(graph.nodes)) {
+          // Reuse the same mapping as hydrateFromConversation — keep it
+          // inline so this action is self-contained.
+          const macraNodesMap = new Map<string, MacraNodeData>()
+          graph.nodes.forEach((node) => {
+            const cn = node as unknown as CanvasNode
+            const dataObj = (cn.data ?? {}) as Record<string, unknown>
+            const meta = dataObj.meta as Record<string, unknown> | undefined
+            if (!meta) return
+            macraNodesMap.set(cn.id, {
+              id: cn.id,
+              type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
+              label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
+              content: typeof dataObj.content === 'string' ? dataObj.content : '',
+              summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+              fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+              domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
+              metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+              agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
+              severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
+              conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
+              isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
+              position: cn.position,
+            } as MacraNodeData)
+          })
+          set({
+            nodes: graph.nodes.map(mapCanvasNodeToReactFlow),
+            edges: graph.edges.map(mapCanvasEdgeToReactFlow),
+            macraNodes: macraNodesMap,
+          })
+        }
+      } catch (err) {
+        console.warn('[reattachToActiveSession] graph snapshot load failed', err)
+      }
+
+      // Spin up the watcher so future graph/diff + status events flow
+      // into this tab. We deliberately do NOT await watcher.done — the
+      // page mount returns immediately; the subscription self-tears
+      // when the server emits status='completed'.
+      const watcher = watchConversation({
+        workspaceId,
+        conversationId: running.id,
+        onGraphAppended: (payload) => {
+          const graph = payload as WorkspaceGraphResponse
+          set({
+            nodes: graph.nodes.map(mapCanvasNodeToReactFlow),
+            edges: graph.edges.map(mapCanvasEdgeToReactFlow),
+          })
+        },
+        onGraphDiff: (payload) => {
+          const delta = payload as {
+            nodes?: CanvasNode[]
+            edges?: CanvasEdge[]
+            removedNodeIds?: string[]
+            removedEdgeIds?: string[]
+          }
+          set((s) => ({
+            nodes: mergeById(
+              delta.removedNodeIds
+                ? s.nodes.filter((n) => !delta.removedNodeIds?.includes(n.id))
+                : s.nodes,
+              delta.nodes?.map(mapCanvasNodeToReactFlow)
+            ),
+            edges: mergeById(
+              delta.removedEdgeIds
+                ? s.edges.filter((e) => !delta.removedEdgeIds?.includes(e.id))
+                : s.edges,
+              delta.edges?.map(mapCanvasEdgeToReactFlow)
+            ),
+            lastDeltaAt: Date.now(),
+          }))
+        },
+        onEvidence: (payload) => {
+          const ev = payload as KnowledgeEvidence[]
+          if (Array.isArray(ev)) set({ knowledgeEvidence: ev })
+        },
+        onCardCited: (payload) => {
+          const data = payload as { cardId?: string; citation?: CardCitation }
+          if (data?.cardId && data.citation) {
+            get().setCardCitation(data.cardId, data.citation)
+          }
+        },
+        loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId),
+      })
+
+      // Tear watcher when conversation ends. Don't block the action.
+      watcher.done.catch(() => {}).finally(() => {
+        const cur = get().currentConversationId
+        if (cur === running.id) {
+          set({ currentConversationId: null })
+        }
+      })
+
+      return running.id
+    } catch (err) {
+      console.warn('[reattachToActiveSession] failed', err)
       return null
     }
   },
