@@ -117,6 +117,61 @@ export function CanvasLiveCoach(props: Props) {
     return { bmc, conflicts, insights, reports, total: macraNodes.size }
   }, [macraNodes])
 
+  /**
+   * Coach context-awareness — read what the user actually has on canvas
+   * so suggestions can target the specific gaps. Three signals:
+   *   1. projectHeadline · the first non-empty BMC cell title or root
+   *      summary, used to address the user with their own wording
+   *   2. missingDomains  · which of the 9 BMC dimensions have no cell
+   *      yet — coach proposes the matching agent
+   *   3. lowGroundingDomains · cells whose grounding rate < 30% — coach
+   *      suggests RAG / KB upload to firm them up
+   */
+  const projectContext = useMemo(() => {
+    type CellInfo = { domain: string; agent: 'market' | 'product' | 'finance'; idPrefix: string }
+    // Mapping from id-prefix → which agent owns the dimension
+    const NINE_DIMENSIONS: CellInfo[] = [
+      { domain: '客户细分',   agent: 'market',  idPrefix: 'market-customer-segments' },
+      { domain: '客户关系',   agent: 'market',  idPrefix: 'market-customer-relationships' },
+      { domain: '渠道通路',   agent: 'market',  idPrefix: 'market-channels' },
+      { domain: '价值主张',   agent: 'product', idPrefix: 'product-value-propositions' },
+      { domain: '关键资源',   agent: 'product', idPrefix: 'product-key-resources' },
+      { domain: '关键业务',   agent: 'product', idPrefix: 'product-key-activities' },
+      { domain: '重要合作',   agent: 'product', idPrefix: 'product-key-partnerships' },
+      { domain: '收入来源',   agent: 'finance', idPrefix: 'finance-revenue-streams' },
+      { domain: '成本结构',   agent: 'finance', idPrefix: 'finance-cost-structure' }
+    ]
+    const present = new Set<string>()
+    let projectHeadline: string | null = null
+    const lowGroundingDomains: string[] = []
+    for (const node of macraNodes.values()) {
+      if (node.type !== 'cc-bmc-card') continue
+      present.add(node.id)
+      // Detect low-grounding cells. groundingRate lives in metadata; we
+      // duplicate the < 0.30 threshold from cc-bmc-card-node.tsx Sprint 3.1.
+      const meta = node.metadata as Record<string, unknown> | undefined
+      const grounding = typeof meta?.groundingRate === 'number' ? (meta.groundingRate as number) : null
+      if (grounding !== null && grounding < 0.3) {
+        const dim = NINE_DIMENSIONS.find((d) => d.idPrefix === node.id)
+        if (dim) lowGroundingDomains.push(dim.domain)
+      }
+      // First non-empty cell title becomes the project headline.
+      const label = (node.label || '').trim()
+      if (!projectHeadline && label && label !== '未命名') {
+        projectHeadline = label.length > 18 ? `${label.slice(0, 18)}…` : label
+      }
+    }
+    const missingDimensions = NINE_DIMENSIONS.filter((d) => !present.has(d.idPrefix))
+    // Pick a representative agent to recommend: whichever agent has the
+    // most missing dimensions (so the user hits the biggest gap with one click)
+    const missingByAgent: Record<string, number> = { market: 0, product: 0, finance: 0 }
+    missingDimensions.forEach((d) => { missingByAgent[d.agent] += 1 })
+    const topGapAgent = (Object.entries(missingByAgent) as Array<['market' | 'product' | 'finance', number]>)
+      .sort((a, b) => b[1] - a[1])[0]
+    const suggestedAgent = topGapAgent && topGapAgent[1] > 0 ? topGapAgent[0] : null
+    return { projectHeadline, missingDimensions, lowGroundingDomains, suggestedAgent }
+  }, [macraNodes])
+
   // Cycle the agent ticker only while thinking.
   useEffect(() => {
     if (workflowStage !== 'thinking' && workflowStage !== 'revising') return
@@ -260,22 +315,67 @@ export function CanvasLiveCoach(props: Props) {
       }
     }
     if (stats.bmc < 9 && stats.bmc > 0) {
+      // Coach context-awareness · address the user's project specifically
+      // and recommend the agent with the biggest gap. Examples:
+      //   "B2B 咖啡订阅 · 还差 3 维度（客户细分 / 渠道通路 / 收入来源）"
+      //   → 一键 fill: pre-fills @market-agent 帮你补完 客户细分/渠道通路
+      const headline = projectContext.projectHeadline
+        ? `${projectContext.projectHeadline} · 还差 ${9 - stats.bmc} 维度`
+        : `9 维度 · 已填 ${stats.bmc} / 9`
+      const missingNames = projectContext.missingDimensions.slice(0, 3).map(d => d.domain).join(' / ')
+      const detail = missingNames || '点开聊天 @ 对应 agent 补缺'
+      const ag = projectContext.suggestedAgent
+      const fillLabel = ag === 'market' ? '@market 补市场' : ag === 'product' ? '@product 补产品' : ag === 'finance' ? '@finance 补财务' : '打开聊天'
+      const fillCommand = ag
+        ? `@${ag}-agent 帮我补 ${projectContext.missingDimensions.filter(d => d.agent === ag).map(d => d.domain).join('、')}`
+        : ''
       return {
         kicker: 'PARTIAL · BMC 待补全',
-        headline: `9 维度 · 已填 ${stats.bmc} / 9`,
-        detail: '@market / @product / @finance 补缺',
+        headline,
+        detail,
         actions: [
-          { label: '打开聊天', onClick: props.onOpenChat, severity: 'primary', icon: ArrowRight }
+          ag
+            ? {
+                label: fillLabel,
+                onClick: () => { setChatInput(fillCommand); props.onOpenChat() },
+                severity: 'primary',
+                icon: Sparkles
+              }
+            : { label: '打开聊天', onClick: props.onOpenChat, severity: 'primary', icon: ArrowRight }
         ]
       }
     }
     if (stats.conflicts > 0) {
+      const headline = projectContext.projectHeadline
+        ? `${projectContext.projectHeadline} · ${stats.conflicts} 处冲突待解`
+        : `Critic 标了 ${stats.conflicts} 处冲突`
       return {
         kicker: 'CONFLICT · 待解决',
-        headline: `Critic 标了 ${stats.conflicts} 处冲突`,
+        headline,
         detail: '点开看是否真冲突，或让 critic 重审',
         actions: [
           { label: '查看冲突', onClick: props.onShowConflicts, severity: 'warn', icon: AlertTriangle }
+        ]
+      }
+    }
+    // Coach context · grounding gate — flag low-evidence cells when
+    // BMC complete + no conflicts. User likely needs more KB data.
+    if (stats.bmc >= 9 && projectContext.lowGroundingDomains.length >= 3) {
+      return {
+        kicker: 'EVIDENCE · 证据率偏低',
+        headline: `${projectContext.lowGroundingDomains.length} 个维度证据不足`,
+        detail: `${projectContext.lowGroundingDomains.slice(0, 3).join(' / ')} 主要靠模型推理`,
+        actions: [
+          { label: '上传 KB', onClick: props.onOpenKb, severity: 'primary', icon: FileText },
+          {
+            label: '深度调研',
+            onClick: () => {
+              setChatInput(`@deep-research 给 ${projectContext.lowGroundingDomains.slice(0, 2).join('、')} 找业内数据`)
+              props.onOpenChat()
+            },
+            severity: 'info',
+            icon: ArrowRight
+          }
         ]
       }
     }
@@ -316,7 +416,7 @@ export function CanvasLiveCoach(props: Props) {
         { label: '打开聊天', onClick: props.onOpenChat, severity: 'primary', icon: ArrowRight }
       ]
     }
-  }, [workflowStage, stats, tickIndex, setChatInput, props, currentAgent, roundNumber, maxRounds, lastDeltaAt, lastCompletionAt, now, cancelActiveSession])
+  }, [workflowStage, stats, tickIndex, setChatInput, props, currentAgent, roundNumber, maxRounds, lastDeltaAt, lastCompletionAt, now, cancelActiveSession, projectContext])
 
   if (collapsed) {
     return (
