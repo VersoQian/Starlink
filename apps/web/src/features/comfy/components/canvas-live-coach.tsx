@@ -420,25 +420,66 @@ export function CanvasLiveCoach(props: Props) {
     }
   }, [workflowStage, stats, tickIndex, setChatInput, props, currentAgent, roundNumber, maxRounds, lastDeltaAt, lastCompletionAt, now, cancelActiveSession, projectContext])
 
-  if (collapsed) {
-    return (
+  // P10.2 layout · Always show the 3 quick-access buttons (KB / Memory /
+  // Wizard) in a vertical column under the Coach header — regardless of
+  // whether Coach itself is collapsed (pill) or expanded (full panel).
+  // User wanted the buttons to "和 coach 一列" (in a column with coach),
+  // not just visible when Coach is open.
+  const quickButtons = (
+    <div className="flex flex-col gap-1.5 w-[200px]">
       <button
         type="button"
-        onClick={() => setCollapsed(false)}
-        aria-label="展开 AI 教练"
-        className="absolute top-[88px] right-6 z-20 flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 shadow-lg text-white hover:bg-stratum-navy-soft transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
+        onClick={props.onOpenWizard}
+        className="flex h-9 items-center gap-2 rounded-full bg-white px-3 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
+        aria-label="结构化向导"
       >
-        <Lightbulb className="h-3.5 w-3.5 text-stratum-sky" strokeWidth={2} fill="#89CEFF" />
-        <span className="font-mono text-[10px] font-bold uppercase tracking-[0.14em]">COACH</span>
+        <ListChecks className="h-3.5 w-3.5" strokeWidth={1.75} />
+        <span className="font-body text-[11px] font-semibold">AI 引导 · 7 步</span>
       </button>
+      <button
+        type="button"
+        onClick={props.onOpenMemory}
+        className="flex h-9 items-center gap-2 rounded-full bg-white px-3 shadow-lg border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
+        aria-label="查看长期记忆"
+      >
+        <Brain className="h-3.5 w-3.5" strokeWidth={1.75} />
+        <span className="font-body text-[11px] font-semibold">记忆 · Memory</span>
+      </button>
+      <button
+        type="button"
+        onClick={props.onOpenKb}
+        className="flex h-9 items-center gap-2 rounded-full bg-white px-3 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
+        aria-label="打开 KB 资料"
+      >
+        <Database className="h-3.5 w-3.5" strokeWidth={1.75} />
+        <span className="font-body text-[11px] font-semibold">资料 · KB</span>
+      </button>
+    </div>
+  )
+
+  if (collapsed) {
+    return (
+      <div className="absolute top-[88px] right-6 z-20 flex flex-col gap-2 items-end">
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          aria-label="展开 AI 教练"
+          className="flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 shadow-lg text-white hover:bg-stratum-navy-soft transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
+        >
+          <Lightbulb className="h-3.5 w-3.5 text-stratum-sky" strokeWidth={2} fill="#89CEFF" />
+          <span className="font-mono text-[10px] font-bold uppercase tracking-[0.14em]">COACH</span>
+        </button>
+        {quickButtons}
+      </div>
     )
   }
 
   const isLive = workflowStage === 'thinking' || workflowStage === 'revising'
 
   return (
+    <div className="absolute top-[88px] right-6 z-20 flex flex-col gap-2 items-end">
     <aside
-      className="absolute top-[88px] right-6 z-20 w-[300px] max-w-[40vw] rounded-xl bg-white shadow-lg border border-stratum-line pointer-events-auto"
+      className="w-[300px] max-w-[40vw] rounded-xl bg-white shadow-lg border border-stratum-line pointer-events-auto"
       aria-label="AI 教练"
     >
       <header className="flex items-center justify-between px-3 py-2 border-b-[0.5px] border-stratum-line bg-stratum-surface-low/40 rounded-t-xl">
@@ -530,40 +571,8 @@ export function CanvasLiveCoach(props: Props) {
           </div>
         ) : null}
       </div>
-      {/* P10 user request · 3 quick-access buttons under Coach so they
-          sit directly below regardless of Coach body height. Replaces
-          the previous absolute-positioned floating buttons that would
-          drift either too far below collapsed Coach or overlap expanded
-          Coach. */}
-      <footer className="border-t-[0.5px] border-stratum-line bg-stratum-surface-low/40 rounded-b-xl px-3 py-2 flex flex-col gap-1.5">
-        <button
-          type="button"
-          onClick={props.onOpenWizard}
-          className="flex h-9 items-center gap-2 rounded-full bg-white px-3 border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px"
-          aria-label="结构化向导"
-        >
-          <ListChecks className="h-3.5 w-3.5" strokeWidth={1.75} />
-          <span className="font-body text-[11px] font-semibold">AI 引导 · 7 步</span>
-        </button>
-        <button
-          type="button"
-          onClick={props.onOpenMemory}
-          className="flex h-9 items-center gap-2 rounded-full bg-white px-3 border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px"
-          aria-label="查看长期记忆"
-        >
-          <Brain className="h-3.5 w-3.5" strokeWidth={1.75} />
-          <span className="font-body text-[11px] font-semibold">记忆 · Memory</span>
-        </button>
-        <button
-          type="button"
-          onClick={props.onOpenKb}
-          className="flex h-9 items-center gap-2 rounded-full bg-white px-3 border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px"
-          aria-label="打开 KB 资料"
-        >
-          <Database className="h-3.5 w-3.5" strokeWidth={1.75} />
-          <span className="font-body text-[11px] font-semibold">资料 · KB</span>
-        </button>
-      </footer>
     </aside>
+    {quickButtons}
+    </div>
   )
 }
