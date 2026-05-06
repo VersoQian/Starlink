@@ -14,6 +14,7 @@ import { CanvasChatDock } from './canvas-chat-dock'
 import { CanvasCitationPanel } from './canvas-citation-panel'
 import { MemoryDrawer } from './memory-drawer'
 import { CanvasWizardPanel } from './canvas-wizard-panel'
+import { CanvasLiveCoach } from './canvas-live-coach'
 import { CanvasHitlBanner } from './canvas-hitl-banner'
 import { CanvasPromptDialog } from './canvas-prompt-dialog'
 import { CanvasThinkingOverlay } from './canvas-thinking-overlay'
@@ -753,6 +754,27 @@ export function CanvasPage({
           onClose={() => setWizardOpen(false)}
           workspaceId={workspaceId}
         />
+        {/* Live coach: small floating panel that adapts its message to
+            workflowStage + canvas content. Sits top-right; user can
+            collapse into a single COACH chip if they want to focus.
+            Hidden when wizard is open (wizard already gives guidance). */}
+        {!wizardOpen ? (
+          <CanvasLiveCoach
+            workspaceId={workspaceId}
+            onOpenWizard={() => setWizardOpen(true)}
+            onOpenKb={() => setKbModalOpen(true)}
+            onShowConflicts={() => {
+              setCitationOpen(true)
+              // Picking the first conflict id surfaces the review tab
+              // with that conflict expanded; null clears prior selection.
+              const firstConflict = Array.from(macraNodes.values()).find(
+                (n) => n.type === 'conflict-alert'
+              )
+              setFocusedConflictId(firstConflict?.id ?? null)
+            }}
+            onOpenChat={() => setChatOpen(true)}
+          />
+        ) : null}
       </div>
     )
   }
