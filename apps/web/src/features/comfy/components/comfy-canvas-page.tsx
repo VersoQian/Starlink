@@ -20,7 +20,6 @@ import { CanvasPromptDialog } from './canvas-prompt-dialog'
 import { CanvasThinkingOverlay } from './canvas-thinking-overlay'
 import { EvidenceDrawer } from './evidence-drawer'
 import { KbUploadModal } from './kb-upload-modal'
-import { Brain, Database, ListChecks } from 'lucide-react'
 import { WorkspaceShell } from './workspace-shell'
 import type { PendingDecisionRequest } from './workspace-shell-context'
 import './panels/register-default-panels'
@@ -759,41 +758,9 @@ export function CanvasPage({
               {/* Floating KB button — Mode B entry point on canvas. Sits
                   bottom-left so it doesn't collide with chat dock when
                   open (chat takes top-left), nor the action bar (center). */}
-              {/* P10 reposition: 3 floating buttons stacked vertically
-                  on the right side, BELOW the Coach panel (Coach is at
-                  top-[88px] right-6, ~300px wide × ~180px tall when
-                  expanded). KB/Memory/Wizard sit at top-[280px+] right-6.
-                  No more bottom-edge crowding with action-bar / minimap
-                  / canvas keyboard hint pill. Same vertical stack on
-                  every viewport (no md: branch needed since they don't
-                  collide with anything else now). */}
-              <button
-                type="button"
-                onClick={() => setWizardOpen(true)}
-                className="absolute top-[280px] right-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
-                aria-label="结构化向导"
-              >
-                <ListChecks className="h-4 w-4" strokeWidth={1.75} />
-                <span className="font-body text-[11px] font-semibold">AI 引导 · 7 步</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMemoryOpen(true)}
-                className="absolute top-[336px] right-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-colors pointer-events-auto"
-                aria-label="查看长期记忆"
-              >
-                <Brain className="h-4 w-4" strokeWidth={1.75} />
-                <span className="font-body text-[11px] font-semibold">记忆 · Memory</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setKbModalOpen(true)}
-                className="absolute top-[392px] right-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
-                aria-label="打开 KB 资料"
-              >
-                <Database className="h-4 w-4" strokeWidth={1.75} />
-                <span className="font-body text-[11px] font-semibold">资料 · KB</span>
-              </button>
+              {/* P10 final · KB / Memory / Wizard 按钮已移到 CanvasLiveCoach
+                  组件的 footer，紧贴 Coach 面板下方（不再用绝对定位，
+                  完美追随 Coach 高度变化）。原本这里的 3 个浮动按钮已删。 */}
             </>
           ) : null}
         </div>
@@ -853,6 +820,7 @@ export function CanvasPage({
               void startWizardInChat(workspaceId, true)
             }}
             onOpenKb={() => setKbModalOpen(true)}
+            onOpenMemory={() => setMemoryOpen(true)}
             onShowConflicts={() => {
               setCitationOpen(true)
               // Picking the first conflict id surfaces the review tab

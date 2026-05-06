@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, FileText, Lightbulb, Sparkles, Square } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Brain, Database, FileText, Lightbulb, ListChecks, Sparkles, Square } from 'lucide-react'
 import { useComfyStore } from '../store'
 
 const AGENT_DISPATCH_TICKS: ReadonlyArray<string> = [
@@ -83,6 +83,8 @@ interface Props {
   onOpenWizard: () => void
   /** Open the KB upload modal. */
   onOpenKb: () => void
+  /** Open the long-term memory drawer. */
+  onOpenMemory: () => void
   /** Toggle insight panel on the conflicts tab. */
   onShowConflicts: () => void
   /** Open the chat dock. */
@@ -528,6 +530,40 @@ export function CanvasLiveCoach(props: Props) {
           </div>
         ) : null}
       </div>
+      {/* P10 user request · 3 quick-access buttons under Coach so they
+          sit directly below regardless of Coach body height. Replaces
+          the previous absolute-positioned floating buttons that would
+          drift either too far below collapsed Coach or overlap expanded
+          Coach. */}
+      <footer className="border-t-[0.5px] border-stratum-line bg-stratum-surface-low/40 rounded-b-xl px-3 py-2 flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={props.onOpenWizard}
+          className="flex h-9 items-center gap-2 rounded-full bg-white px-3 border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px"
+          aria-label="结构化向导"
+        >
+          <ListChecks className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <span className="font-body text-[11px] font-semibold">AI 引导 · 7 步</span>
+        </button>
+        <button
+          type="button"
+          onClick={props.onOpenMemory}
+          className="flex h-9 items-center gap-2 rounded-full bg-white px-3 border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px"
+          aria-label="查看长期记忆"
+        >
+          <Brain className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <span className="font-body text-[11px] font-semibold">记忆 · Memory</span>
+        </button>
+        <button
+          type="button"
+          onClick={props.onOpenKb}
+          className="flex h-9 items-center gap-2 rounded-full bg-white px-3 border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px"
+          aria-label="打开 KB 资料"
+        >
+          <Database className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <span className="font-body text-[11px] font-semibold">资料 · KB</span>
+        </button>
+      </footer>
     </aside>
   )
 }
