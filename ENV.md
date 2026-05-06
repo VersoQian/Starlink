@@ -50,7 +50,7 @@
 | **BMC pipeline** | `BMC_MAX_ROUNDS=3` / `BMC_STAGE_TIMEOUT_MS=90000` / `WIZARD_PREFILL_MODEL=deepseek-v4-flash` | 默认即可 |
 | **LangGraph checkpointer** | `LANGGRAPH_CHECKPOINTER_ENABLED=true` | dev 都开 |
 | **CORS** | `CORS_ORIGINS=http://localhost:3210,http://localhost:3000` | ✅ |
-| **Memory / User-skill** | `MEMORY_READ_ENABLED` / `USER_SKILL_*` | 默认即可 |
+| **Memory / User-skill** ⚠ | `MEMORY_WRITE_ENABLED=true` / `MEMORY_READ_ENABLED=true` / `USER_SKILL_ENCRYPTION_KEY` | **必填**（dev 默认关闭，全部 personalization 静默失效） |
 | **Reaper** | `REAPER_*` 心跳超时清理 | 默认即可 |
 | **Observability** | `LANGSMITH_*` / `OTEL_*` | 可选 |
 | **Web search tools** | `BRAVE_API_KEY` / `SERPAPI_KEY` / `TAVILY_API_KEY` | 可选 |
