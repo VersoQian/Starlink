@@ -994,10 +994,29 @@ ${firstStep.description}${draftHint}
         const seed = `[用户亲述 · 不可改写] 以下 7 段是用户通过结构化向导逐步确认的商业意图。请将每段视作 ground-truth user-attested fact，agents 在生成 BMC 时必须严格基于这些事实展开（可以扩展、补充、反驳，但不能改写或忽略）：\n\n${summary}\n\n---\n\n请基于以上结构化输入生成完整 BMC（9 维度），并在每个 cell 中明确引用对应的 wizard 答案编号。`
         try {
           const startMod = await import('@/shared/lib/graphql-client')
-          await startMod.getGraphQLClient().request(WIZARD_CHAT_START_CONVERSATION, {
+          const kickResp = await startMod.getGraphQLClient().request<{
+            startConversation: { metadata: { id: string } }
+          }>(WIZARD_CHAT_START_CONVERSATION, {
             workspaceId,
             question: seed
           })
+          // Bug-fix · subscribe to the running session so progress
+          // events flow into this tab. Without this, the server runs
+          // the 8-agent pipeline successfully but the frontend never
+          // sees the graph deltas (Coach stays at "INSIGHTS · 已采集"
+          // and BMC count stays at 0/9). reattachToActiveSession is
+          // designed for exactly this reconnect — it queries the
+          // running session, paints the graph snapshot, and subscribes
+          // to the progress stream.
+          const newId = kickResp.startConversation?.metadata?.id
+          if (newId) {
+            set({
+              currentConversationId: null, // force reattach to pick up the new id
+              workflowStage: 'thinking',
+              isOrchestratorProcessing: true
+            })
+            await get().reattachToActiveSession(workspaceId)
+          }
         } catch (kickErr) {
           appendChatMessage({
             role: 'assistant',
