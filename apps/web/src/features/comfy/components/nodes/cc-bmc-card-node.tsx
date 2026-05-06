@@ -317,11 +317,14 @@ export const CCBMCCardNode = memo(function CCBMCCardNode({ id, data }: NodeProps
                 </div>
               )}
 
-              {/* 展开/折叠按钮 */}
+              {/* 展开/折叠按钮.
+                  taste-skill Rule 5: tactile press feedback —
+                  scale + translate-y on :active. transform-only
+                  to stay on GPU. */}
               {hasExtendedContent && (
                 <button
                   onClick={() => setIsExpanded(!isExpanded)}
-                  className="mt-3 inline-flex items-center gap-1.5 border-[0.5px] border-stratum-line px-2 py-1 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted transition-colors hover:border-stratum-blue/60 hover:text-stratum-navy"
+                  className="mt-3 inline-flex items-center gap-1.5 border-[0.5px] border-stratum-line px-2 py-1 font-instr text-[10px] uppercase tracking-kicker text-stratum-muted transition-[color,border-color,transform] duration-150 ease-out hover:border-stratum-blue/60 hover:text-stratum-navy active:scale-[0.97] active:translate-y-px"
                 >
                   {isExpanded ? (
                     <>

@@ -324,7 +324,7 @@ export function CanvasLiveCoach(props: Props) {
         type="button"
         onClick={() => setCollapsed(false)}
         aria-label="展开 AI 教练"
-        className="absolute top-6 right-6 z-20 flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 shadow-lg text-white hover:bg-stratum-navy-soft transition-colors pointer-events-auto"
+        className="absolute top-6 right-6 z-20 flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 shadow-lg text-white hover:bg-stratum-navy-soft transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
       >
         <Lightbulb className="h-3.5 w-3.5 text-stratum-sky" strokeWidth={2} fill="#89CEFF" />
         <span className="font-mono text-[10px] font-bold uppercase tracking-[0.14em]">COACH</span>
@@ -388,7 +388,10 @@ export function CanvasLiveCoach(props: Props) {
                   key={action.label}
                   type="button"
                   onClick={action.onClick}
-                  className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-body text-[11px] font-semibold transition-colors ${className}`}
+                  // Tactile feedback (taste-skill Rule 5): physical
+                  // press cue on :active. transform + opacity only —
+                  // no width/height animation (hardware-accelerated).
+                  className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-body text-[11px] font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px ${className}`}
                 >
                   <Icon className="h-3 w-3" strokeWidth={2} />
                   {action.label}
@@ -397,13 +400,31 @@ export function CanvasLiveCoach(props: Props) {
             })}
           </div>
         ) : null}
-        {/* Stats footer when canvas has content */}
+        {/* Stats footer when canvas has content.
+            taste-skill anti-emoji: replace ⚠/💡/📊 with stroke icons
+            from lucide so the chrome reads as a real instrument
+            cluster, not a chat-style sticker row. */}
         {stats.total > 0 ? (
-          <div className="mt-2.5 pt-2 border-t-[0.5px] border-stratum-line flex items-center gap-2.5 font-mono text-[9px] tabular-nums text-stratum-muted">
+          <div className="mt-2.5 pt-2 border-t-[0.5px] border-stratum-line flex items-center gap-3 font-mono text-[9px] tabular-nums text-stratum-muted">
             <span>BMC {stats.bmc}/9</span>
-            {stats.conflicts > 0 ? <span className="text-stratum-danger">⚠ {stats.conflicts}</span> : null}
-            {stats.insights > 0 ? <span>💡 {stats.insights}</span> : null}
-            {stats.reports > 0 ? <span>📊 {stats.reports}</span> : null}
+            {stats.conflicts > 0 ? (
+              <span className="inline-flex items-center gap-1 text-stratum-danger">
+                <AlertTriangle className="h-2.5 w-2.5" strokeWidth={2} />
+                {stats.conflicts}
+              </span>
+            ) : null}
+            {stats.insights > 0 ? (
+              <span className="inline-flex items-center gap-1">
+                <Lightbulb className="h-2.5 w-2.5" strokeWidth={2} />
+                {stats.insights}
+              </span>
+            ) : null}
+            {stats.reports > 0 ? (
+              <span className="inline-flex items-center gap-1">
+                <FileText className="h-2.5 w-2.5" strokeWidth={2} />
+                {stats.reports}
+              </span>
+            ) : null}
           </div>
         ) : null}
       </div>
