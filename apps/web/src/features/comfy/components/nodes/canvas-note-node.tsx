@@ -85,11 +85,15 @@ export const CanvasNoteNode = memo(function CanvasNoteNode({ data }: NodeProps<C
   return (
     <>
       <Handle type="target" position={Position.Left} className="h-2.5 w-2.5 rounded-full border border-stratum-line bg-white" />
-      <Card className="w-96 rounded-xl border border-stratum-line bg-white shadow-md transition-shadow hover:shadow-lg">
-        <CardHeader className="pb-3">
+      {/* P8 anti-overlap: clamp note height to 480px (max). When the root
+          note carries the wizard-graduation STRONG seed, the body can grow
+          to 550+px and overflow into the BMC top row at y=200. We let
+          the user scroll inside the node instead. */}
+      <Card className="w-96 max-h-[480px] flex flex-col rounded-xl border border-stratum-line bg-white shadow-md transition-shadow hover:shadow-lg">
+        <CardHeader className="pb-3 flex-shrink-0">
           <CardTitle className="text-[13px] font-semibold text-stratum-navy">{title}</CardTitle>
         </CardHeader>
-        <CardContent>{renderContent(data)}</CardContent>
+        <CardContent className="overflow-y-auto flex-1">{renderContent(data)}</CardContent>
       </Card>
       <Handle type="source" position={Position.Right} className="h-2.5 w-2.5 rounded-full border border-stratum-line bg-white" />
     </>

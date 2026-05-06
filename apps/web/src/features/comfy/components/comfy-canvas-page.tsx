@@ -151,8 +151,15 @@ export function CanvasPage({
   const focusedConflictId = useComfyStore((s) => s.focusedConflictId)
   const setFocusedConflictId = useComfyStore((s) => s.setFocusedConflictId)
   // Whenever a chip / edge sets a conflict id, auto-open the citation panel.
+  // P8 anti-overlap: at narrow viewports (< 1100px) chat + citation panels
+  // collide horizontally — open one, close the other.
   useEffect(() => {
-    if (focusedConflictId) setCitationOpen(true)
+    if (focusedConflictId) {
+      setCitationOpen(true)
+      if (typeof window !== 'undefined' && window.innerWidth < 1100) {
+        setChatOpen(false)
+      }
+    }
   }, [focusedConflictId])
   const structuredNodes = useMemo(
     () =>
@@ -719,20 +726,43 @@ export function CanvasPage({
               />
               <CanvasChatDock
                 open={chatOpen}
-                onToggle={() => setChatOpen((prev) => !prev)}
+                // P8 anti-overlap: chat + citation share z-10 and collide
+                // horizontally on viewports < 1100px. Auto-close citation
+                // when opening chat at narrow widths.
+                onToggle={() => {
+                  setChatOpen((prev) => {
+                    const next = !prev
+                    if (next && typeof window !== 'undefined' && window.innerWidth < 1100) {
+                      setCitationOpen(false)
+                    }
+                    return next
+                  })
+                }}
                 onSend={handleSendChat}
                 onGraduate={handleGraduateToBmc}
                 workspaceId={workspaceId}
               />
               <CanvasCitationPanel
                 open={citationOpen}
-                onToggle={() => setCitationOpen((prev) => !prev)}
+                onToggle={() => {
+                  setCitationOpen((prev) => {
+                    const next = !prev
+                    if (next && typeof window !== 'undefined' && window.innerWidth < 1100) {
+                      setChatOpen(false)
+                    }
+                    return next
+                  })
+                }}
                 workspaceId={workspaceId}
                 highlightedConflictId={focusedConflictId}
               />
               {/* Floating KB button — Mode B entry point on canvas. Sits
                   bottom-left so it doesn't collide with chat dock when
                   open (chat takes top-left), nor the action bar (center). */}
+              {/* P8 anti-overlap: 3 floating buttons. On md+ (≥768px) they
+                  sit horizontally bottom-left. Below md, stack vertically
+                  to avoid (a) running past viewport right edge and (b)
+                  colliding with the centered z-30 action bar. */}
               <button
                 type="button"
                 onClick={() => setKbModalOpen(true)}
@@ -742,27 +772,19 @@ export function CanvasPage({
                 <Database className="h-4 w-4" strokeWidth={1.75} />
                 <span className="font-body text-[11px] font-semibold">资料 · KB</span>
               </button>
-              {/* Floating Memory button — sits next to KB so users can
-                  inspect / correct AI's long-term inferences alongside
-                  their knowledge base. Per session-memory-design v2 §5,
-                  this satisfies the GDPR/PIPL "view + correct + delete"
-                  requirement for AI-derived user data. */}
               <button
                 type="button"
                 onClick={() => setMemoryOpen(true)}
-                className="absolute bottom-6 left-[180px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-colors pointer-events-auto"
+                className="absolute bottom-[88px] left-6 md:bottom-6 md:left-[180px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-colors pointer-events-auto"
                 aria-label="查看长期记忆"
               >
                 <Brain className="h-4 w-4" strokeWidth={1.75} />
                 <span className="font-body text-[11px] font-semibold">记忆 · Memory</span>
               </button>
-              {/* Inline 7-step wizard — replaces the standalone /wizard
-                  page UX so user can see canvas grow as they answer.
-                  Auto-opens when URL has ?wizard=1 (link from chat home). */}
               <button
                 type="button"
                 onClick={() => setWizardOpen(true)}
-                className="absolute bottom-6 left-[330px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
+                className="absolute bottom-[152px] left-6 md:bottom-6 md:left-[330px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
                 aria-label="结构化向导"
               >
                 <ListChecks className="h-4 w-4" strokeWidth={1.75} />

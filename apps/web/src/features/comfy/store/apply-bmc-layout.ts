@@ -86,10 +86,12 @@ const ROW = {
 } as const
 
 /** Vertical gap when conflicts wrap to a second row.
- *  Conflict-alert nodes can grow to ~280px tall once content + tags fill in,
- *  so we leave 320px to avoid second-row overlap.
+ *  Conflict-alert nodes can grow to ~280px tall once content + tags
+ *  fill in. Earlier value (320) left only 40px buffer — multi-line
+ *  body + severity tags + relatedAgents could overflow into the next
+ *  row. Bumped to 360 to give 80px safe buffer (P8 audit).
  */
-const CONFLICT_ROW_HEIGHT = 320
+const CONFLICT_ROW_HEIGHT = 360
 
 /** Overflow band horizontal pitch + vertical pitch. */
 const OVERFLOW_PITCH_X = 400
@@ -106,6 +108,11 @@ const INSIGHT_X_SLOTS = [COL[0], COL[1], COL[3], COL[4]] as const
  *  column skipped + avatar rail off-limits, 3 slots fit cleanly:
  *    slot 0: 80–500, slot 1: 540–960 (skip 880 root), slot 2: 1280–1700.
  *  Beyond 3 reports, overflow below.
+ *
+ *  ReactFlow virtualises canvas-space, so absolute x doesn't matter
+ *  for "fits on iPad" — fitView pans + zooms to show everything. The
+ *  audit's "offscreen at <1280" claim was a viewport-vs-canvas
+ *  confusion; reverted to original positions.
  */
 const REPORT_X_SLOTS = [COL[0], COL[1] + 60, COL[3]] as const
 
