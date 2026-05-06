@@ -53,7 +53,7 @@ Constraints:
  * user just did, recent chat history, and meta dedup hints.
  */
 export function buildCoachUserMessage(input: ReflectionRequest): string {
-  const { event, canvas, recentChat, firedMetaIds, userSkillBlock } = input
+  const { event, canvas, recentChat, firedMetaIds, userSkillBlock, priorScaffolds, userTurnCount } = input
 
   const canvasSummary = (() => {
     const counts = canvas.nodeCountByKind
@@ -89,7 +89,34 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
             ? `Already fired meta ids (DO NOT repeat themes): ${firedMetaIds.join(', ')}.`
             : '')
         )
+      case 'user-message':
+        // P10 fix · user typed in chat dock; main path. Tell the LLM
+        // exactly what they said so it can react, not invent.
+        return `User just SAID in chat: "${event.label.slice(0, 480)}"`
     }
+  })()
+
+  // P10 fix B · scaffold rotation hint. If we've used the same scaffold
+  // 2× in a row, force a different one.
+  const scaffoldHistoryLine = (() => {
+    if (!priorScaffolds || priorScaffolds.length === 0) return ''
+    const last3 = priorScaffolds.slice(-3)
+    const allSame = last3.length >= 2 && last3.every((s) => s === last3[0])
+    if (allSame) {
+      return `\n\n## 反思类型轮转（重要）\n你已经连续用了 ${last3.length} 次 "${last3[0]}"。本次必须 PICK 另一种 scaffold（why/how/so-what/evidence-needed/meta 中除 "${last3[0]}" 外）。`
+    }
+    return `\n\n## 最近反思类型: ${last3.join(' → ')}（避免立刻重复同类型）`
+  })()
+
+  // P10 fix D · turn-count graduation pressure. After 4+ user messages
+  // without canvas changes, suggest user move to /wizard or generate BMC.
+  const graduationLine = (() => {
+    const turns = userTurnCount ?? 0
+    const canvasIsSparse = canvas.nodes.length < 3
+    if (turns >= 4 && canvasIsSparse) {
+      return `\n\n## 进阶提示（重要）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。**强烈建议** scaffold='meta'，并在 content 里温和地引导用户：要么用 \`/wizard\` 走 7 步结构化引导，要么直接说"准备生成 BMC"让系统拆解。不要再问 why。`
+    }
+    return ''
   })()
 
   const chatLines = recentChat.length
@@ -115,7 +142,7 @@ ${canvasSummary}
 ${nodeList}
 
 EVENT:
-${eventLine}${skillSection}
+${eventLine}${scaffoldHistoryLine}${graduationLine}${skillSection}
 
 RECENT EXCHANGE (newest last):
 ${chatLines}

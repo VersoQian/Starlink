@@ -753,6 +753,36 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     const nextMessages = typeof messages === 'function' ? messages(get().chatMessages) : messages
     if (nextMessages === get().chatMessages) return
     set({ chatMessages: nextMessages })
+    // P10 fix · persist chat to localStorage so it survives page reload.
+    // Helper exists in conversations-persistence.ts but was never wired.
+    // Now: every setChatMessages saves the current workspace's bucket.
+    const wsId = get().workspaceId
+    if (wsId && typeof window !== 'undefined') {
+      try {
+        const stored = nextMessages.map((m) => ({
+          role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+          content: m.content,
+          timestamp: m.timestamp || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        }))
+        const title = stored.find((m) => m.role === 'user')?.content?.slice(0, 24) || '当前会话'
+        const nowIso = new Date().toISOString()
+        window.localStorage.setItem(
+          `starlink_conversations_${wsId}`,
+          JSON.stringify({
+            conversations: [{
+              id: 'active',
+              title: title.length > 22 ? `${title.slice(0, 22)}…` : title,
+              messages: stored,
+              createdAt: nowIso,
+              updatedAt: nowIso
+            }],
+            activeId: 'active'
+          })
+        )
+      } catch {
+        // quota / serialize — silent, in-memory state still consistent
+      }
+    }
   },
 
   appendChatMessage: (message) => {
@@ -1102,6 +1132,36 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
   setWorkspaceId: (workspaceId) => {
     if (get().workspaceId === workspaceId) return
     set({ workspaceId })
+    // P10 fix · load persisted chat history for this workspace from
+    // localStorage. Without this, every page reload wipes chatMessages
+    // back to just the welcome bubble (createInitialChatMessages).
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(`starlink_conversations_${workspaceId}`)
+        if (raw) {
+          const parsed = JSON.parse(raw) as {
+            conversations?: Array<{ id: string; messages?: Array<{ role: string; content: string; timestamp?: string }> }>
+            activeId?: string
+          }
+          const list = Array.isArray(parsed.conversations) ? parsed.conversations : []
+          const active = list.find((c) => c.id === parsed.activeId) || list[0]
+          const stored = Array.isArray(active?.messages) ? active.messages : null
+          if (stored && stored.length > 0) {
+            // Replace welcome with persisted history. Skip auto-save in
+            // this set() call by going directly to set, NOT via setChatMessages.
+            set({
+              chatMessages: stored.map((m) => ({
+                role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+                content: m.content,
+                timestamp: m.timestamp ?? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+              }))
+            })
+          }
+        }
+      } catch {
+        // corrupt JSON / parse error — keep the default greeting
+      }
+    }
   },
 
   setNodes: (nodes) => {
@@ -2066,6 +2126,17 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       .slice(-6)
       .map((m) => ({ role: m.role === 'user' ? 'user' : 'ai', content: m.content }))
 
+    // P10 fix B · pass scaffold history so LLM avoids picking the same
+    // type repeatedly. Reads m.scaffold off prior assistant messages.
+    const priorScaffolds = state.chatMessages
+      .filter((m) => m.role === 'assistant' && typeof m.scaffold === 'string')
+      .slice(-5)
+      .map((m) => m.scaffold as string)
+
+    // P10 fix D · count user messages in this session for graduation
+    // pressure (after 4+ msgs and sparse canvas, suggest /wizard).
+    const userTurnCount = state.chatMessages.filter((m) => m.role === 'user').length
+
     try {
       const client = getGraphQLClient()
       const response = await client.request<{
@@ -2091,6 +2162,8 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               nodeCountByKind,
             },
             recentChat,
+            priorScaffolds,
+            userTurnCount,
             firedMetaIds: [],
             workspaceId: state.workspaceId,
           },

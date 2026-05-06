@@ -847,7 +847,7 @@ export const typeDefs = gql `
   }
 
   input ReflectOnIdeationEventInput {
-    type: String!  # 'node-added' | 'node-linked' | 'meta-check'
+    type: String!  # 'node-added' | 'node-linked' | 'meta-check' | 'user-message'
     kind: String
     label: String
     fromKind: String
@@ -859,6 +859,17 @@ export const typeDefs = gql `
     canvas: IdeationCanvasInput!
     recentChat: [IdeationChatTurnInput!]!
     firedMetaIds: [String!]!
+    """
+    P10 fix B · last 3-5 scaffold types the LLM picked, so it avoids
+    repeating "why" in a row. Frontend pulls from chatMessages where
+    m.scaffold is set.
+    """
+    priorScaffolds: [String!]
+    """
+    P10 fix D · how many user messages so far. After 4+ with sparse
+    canvas, prompt suggests /wizard or BMC graduation.
+    """
+    userTurnCount: Int
     """
     Optional. When provided, the resolver fetches the user's durable
     user-skill memories scoped to (userId, workspaceId) and renders them

@@ -116,12 +116,61 @@ function reflectionFallback(
 }
 
 /**
+ * P10 fix C · cheap string-similarity check for repetition detection.
+ * Uses normalized character bigram overlap (Sørensen–Dice on bigrams).
+ * Threshold ~0.85 for "essentially the same message".
+ */
+function isMessageRepeat(a: string, b: string): boolean {
+  const na = a.trim().toLowerCase()
+  const nb = b.trim().toLowerCase()
+  if (!na || !nb) return false
+  if (na === nb) return true
+  // Quick fail if length diverges too much
+  const lenRatio = Math.min(na.length, nb.length) / Math.max(na.length, nb.length)
+  if (lenRatio < 0.5) return false
+  // Bigram Dice similarity
+  const bigrams = (s: string): Set<string> => {
+    const out = new Set<string>()
+    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2))
+    return out
+  }
+  const A = bigrams(na)
+  const B = bigrams(nb)
+  if (A.size === 0 || B.size === 0) return false
+  let intersection = 0
+  for (const g of A) if (B.has(g)) intersection += 1
+  const dice = (2 * intersection) / (A.size + B.size)
+  return dice >= 0.85
+}
+
+/**
  * Generate one reflection for the GraphQL `reflectOnIdeation` mutation.
  */
 export async function reflectOnIdeation(
   request: ReflectionRequest
 ): Promise<ReflectionResponse> {
   const startedAt = Date.now()
+
+  // P10 fix C · short-circuit on repeated user message. If the user just
+  // sent essentially the same thing as their previous turn, the Coach
+  // should NOT loop back to the same Socratic question — instead nudge
+  // toward graduation. Saves an LLM call AND breaks the WHY/WHY loop.
+  if (request.event.type === 'user-message') {
+    const lastUserMsg = [...request.recentChat].reverse().find((m) => m.role === 'user')
+    if (lastUserMsg && isMessageRepeat(lastUserMsg.content, request.event.label)) {
+      return {
+        scaffold: 'meta',
+        content:
+          '我注意到你重复了同一个想法 — 这通常说明你已经讲得足够清楚，需要换个动作了。\n\n' +
+          '建议二选一：\n' +
+          '- 输入 `/wizard` 走 7 步结构化引导（推荐，每步聚焦一个维度）\n' +
+          '- 或者直接说**"开始生成 BMC"**，让 8 个 agent 协同把你的想法拆成 9 个商业维度',
+        source: 'scripted',
+        latencyMs: Date.now() - startedAt
+      }
+    }
+  }
+
   try {
     const userPrompt = buildCoachUserMessage(request)
     const reply = await callDeepSeek(

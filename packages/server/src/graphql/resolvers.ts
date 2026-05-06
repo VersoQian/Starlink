@@ -1113,6 +1113,8 @@ export const resolvers = {
           }
           recentChat: Array<{ role: string; content: string }>
           firedMetaIds: string[]
+          priorScaffolds?: string[] | null
+          userTurnCount?: number | null
           workspaceId?: string | null
         }
       },

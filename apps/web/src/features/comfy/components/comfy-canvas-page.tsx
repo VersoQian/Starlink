@@ -759,23 +759,27 @@ export function CanvasPage({
               {/* Floating KB button — Mode B entry point on canvas. Sits
                   bottom-left so it doesn't collide with chat dock when
                   open (chat takes top-left), nor the action bar (center). */}
-              {/* P8 anti-overlap: 3 floating buttons. On md+ (≥768px) they
-                  sit horizontally bottom-left. Below md, stack vertically
-                  to avoid (a) running past viewport right edge and (b)
-                  colliding with the centered z-30 action bar. */}
+              {/* P10 reposition: 3 floating buttons stacked vertically
+                  on the right side, BELOW the Coach panel (Coach is at
+                  top-[88px] right-6, ~300px wide × ~180px tall when
+                  expanded). KB/Memory/Wizard sit at top-[280px+] right-6.
+                  No more bottom-edge crowding with action-bar / minimap
+                  / canvas keyboard hint pill. Same vertical stack on
+                  every viewport (no md: branch needed since they don't
+                  collide with anything else now). */}
               <button
                 type="button"
-                onClick={() => setKbModalOpen(true)}
-                className="absolute bottom-6 left-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
-                aria-label="打开 KB 资料"
+                onClick={() => setWizardOpen(true)}
+                className="absolute top-[280px] right-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
+                aria-label="结构化向导"
               >
-                <Database className="h-4 w-4" strokeWidth={1.75} />
-                <span className="font-body text-[11px] font-semibold">资料 · KB</span>
+                <ListChecks className="h-4 w-4" strokeWidth={1.75} />
+                <span className="font-body text-[11px] font-semibold">AI 引导 · 7 步</span>
               </button>
               <button
                 type="button"
                 onClick={() => setMemoryOpen(true)}
-                className="absolute bottom-[88px] left-6 md:bottom-6 md:left-[180px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-colors pointer-events-auto"
+                className="absolute top-[336px] right-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-press hover:border-press/40 transition-colors pointer-events-auto"
                 aria-label="查看长期记忆"
               >
                 <Brain className="h-4 w-4" strokeWidth={1.75} />
@@ -783,12 +787,12 @@ export function CanvasPage({
               </button>
               <button
                 type="button"
-                onClick={() => setWizardOpen(true)}
-                className="absolute bottom-[152px] left-6 md:bottom-6 md:left-[330px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
-                aria-label="结构化向导"
+                onClick={() => setKbModalOpen(true)}
+                className="absolute top-[392px] right-6 z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
+                aria-label="打开 KB 资料"
               >
-                <ListChecks className="h-4 w-4" strokeWidth={1.75} />
-                <span className="font-body text-[11px] font-semibold">AI 引导 · 7 步</span>
+                <Database className="h-4 w-4" strokeWidth={1.75} />
+                <span className="font-body text-[11px] font-semibold">资料 · KB</span>
               </button>
             </>
           ) : null}

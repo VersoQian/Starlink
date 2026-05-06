@@ -1309,6 +1309,8 @@ export declare const resolvers: {
                     content: string;
                 }>;
                 firedMetaIds: string[];
+                priorScaffolds?: string[] | null;
+                userTurnCount?: number | null;
                 workspaceId?: string | null;
             };
         }, context: GraphQLContext) => Promise<{

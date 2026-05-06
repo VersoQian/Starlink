@@ -48,7 +48,17 @@ export const ReflectionRequestSchema = z.object({
       fromKind: NodeKindZ,
       toKind: NodeKindZ
     }),
-    z.object({ type: z.literal('meta-check') })
+    z.object({ type: z.literal('meta-check') }),
+    /**
+     * P10 fix · user typed in chat dock (not via canvas drag-drop).
+     * Frontend was already sending this type, but schema only allowed
+     * the 3 above — Zod silently failed and Coach lost user-message
+     * context, falling back to canvas-empty WHY questions.
+     */
+    z.object({
+      type: z.literal('user-message'),
+      label: z.string()
+    })
   ]),
   canvas: z.object({
     nodes: z
@@ -73,6 +83,20 @@ export const ReflectionRequestSchema = z.object({
     )
     .max(8),
   firedMetaIds: z.array(z.string()).default([]),
+  /**
+   * P10 fix B · last 3 scaffold types the LLM picked. Lets the prompt
+   * tell the LLM to AVOID repeating, e.g. ['why','why'] → must pick
+   * something other than 'why'. Without this hint the LLM keeps
+   * defaulting to 'why' (its statistical happy path).
+   */
+  priorScaffolds: z.array(z.string()).max(5).optional(),
+  /**
+   * P10 fix D · how many user messages have been sent in this session.
+   * After 4+ messages without canvas progress, the prompt nudges the LLM
+   * toward `meta` scaffold + a graduation suggestion (try /wizard or
+   * trigger BMC pipeline) instead of more why/how loops.
+   */
+  userTurnCount: z.number().int().nonnegative().optional(),
   /**
    * Pre-rendered user-skill markdown block (server-fetched). When present,
    * the coach prompt builder injects it as "## 用户长期画像" so the LLM can
