@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, FileText, Lightbulb, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowRight, FileText, Lightbulb, Sparkles, Square } from 'lucide-react'
 import { useComfyStore } from '../store'
 
 const AGENT_DISPATCH_TICKS: ReadonlyArray<string> = [
@@ -98,6 +98,7 @@ export function CanvasLiveCoach(props: Props) {
   const maxRounds = useComfyStore((s) => s.maxRounds)
   const lastDeltaAt = useComfyStore((s) => s.lastDeltaAt)
   const lastCompletionAt = useComfyStore((s) => s.lastCompletionAt)
+  const cancelActiveSession = useComfyStore((s) => s.cancelActiveSession)
   const [tickIndex, setTickIndex] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -148,6 +149,17 @@ export function CanvasLiveCoach(props: Props) {
     const isQuiet = sinceDeltaMs > 8_000
     const elapsedSec = lastDeltaAt && isQuiet ? Math.round(sinceDeltaMs / 1000) : null
 
+    // Sprint 4.1 · stop button — only shows during live work, severity=warn
+    // so it reads as "interrupt", not "primary action".
+    const stopAction: SuggestionAction = {
+      label: '停止',
+      onClick: () => {
+        void cancelActiveSession('user-cancelled')
+      },
+      severity: 'warn',
+      icon: Square,
+    }
+
     if (workflowStage === 'thinking') {
       const round = roundNumber > 0 ? roundNumber : 1
       const kicker = `LIVE · 第 ${round}/${maxRounds} 轮`
@@ -156,7 +168,7 @@ export function CanvasLiveCoach(props: Props) {
           kicker,
           headline: `${agentLabel} · 输出中`,
           detail: `已 ${stats.bmc}/9 cells · ${stats.conflicts} 冲突 · ${stats.insights} 洞察`,
-          actions: []
+          actions: [stopAction]
         }
       }
       // Stream silent or hasn't emitted yet — fall back to friendly ticker
@@ -166,7 +178,7 @@ export function CanvasLiveCoach(props: Props) {
           ? `${agentLabel} · 计算中（${elapsedSec ?? '…'}s）`
           : AGENT_DISPATCH_TICKS[tickIndex],
         detail: '画布会逐步浮现节点；不要切走',
-        actions: []
+        actions: [stopAction]
       }
     }
     if (workflowStage === 'revising') {
@@ -175,7 +187,7 @@ export function CanvasLiveCoach(props: Props) {
         kicker: `LIVE · 第 ${round}/${maxRounds} 轮 · 修订`,
         headline: agentLabel ? `${agentLabel} · 修订中` : '正在重写节点修复冲突',
         detail: 'Critic 找到的问题正在被对应 agent 改正',
-        actions: []
+        actions: [stopAction]
       }
     }
     // Sprint 4.4 · transient completion banner — shows for 12s after a
@@ -304,7 +316,7 @@ export function CanvasLiveCoach(props: Props) {
         { label: '打开聊天', onClick: props.onOpenChat, severity: 'primary', icon: ArrowRight }
       ]
     }
-  }, [workflowStage, stats, tickIndex, setChatInput, props, currentAgent, roundNumber, maxRounds, lastDeltaAt, lastCompletionAt, now])
+  }, [workflowStage, stats, tickIndex, setChatInput, props, currentAgent, roundNumber, maxRounds, lastDeltaAt, lastCompletionAt, now, cancelActiveSession])
 
   if (collapsed) {
     return (

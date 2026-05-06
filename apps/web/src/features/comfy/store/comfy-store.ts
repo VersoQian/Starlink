@@ -542,6 +542,15 @@ interface MacraState {
    */
   reattachToActiveSession: (workspaceId: string) => Promise<string | null>
 
+  /**
+   * Sprint 4.1 · User-initiated cancellation of the running pipeline.
+   * Calls the cancelStaleSession mutation server-side (which marks the
+   * session as failed and signals the runtime via the heartbeat path),
+   * then transitions the local workflow to 'cancelled' so the Coach
+   * banner shows. No-op when there's no current conversation.
+   */
+  cancelActiveSession: (reason?: string) => Promise<boolean>
+
   // 苏格拉底式反问 - 调 server reflectOnIdeation，把当前 canvas snapshot
   // + 最近 chat 历史 + 用户新消息打包发过去，返回单条 scaffold 类型的反问
   // (why / how / so_what / evidence_needed / meta)。和 callLangGraph 区
@@ -1877,6 +1886,48 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
     } catch (err) {
       console.warn('[reattachToActiveSession] failed', err)
       return null
+    }
+  },
+
+  // ============== Sprint 4.1 · User-cancel running session ==============
+  cancelActiveSession: async (reason = 'user-cancelled') => {
+    const conversationId = get().currentConversationId
+    if (!conversationId) return false
+    try {
+      const client = getGraphQLClient()
+      type CancelPayload = {
+        cancelStaleSession: { id: string; status: string } | null
+      }
+      const data = await client.request<CancelPayload>(
+        /* GraphQL */ `
+          mutation CancelSession($sessionId: ID!, $reason: String) {
+            cancelStaleSession(sessionId: $sessionId, reason: $reason) {
+              id
+              status
+            }
+          }
+        `,
+        { sessionId: conversationId, reason }
+      )
+      const ok = data.cancelStaleSession?.status === 'failed'
+      // Local-side cleanup regardless: the watcher will hit status='failed'
+      // and tear itself, but Coach should reflect the cancel immediately.
+      set((state) => ({
+        currentConversationId: null,
+        isOrchestratorProcessing: false,
+        workflowStage: 'cancelled',
+        workflowMeta: {
+          ...state.workflowMeta,
+          lastError: null,
+          lastTransitionReason: 'user-cancelled',
+        },
+        currentAgent: null,
+        lastCompletionAt: Date.now(),
+      }))
+      return ok
+    } catch (err) {
+      console.warn('[cancelActiveSession] failed', err)
+      return false
     }
   },
 
