@@ -1010,10 +1010,13 @@ ${firstStep.description}${draftHint}
           // to the progress stream.
           const newId = kickResp.startConversation?.metadata?.id
           if (newId) {
+            // Set workflow stage but NOT isOrchestratorProcessing yet —
+            // reattachToActiveSession early-returns when that flag is
+            // truthy. Reattach will paint the graph snapshot + start
+            // a watcher; the watcher controls isOrchestratorProcessing.
             set({
-              currentConversationId: null, // force reattach to pick up the new id
-              workflowStage: 'thinking',
-              isOrchestratorProcessing: true
+              currentConversationId: null,
+              workflowStage: 'thinking'
             })
             await get().reattachToActiveSession(workspaceId)
           }

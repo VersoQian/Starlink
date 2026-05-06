@@ -1377,7 +1377,10 @@ export class ConversationStore {
     userId: string,
     requiredPermission: 'workspace.read' | 'workspace.write' | 'workspace.publish' | 'workspace.manage'
   ) {
-    const metadata = await getWorkspaceMetadata(workspaceId)
+    // Pass userId as seedOwner so that auto-created workspaces (URL
+    // navigation to an unknown id) immediately give the requesting user
+    // full ownership instead of leaving them locked out.
+    const metadata = await getWorkspaceMetadata(workspaceId, { id: userId })
     return this.assertPermissionFromMetadata(metadata, userId, requiredPermission)
   }
 

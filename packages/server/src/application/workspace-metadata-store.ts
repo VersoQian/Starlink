@@ -126,18 +126,23 @@ function cloneHistory(entry: WorkspaceMetadataHistoryEntry): WorkspaceMetadataHi
   return { ...entry }
 }
 
-function buildDefaultWorkspaceMetadata(workspaceId: string): StoredWorkspaceMetadataRecord {
+function buildDefaultWorkspaceMetadata(
+  workspaceId: string,
+  seedOwner?: { id: string; name?: string }
+): StoredWorkspaceMetadataRecord {
+  const ownerId = seedOwner?.id || 'system-owner'
+  const ownerName = seedOwner?.name || (seedOwner?.id ? seedOwner.id : 'Workspace Owner')
   return {
     workspaceId,
     name: workspaceId,
     type: 'workspace',
     focus: '等待工作区元数据接入',
-    ownerId: 'system-owner',
-    ownerName: 'Workspace Owner',
+    ownerId,
+    ownerName,
     members: [
       {
-        id: 'system-owner',
-        name: 'Workspace Owner',
+        id: ownerId,
+        name: ownerName,
         role: 'owner',
         permissions: ['workspace.read', 'workspace.write', 'workspace.publish', 'workspace.manage']
       }
@@ -197,11 +202,14 @@ export async function listWorkspaceMetadata() {
   return document.workspaces.map(cloneWorkspace)
 }
 
-export async function getWorkspaceMetadata(workspaceId: string) {
+export async function getWorkspaceMetadata(
+  workspaceId: string,
+  seedOwner?: { id: string; name?: string }
+) {
   const document = await loadDocument()
   return cloneWorkspace(
     document.workspaces.find((record) => record.workspaceId === workspaceId) ??
-      buildDefaultWorkspaceMetadata(workspaceId)
+      buildDefaultWorkspaceMetadata(workspaceId, seedOwner)
   )
 }
 

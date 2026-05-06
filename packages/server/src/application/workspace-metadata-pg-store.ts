@@ -157,18 +157,27 @@ function rowToRecord(row: Record<string, unknown>): StoredWorkspaceMetadataRecor
   }
 }
 
-function buildDefaultWorkspaceMetadata(workspaceId: string): StoredWorkspaceMetadataRecord {
+function buildDefaultWorkspaceMetadata(
+  workspaceId: string,
+  seedOwner?: { id: string; name?: string }
+): StoredWorkspaceMetadataRecord {
+  // When a workspace is auto-created (URL navigation hits getWorkspaceMetadata
+  // for an unknown id), default the owner to the requesting user so they
+  // can immediately read/write. Without this the new workspace only has
+  // 'system-owner' and every subsequent op fails with FORBIDDEN.
+  const ownerId = seedOwner?.id || 'system-owner'
+  const ownerName = seedOwner?.name || (seedOwner?.id ? seedOwner.id : 'Workspace Owner')
   return {
     workspaceId,
     name: workspaceId,
     type: 'workspace',
     focus: '等待工作区元数据接入',
-    ownerId: 'system-owner',
-    ownerName: 'Workspace Owner',
+    ownerId,
+    ownerName,
     members: [
       {
-        id: 'system-owner',
-        name: 'Workspace Owner',
+        id: ownerId,
+        name: ownerName,
         role: 'owner',
         permissions: ['workspace.read', 'workspace.write', 'workspace.publish', 'workspace.manage']
       }
@@ -198,14 +207,17 @@ export async function listWorkspaceMetadata(): Promise<StoredWorkspaceMetadataRe
   return result.rows.map(rowToRecord)
 }
 
-export async function getWorkspaceMetadata(workspaceId: string): Promise<StoredWorkspaceMetadataRecord> {
+export async function getWorkspaceMetadata(
+  workspaceId: string,
+  seedOwner?: { id: string; name?: string }
+): Promise<StoredWorkspaceMetadataRecord> {
   await ensureTables()
   const result = await pool.query(
     'SELECT * FROM workspace_metadata WHERE workspace_id = $1',
     [workspaceId]
   )
   if (result.rowCount === 0) {
-    const defaultRecord = buildDefaultWorkspaceMetadata(workspaceId)
+    const defaultRecord = buildDefaultWorkspaceMetadata(workspaceId, seedOwner)
     await pool.query(
       `INSERT INTO workspace_metadata (workspace_id, name, type, focus, owner_id, owner_name, members)
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
