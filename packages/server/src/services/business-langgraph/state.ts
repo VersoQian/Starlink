@@ -123,7 +123,45 @@ export const EMPTY_SEEDED_STATE: SeededBusinessState = {
   edges: []
 }
 
-// ============== LangGraph State ==============
+/**
+ * ============== BLACKBOARD MODEL · 共享状态空间 ==============
+ *
+ * This `BusinessState` is the project's blackboard (per the design
+ * task book §3.1, "黑板模型"). All 12 agents write into and read from
+ * the same Annotation.Root — there's no point-to-point messaging.
+ * The supervisor decides which agents run; each agent reads the
+ * blackboard's current snapshot, computes its contribution, and the
+ * reducer (default LangGraph last-write-wins per slot) merges the
+ * partial state back. The next agent then reads the updated blackboard.
+ *
+ * Concretely, the slots below are the blackboard:
+ *
+ *   - traceId / workspaceId / userId / question  → context
+ *   - intent / supervisorDirective / roundNumber → control
+ *   - marketNodes / productNodes / financeNodes  → BMC cells (9 dims)
+ *   - agentAvatars / edges                       → synthesizer output
+ *   - conflicts                                  → critic output
+ *   - debateTurns / debateVerdict                → debate B-loop
+ *   - knowledgeEvidence / citations              → RAG evidence layer
+ *   - userSkillPrompt / supervisorMemoryPrompt   → memory injection
+ *
+ * Why blackboard ≠ pipeline:
+ *   - pipeline = each step transforms input → output, only adjacent
+ *     stages communicate.
+ *   - blackboard = ALL stages share global state; the critic reads
+ *     market+product+finance simultaneously to find cross-dimension
+ *     conflicts; the synthesizer reads the same to find cross-domain
+ *     edges. Neither is possible in a strict pipeline.
+ *
+ * Why this matters for the thesis (§3.1):
+ *   The user's task book required a blackboard model. We deliver it
+ *   via LangGraph's `Annotation.Root` + `addNode/addEdge`/conditional
+ *   edges. Persistence is via `langgraph-checkpointer` to PG so the
+ *   blackboard survives restarts (HITL resume across processes works
+ *   precisely because the blackboard is serialised at every step).
+ *
+ *   See `docs/blackboard-model.md` for a full architecture diagram.
+ */
 export const BusinessState = Annotation.Root({
   traceId: Annotation<string>(),
   workspaceId: Annotation<string>(),
