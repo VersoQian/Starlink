@@ -228,6 +228,11 @@ export class WizardPrefillService {
     let parsed: { items: PrefillItem[] } | null = null
     try {
       const response = await this.llm.chat({
+        // deepseek-v4-flash is the cheap-fast tier — appropriate for
+        // a one-shot scan of a few KB chunks. The default model name
+        // (gpt-4o-mini) gets rejected by our DeepSeek-compatible
+        // backend with HTTP 400.
+        model: process.env.WIZARD_PREFILL_MODEL ?? 'deepseek-v4-flash',
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userMessage }
