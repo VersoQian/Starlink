@@ -358,8 +358,12 @@ registerTool<MemoryInput, MemoryResult>({
             title,
             content,
             sourceType: 'manual',
-            importance: 0.72,
-            confidence: 0.78,
+            // User-authored memory: importance + confidence default to
+            // 1.0 because the user explicitly wrote it (not LLM-derived).
+            // The user can lower these via the memory drawer if they
+            // later realize the entry was speculative.
+            importance: 1.0,
+            confidence: 1.0,
             tags: ['manual', '@memory']
           }
         }

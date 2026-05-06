@@ -711,6 +711,12 @@ export class ConversationMemoryStore {
     const graphSummary = summarizeGraphForMemory(input.graph)
 
     if (input.decision?.trim()) {
+      // Derive confidence from how much evidence was attached when the
+      // decision was finalized. Default 0.7 (no-evidence floor) → 0.95
+      // (≥10 citations). Importance stays high (0.9) because every
+      // user-finalized decision is intrinsically worth surfacing.
+      const evCount = input.evidenceCount ?? 0
+      const decisionConfidence = clamp01(0.7 + Math.min(0.25, evCount * 0.025))
       memories.push(await this.upsertMemory({
         workspaceId: input.workspaceId,
         userId: input.userId,
@@ -721,11 +727,12 @@ export class ConversationMemoryStore {
         sourceType: 'conversation',
         sourceId: input.conversationId,
         importance: 0.9,
-        confidence: 0.82,
+        confidence: decisionConfidence,
         tags: ['decision', 'agent-output'],
         metadata: {
           question,
-          evidenceCount: input.evidenceCount ?? 0
+          evidenceCount: evCount,
+          scoreReason: `evidence=${evCount}`
         }
       }))
     }
