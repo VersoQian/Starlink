@@ -16,13 +16,14 @@
  */
 
 import { useMemo, useState } from 'react'
-import { X, Trash2, AlertCircle, BookOpen, FileText, RefreshCw } from 'lucide-react'
+import { X, Trash2, AlertCircle, BookOpen, FileText, RefreshCw, Download } from 'lucide-react'
 import { EditorialProse } from '../registries/renderers/editorial-prose'
 import {
   useMyMemories,
   useMyKnowledgeEvidence,
   useCorrectMemoryItem,
   useRefreshUserSkills,
+  useExportMyData,
   type MemoryItem,
   type KnowledgeEvidenceRef
 } from '../hooks/use-memory-list'
@@ -196,13 +197,16 @@ export function MemoryDrawer({ open, onClose, workspaceId }: MemoryDrawerProps) 
         <p className="font-body text-[10px] text-stratum-muted">
           这些数据按用户隔离，仅你可见
         </p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-stratum-muted hover:text-stratum-navy"
-        >
-          ESC ↩
-        </button>
+        <div className="flex items-center gap-3">
+          <ExportMyDataButton />
+          <button
+            type="button"
+            onClick={onClose}
+            className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-stratum-muted hover:text-stratum-navy"
+          >
+            ESC ↩
+          </button>
+        </div>
       </footer>
     </aside>
   )
@@ -453,6 +457,60 @@ function RefreshUserSkillsButton({ workspaceId }: { workspaceId: string }) {
     >
       <RefreshCw className={`h-3 w-3 ${refresh.isPending ? 'animate-spin' : ''}`} strokeWidth={2} />
       {refresh.isPending ? '推断中…' : '立即更新'}
+    </button>
+  )
+}
+
+/**
+ * F6 · GDPR / PIPL data portability button.
+ *
+ * On click, requests the full user-owned data dump (sessions / messages
+ * / memory_items / knowledge bases) from the server, then triggers a
+ * browser download as `starlink-export-{userId}-{timestamp}.json`.
+ *
+ * Server enforces 1-per-5-min rate limit (RATE_LIMITED extension);
+ * we surface the retry seconds when triggered.
+ */
+function ExportMyDataButton() {
+  const exportData = useExportMyData()
+  const handleClick = () => {
+    exportData.mutate(undefined, {
+      onSuccess: (data) => {
+        const json = JSON.stringify(data, null, 2)
+        const blob = new Blob([json], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        const userId = (data as { userId?: string })?.userId ?? 'me'
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+        a.download = `starlink-export-${userId}-${timestamp}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      },
+      onError: (err) => {
+        const ext =
+          (err as { response?: { errors?: Array<{ extensions?: { code?: string; retryAfterSec?: number } }> } })
+            .response?.errors?.[0]?.extensions
+        if (ext?.code === 'RATE_LIMITED' && typeof ext.retryAfterSec === 'number') {
+          window.alert(`导出过于频繁，请 ${Math.ceil(ext.retryAfterSec / 60)} 分钟后重试`)
+        } else {
+          window.alert(`导出失败：${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    })
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={exportData.isPending}
+      title="导出我所有的数据为 JSON 文件 (GDPR / PIPL 数据可携带权)"
+      className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-stratum-muted hover:text-stratum-navy disabled:opacity-40 transition-colors"
+    >
+      <Download className="h-3 w-3" strokeWidth={2} />
+      {exportData.isPending ? '导出中…' : '导出我的数据'}
     </button>
   )
 }

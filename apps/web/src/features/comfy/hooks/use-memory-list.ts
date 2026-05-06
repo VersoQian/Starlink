@@ -110,6 +110,12 @@ const REFRESH_USER_SKILLS_MUTATION = /* GraphQL */ `
   }
 `
 
+const EXPORT_MY_DATA_QUERY = /* GraphQL */ `
+  query ExportMyData {
+    exportMyData
+  }
+`
+
 export function useMyMemories(opts: {
   workspaceId?: string | null
   kind?: string | null
@@ -208,6 +214,22 @@ export function useRefreshUserSkills() {
     onSuccess: () => {
       // Refresh memory queries so newly-extracted user-skill rows show up.
       queryClient.invalidateQueries({ queryKey: ['memory'] })
+    }
+  })
+}
+
+/**
+ * F6 · Trigger a data export (GDPR Art. 20). Returns the JSON dump
+ * directly so the caller can download it as a file. Rate limit:
+ * 1 per 5 minutes (server-side). This hook NOT cached — exports
+ * always re-run for freshness.
+ */
+export function useExportMyData() {
+  return useMutation({
+    mutationFn: async (): Promise<unknown> => {
+      const client = getGraphQLClient()
+      const response = await client.request<{ exportMyData: unknown }>(EXPORT_MY_DATA_QUERY)
+      return response.exportMyData
     }
   })
 }

@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { listAgents } from '../registries/agent-registry'
-import { Database, FileText, Globe, Pencil, Plus, Sparkles, Upload, X } from 'lucide-react'
+import { Database, FileText, Globe, Pencil, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 
 const KB_LIST = /* GraphQL */ `
@@ -51,6 +51,7 @@ const KB_ADD_FILE = /* GraphQL */ `
     $fileName: String!
     $contentType: String!
     $content: String!
+    $isBase64: Boolean
   ) {
     addKnowledgeFile(
       workspaceId: $workspaceId
@@ -58,9 +59,24 @@ const KB_ADD_FILE = /* GraphQL */ `
       fileName: $fileName
       contentType: $contentType
       content: $content
+      isBase64: $isBase64
     ) {
       id status payload error
     }
+  }
+`
+
+const KB_LIST_DOCUMENTS = /* GraphQL */ `
+  query KbDocuments($workspaceId: ID!, $kbId: ID!) {
+    knowledgeBaseDocuments(workspaceId: $workspaceId, kbId: $kbId) {
+      id title contentType sourceUrl sizeChars metadata createdAt updatedAt
+    }
+  }
+`
+
+const KB_DELETE_DOCUMENT = /* GraphQL */ `
+  mutation KbDeleteDoc($workspaceId: ID!, $kbId: ID!, $docId: ID!) {
+    deleteKnowledgeBaseDocument(workspaceId: $workspaceId, kbId: $kbId, docId: $docId)
   }
 `
 
@@ -198,43 +214,83 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
         setSubmitNote('URL 已提交抓取，agent 后台分析中…')
       } else if (sourceTab === 'file') {
         if (!selectedFile) throw new Error('请先选择一个文件')
-        // 5 MiB cap matches the server-side guard in addKnowledgeFile
-        // resolver. Larger files should be split client-side.
-        if (selectedFile.size > 5 * 1024 * 1024) {
-          throw new Error(`文件过大（${(selectedFile.size / 1024 / 1024).toFixed(2)} MiB），上限 5 MiB`)
-        }
-        // Reject PDF early — extractor doesn't support them yet (the
-        // pdf-parse dep is not installed). Other binary formats fail
-        // gracefully via best-effort plaintext extraction.
         const fileName = selectedFile.name
         const lower = fileName.toLowerCase()
-        if (lower.endsWith('.pdf') || selectedFile.type === 'application/pdf') {
-          throw new Error('PDF 暂不支持；请先转成 .md / .txt / .html 后上传')
+        // Detect binary formats. Raw .pdf / .docx / .xlsx → base64 path
+        // through the binary extractor (pdf-parse / mammoth / xlsx).
+        const isBinary =
+          lower.endsWith('.pdf')
+          || lower.endsWith('.docx')
+          || lower.endsWith('.xlsx')
+          || lower.endsWith('.xls')
+          || selectedFile.type === 'application/pdf'
+          || selectedFile.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          || selectedFile.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+        // Size limit: text 5 MiB raw, binary 6 MiB raw (~8 MiB base64).
+        const limitBytes = isBinary ? 6 * 1024 * 1024 : 5 * 1024 * 1024
+        if (selectedFile.size > limitBytes) {
+          throw new Error(
+            `文件过大（${(selectedFile.size / 1024 / 1024).toFixed(2)} MiB），上限 ${limitBytes / 1024 / 1024} MiB`
+          )
         }
-        // FileReader.readAsText handles utf-8 by default — sufficient
-        // for txt / md / html / json / csv / log etc.
-        const text = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
-          reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'))
-          reader.readAsText(selectedFile)
-        })
+
+        // Resolve content-type from file metadata or extension.
         const contentType = selectedFile.type
           || (lower.endsWith('.md') ? 'text/markdown'
               : lower.endsWith('.html') || lower.endsWith('.htm') ? 'text/html'
               : lower.endsWith('.json') ? 'application/json'
+              : lower.endsWith('.pdf') ? 'application/pdf'
+              : lower.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+              : lower.endsWith('.xlsx') || lower.endsWith('.xls')
+                ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
               : 'text/plain')
+
+        let payload: string
+        let isBase64 = false
+        if (isBinary) {
+          // Read as ArrayBuffer → base64. btoa() can't handle binary
+          // strings directly; build the base64 chunk-by-chunk to avoid
+          // String.fromCharCode stack overflow on large files.
+          const buf = await selectedFile.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          let binaryStr = ''
+          const chunk = 0x8000
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binaryStr += String.fromCharCode.apply(
+              null,
+              Array.from(bytes.subarray(i, i + chunk))
+            )
+          }
+          payload = btoa(binaryStr)
+          isBase64 = true
+        } else {
+          payload = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+            reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'))
+            reader.readAsText(selectedFile)
+          })
+        }
+
         await client.request(KB_ADD_FILE, {
           workspaceId,
           kbId: activeKbId,
           fileName,
           contentType,
-          content: text
+          content: payload,
+          isBase64
         })
         setSelectedFile(null)
-        setSubmitNote(`✓ ${fileName} 已入库（${(text.length / 1024).toFixed(1)} KB），后台 chunk + embed 中…`)
+        const sizeNote = isBinary
+          ? `${(selectedFile.size / 1024).toFixed(1)} KB · ${contentType.includes('pdf') ? 'PDF' : contentType.includes('word') ? 'DOCX' : contentType.includes('sheet') ? 'XLSX' : '二进制'}`
+          : `${(payload.length / 1024).toFixed(1)} KB · 文本`
+        setSubmitNote(`✓ ${fileName} 已入库（${sizeNote}），后台 chunk + embed 中…`)
       }
       void qc.invalidateQueries({ queryKey: ['kbList', workspaceId] })
+      // F7 · also invalidate the doc list so the freshly-added file
+      // appears in the panel without manual refresh.
+      void qc.invalidateQueries({ queryKey: ['kbDocuments', workspaceId, activeKbId] })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setSubmitNote(`失败：${msg.slice(0, 200)}`)
@@ -407,10 +463,10 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
                       <>
                         <p className="font-body text-[12px] text-stratum-muted leading-relaxed">
                           点击或拖拽文件到此处<br />
-                          支持 .txt / .md / .html / .json（≤ 5 MiB）
+                          支持 <span className="font-mono">.txt · .md · .html · .json · .pdf · .docx · .xlsx</span>
                         </p>
                         <p className="mt-2 font-body text-[10px] text-stratum-muted">
-                          ⚠ PDF 暂不支持，请先转成 .md / .txt
+                          文本 ≤ 5 MiB · PDF/DOCX/XLSX ≤ 6 MiB
                         </p>
                       </>
                     )}
@@ -418,7 +474,7 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
                   <input
                     id="kb-file-input"
                     type="file"
-                    accept=".txt,.md,.markdown,.html,.htm,.json,.csv,.log,text/*,application/json"
+                    accept=".txt,.md,.markdown,.html,.htm,.json,.csv,.log,.pdf,.docx,.xlsx,.xls,text/*,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0] ?? null
@@ -448,6 +504,14 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
                 >
                   {submitNote}
                 </p>
+              ) : null}
+
+              {/* F7 · Document list panel — shows what's already in the
+                  KB with size + delete affordance. Sits between the
+                  source-add UI and the agent binding panel so users
+                  see "what's already here" before adding more. */}
+              {activeKbId ? (
+                <KbDocumentListPanel workspaceId={workspaceId} kbId={activeKbId} />
               ) : null}
 
               {/* F4 · Agent binding panel — at the bottom of the source
@@ -692,6 +756,128 @@ function KbAgentBindingPanel({ workspaceId, kbId }: { workspaceId: string; kbId:
           </button>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+// ============================================================================
+// F7 · Document list panel
+// ============================================================================
+
+interface KbDocumentRow {
+  id: string
+  title: string
+  contentType: string
+  sourceUrl: string | null
+  sizeChars: number
+  metadata: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+function formatChars(n: number): string {
+  if (n < 1000) return `${n} 字`
+  if (n < 100_000) return `${(n / 1000).toFixed(1)}K 字`
+  return `${(n / 1000).toFixed(0)}K 字`
+}
+
+function contentTypeBadge(ct: string): { label: string; color: string } {
+  if (ct.includes('pdf')) return { label: 'PDF', color: 'bg-stratum-danger-wash text-stratum-danger' }
+  if (ct.includes('word')) return { label: 'DOCX', color: 'bg-stratum-blue/10 text-stratum-blue' }
+  if (ct.includes('sheet')) return { label: 'XLSX', color: 'bg-stratum-ok-wash text-stratum-ok' }
+  if (ct.includes('markdown')) return { label: 'MD', color: 'bg-stratum-surface-low text-stratum-navy' }
+  if (ct.includes('html')) return { label: 'HTML', color: 'bg-stratum-surface-low text-stratum-navy' }
+  if (ct.includes('json')) return { label: 'JSON', color: 'bg-stratum-surface-low text-stratum-navy' }
+  return { label: 'TXT', color: 'bg-stratum-surface-low text-stratum-muted' }
+}
+
+function KbDocumentListPanel({ workspaceId, kbId }: { workspaceId: string; kbId: string }) {
+  const qc = useQueryClient()
+  const { data: docs, isLoading } = useQuery({
+    queryKey: ['kbDocuments', workspaceId, kbId],
+    queryFn: async () => {
+      const client = getGraphQLClient()
+      const r = await client.request<{ knowledgeBaseDocuments: KbDocumentRow[] }>(
+        KB_LIST_DOCUMENTS,
+        { workspaceId, kbId }
+      )
+      return r.knowledgeBaseDocuments
+    }
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (docId: string) => {
+      const client = getGraphQLClient()
+      await client.request(KB_DELETE_DOCUMENT, { workspaceId, kbId, docId })
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['kbDocuments', workspaceId, kbId] })
+    }
+  })
+
+  const handleDelete = (doc: KbDocumentRow) => {
+    if (!window.confirm(`删除文档「${doc.title}」？此操作不可恢复（chunks 一并删除）。`)) return
+    deleteMutation.mutate(doc.id)
+  }
+
+  return (
+    <div className="mt-4 pt-3 border-t border-stratum-line">
+      <div className="flex items-baseline justify-between mb-2">
+        <p className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-muted">
+          文档列表 · 已入库
+        </p>
+        {docs && docs.length > 0 ? (
+          <span className="font-mono text-[9px] tabular-nums text-stratum-muted">
+            {docs.length} 项
+          </span>
+        ) : null}
+      </div>
+
+      {isLoading ? (
+        <p className="font-body text-[11px] text-stratum-muted py-1">加载中…</p>
+      ) : !docs || docs.length === 0 ? (
+        <p className="font-body text-[11px] text-stratum-muted italic py-1">
+          KB 是空的——上面添加文本/URL/文件后会出现在这里。
+        </p>
+      ) : (
+        <ul className="space-y-1 max-h-[180px] overflow-y-auto pr-1">
+          {docs.map((d) => {
+            const badge = contentTypeBadge(d.contentType)
+            return (
+              <li
+                key={d.id}
+                className="flex items-center justify-between gap-2 rounded-lg bg-stratum-surface-low/40 px-3 py-1.5 hover:bg-stratum-surface-low/70 transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span
+                    className={`font-mono text-[9px] font-bold uppercase tracking-[0.14em] px-1.5 py-0.5 rounded shrink-0 ${badge.color}`}
+                  >
+                    {badge.label}
+                  </span>
+                  <span
+                    className="font-body text-[12px] text-stratum-ink truncate"
+                    title={d.title}
+                  >
+                    {d.title}
+                  </span>
+                </div>
+                <span className="font-mono text-[10px] tabular-nums text-stratum-muted shrink-0">
+                  {formatChars(d.sizeChars)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(d)}
+                  disabled={deleteMutation.isPending}
+                  aria-label={`删除 ${d.title}`}
+                  className="p-1 rounded text-stratum-muted hover:text-stratum-danger hover:bg-stratum-danger-wash/40 transition-colors disabled:opacity-40"
+                >
+                  <Trash2 className="h-3 w-3" strokeWidth={1.75} />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }

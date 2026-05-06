@@ -846,6 +846,77 @@ export class ConversationMemoryStore {
   }
 
   /**
+   * F6 · GDPR / PIPL data export. Returns every user-owned row across
+   * every workspace as a flat JSON-serialisable bundle. Schema is
+   * stable + versioned so users can re-process old exports later.
+   */
+  async exportUserData(userId: string): Promise<{
+    schemaVersion: number
+    exportedAt: string
+    userId: string
+    sessions: ConversationSession[]
+    messages: ConversationMessage[]
+    memoryItems: MemoryItem[]
+    knowledgeBases: Array<Record<string, unknown>>
+    knowledgeDocuments: Array<Record<string, unknown>>
+  }> {
+    await this.ensureTables()
+
+    const sessions = await pool.query(
+      `SELECT * FROM conversation_sessions WHERE user_id = $1 ORDER BY created_at ASC`,
+      [userId]
+    )
+    const messages = await pool.query(
+      `SELECT * FROM conversation_messages WHERE user_id = $1 ORDER BY created_at ASC`,
+      [userId]
+    )
+    // Include archived memory rows so the user has full audit of what
+    // was ever inferred — even items they later flagged or deleted.
+    const memoryItems = await pool.query(
+      `SELECT * FROM memory_items WHERE user_id = $1 ORDER BY created_at ASC`,
+      [userId]
+    )
+
+    let kbsRows: Array<Record<string, unknown>> = []
+    let kbDocs: Array<Record<string, unknown>> = []
+    try {
+      const kbs = await pool.query(
+        `SELECT id, workspace_id, name, status, visibility, owner_user_id,
+                created_at, updated_at, published_at
+           FROM kb_definitions
+          WHERE owner_user_id = $1
+          ORDER BY created_at ASC`,
+        [userId]
+      )
+      kbsRows = kbs.rows
+      const docs = await pool.query(
+        `SELECT d.id, d.workspace_id, d.kb_id, d.title, d.content,
+                d.content_type, d.source_url, d.metadata,
+                d.created_at, d.updated_at
+           FROM kb_documents d
+           JOIN kb_definitions kb ON kb.id = d.kb_id
+          WHERE kb.owner_user_id = $1
+          ORDER BY d.created_at ASC`,
+        [userId]
+      )
+      kbDocs = docs.rows
+    } catch {
+      // kb_* tables may not exist; export is still valuable without them.
+    }
+
+    return {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      userId,
+      sessions: sessions.rows.map((row: Record<string, unknown>) => rowToSession(row)),
+      messages: messages.rows.map((row: Record<string, unknown>) => rowToMessage(row)),
+      memoryItems: memoryItems.rows.map((row: Record<string, unknown>) => rowToMemory(row)),
+      knowledgeBases: kbsRows,
+      knowledgeDocuments: kbDocs
+    }
+  }
+
+  /**
    * P2 · listMemoriesForUser — user-scoped memory list.
    *
    * Returns rows where:

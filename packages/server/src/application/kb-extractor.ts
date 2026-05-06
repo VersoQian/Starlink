@@ -92,9 +92,9 @@ function looksLikeJson(content: string): boolean {
 }
 
 /**
- * Extract prose from a content blob. Throws on unsupported types
- * (notably PDF) with a clear remediation message; never silently produces
- * empty output.
+ * Extract prose from a string content blob. Used when the upstream
+ * already decoded bytes to UTF-8 (the typical text-file path). For
+ * binary formats (PDF / DOCX / XLSX), use extractBinary instead.
  */
 export function extractText(
   content: string,
@@ -122,6 +122,134 @@ export function extractText(
       // Audit log will show the original content-type for triage.
       return collapseWhitespace(content)
   }
+}
+
+/**
+ * F4 (phase 1) · Binary extractors for PDF / DOCX / XLSX.
+ *
+ * Lazily imports the heavy parsers (pdf-parse / mammoth / xlsx) so:
+ *   - boot time stays fast (no deserialisation cost on cold start)
+ *   - environments without these deps installed still load the module
+ *
+ * Returns plain prose suitable for the existing chunker pipeline.
+ *
+ * Throws on parse failure (caller in addBinaryDocument records as
+ * task.status='failed' with the message). Empty extraction throws too,
+ * so we never silently produce 0-chunk docs.
+ */
+export async function extractBinary(
+  buffer: Buffer,
+  contentType: string,
+  options: { fileName?: string } = {}
+): Promise<string> {
+  const ct = normalizeContentType(contentType)
+  // Some browsers send octet-stream for files they don't recognise; sniff
+  // the extension as a fallback.
+  const lowerName = (options.fileName ?? '').toLowerCase()
+  const sniffPdf = ct === 'application/pdf' || lowerName.endsWith('.pdf')
+  const sniffDocx =
+    ct === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    || lowerName.endsWith('.docx')
+  const sniffXlsx =
+    ct === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    || lowerName.endsWith('.xlsx')
+    || lowerName.endsWith('.xls')
+
+  if (sniffPdf) {
+    return await extractPdf(buffer)
+  }
+  if (sniffDocx) {
+    return await extractDocx(buffer)
+  }
+  if (sniffXlsx) {
+    return await extractXlsx(buffer)
+  }
+  // Fall back to UTF-8 decode + extractText. Useful for binaries that
+  // happen to be plaintext misreported (e.g. .log served as octet-stream).
+  return extractText(buffer.toString('utf-8'), 'text/plain', {})
+}
+
+async function extractPdf(buffer: Buffer): Promise<string> {
+  // pdf-parse 2.x exports a `PDFParse` class. Older 1.x exported a
+  // default function — we don't pin to that to avoid downgrade risk.
+  const mod = await import('pdf-parse')
+  const PDFParse = mod.PDFParse
+  // pdfjs takes ownership of the buffer; clone to keep our caller's
+  // copy intact (defensive — addDocument doesn't reuse the buffer
+  // but this avoids surprises).
+  const parser = new PDFParse({ data: new Uint8Array(buffer) })
+  try {
+    const result = await parser.getText()
+    const raw = result?.text ?? ''
+    const cleaned = collapseWhitespace(raw)
+    if (!cleaned) {
+      throw new Error(
+        'kb-extractor.extractPdf: extracted 0 chars. PDF may be image-only (needs OCR) or encrypted.'
+      )
+    }
+    return cleaned
+  } finally {
+    // Always free the parser worker, even on extract error.
+    await parser.destroy().catch(() => {})
+  }
+}
+
+async function extractDocx(buffer: Buffer): Promise<string> {
+  // mammoth.extractRawText returns { value: string, messages: [...] }
+  // value is plain text; warnings (style errors etc) live in messages
+  // and are non-fatal.
+  const mammoth = await import('mammoth')
+  const { value } = await mammoth.extractRawText({ buffer })
+  const cleaned = collapseWhitespace(value ?? '')
+  if (!cleaned) {
+    throw new Error('kb-extractor.extractDocx: extracted 0 chars; document may be empty.')
+  }
+  return cleaned
+}
+
+async function extractXlsx(buffer: Buffer): Promise<string> {
+  const xlsx = await import('xlsx')
+  const wb = xlsx.read(buffer, { type: 'buffer' })
+  const parts: string[] = []
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName]
+    if (!sheet) continue
+    // CSV form is the most prose-friendly for embedding: the chunker
+    // sees "row1col1, row1col2" sequences which embed as natural text.
+    // Sheet name becomes a section heading so cross-sheet queries
+    // ("which sheet mentions X?") work.
+    const csv = xlsx.utils.sheet_to_csv(sheet, { blankrows: false })
+    if (csv.trim()) {
+      parts.push(`## ${sheetName}\n\n${csv.trim()}`)
+    }
+  }
+  const cleaned = parts.join('\n\n').trim()
+  if (!cleaned) {
+    throw new Error('kb-extractor.extractXlsx: workbook has no non-empty sheets.')
+  }
+  return cleaned
+}
+
+/**
+ * Quick predicate — should the upload pipeline route through extractBinary
+ * (binary parsers) or extractText (string parsers)? Used by KbStore to
+ * decide whether to base64-decode the incoming content.
+ */
+export function isBinaryContentType(contentType: string, fileName?: string): boolean {
+  const ct = normalizeContentType(contentType)
+  if (ct === 'application/pdf') return true
+  if (ct === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return true
+  if (ct === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return true
+  if (ct === 'application/octet-stream' && fileName) {
+    const lower = fileName.toLowerCase()
+    return (
+      lower.endsWith('.pdf')
+      || lower.endsWith('.docx')
+      || lower.endsWith('.xlsx')
+      || lower.endsWith('.xls')
+    )
+  }
+  return false
 }
 
 // =============================================================================

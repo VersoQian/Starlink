@@ -22,10 +22,12 @@ import {
   addKnowledgeSeed,
   bindKbToAgent,
   createKnowledgeBase,
+  deleteKnowledgeBaseDocument,
   getKnowledgeBaseStatus,
   importKnowledgeUrl,
   listAgentBindingsForKb,
   listKnowledgeBases,
+  listKnowledgeBaseDocuments,
   publishKnowledgeBase,
   searchKnowledgeBase,
   unbindKbFromAgent,
@@ -193,6 +195,30 @@ export const resolvers = {
         })
       })
     },
+    /**
+     * F6 · Data portability (GDPR Art. 20 / PIPL Art. 45).
+     *
+     * Rate limit: 1 per 5 minutes per user — exports are expensive
+     * (full table scan on memory_items + sessions + messages) and
+     * users rarely need to export more than once per session.
+     */
+    exportMyData: async (
+      _: unknown,
+      __: unknown,
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('exportMyData: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        assertOperationRateLimit(ctx.userId, 'exportMyData', {
+          minIntervalMs: 5 * 60_000
+        })
+        return await defaultConversationMemoryStore.exportUserData(ctx.userId)
+      })
+    },
     workspaceContextSnapshot: async (
       _: unknown,
       args: { workspaceId: string; conversationId?: string | null; query: string; kbId?: string | null },
@@ -270,6 +296,16 @@ export const resolvers = {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
         return await listAgentBindingsForKb(args.workspaceId, args.kbId)
+      })
+    },
+    knowledgeBaseDocuments: async (
+      _: unknown,
+      args: { workspaceId: string; kbId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
+        return await listKnowledgeBaseDocuments(args.workspaceId, args.kbId)
       })
     },
     knowledgeBaseStatus: async (_: unknown, args: { workspaceId: string; kbId: string }, ctx: GraphQLContext) => {
@@ -728,6 +764,32 @@ export const resolvers = {
       })
     },
 
+    /**
+     * F7 · Delete a single KB document. Cascades to chunks via FK.
+     * Owner-check for private KBs is enforced inside
+     * deleteKnowledgeBaseDocument.
+     */
+    deleteKnowledgeBaseDocument: async (
+      _: unknown,
+      args: { workspaceId: string; kbId: string; docId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        if (!ctx.userId) {
+          throw new GraphQLError('deleteKnowledgeBaseDocument: authentication required', {
+            extensions: { code: 'UNAUTHENTICATED' }
+          })
+        }
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.write')
+        return await deleteKnowledgeBaseDocument({
+          workspaceId: args.workspaceId,
+          kbId: args.kbId,
+          docId: args.docId,
+          callerUserId: ctx.userId
+        })
+      })
+    },
+
     updateKnowledgeBaseVisibility: async (
       _: unknown,
       args: { kbId: string; visibility: string },
@@ -762,26 +824,37 @@ export const resolvers = {
     },
     addKnowledgeFile: async (
       _: unknown,
-      args: { workspaceId: string; kbId: string; fileName: string; contentType: string; content: string },
+      args: {
+        workspaceId: string
+        kbId: string
+        fileName: string
+        contentType: string
+        content: string
+        isBase64?: boolean | null
+      },
       ctx: GraphQLContext
     ) => {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.write')
-        // Cap input size to 5 MiB (raw string length). PG TOAST handles
-        // larger values, but ingesting > 5 MiB at once stalls embedding
-        // and floods the LLM provider's chunk queue. Frontend should
-        // split larger files client-side.
-        if (args.content.length > 5 * 1024 * 1024) {
-          throw new GraphQLError('addKnowledgeFile: content exceeds 5 MiB limit', {
-            extensions: { code: 'BAD_USER_INPUT' }
-          })
+        // Cap input size. For text mode, raw string length. For base64
+        // mode, the encoded payload is ~33% larger than the underlying
+        // bytes, so 8 MiB encoded ≈ 6 MiB raw — that's our bytes cap.
+        // Larger files need client-side splitting before upload.
+        const isB64 = Boolean(args.isBase64)
+        const limitBytes = isB64 ? 8 * 1024 * 1024 : 5 * 1024 * 1024
+        if (args.content.length > limitBytes) {
+          throw new GraphQLError(
+            `addKnowledgeFile: content exceeds ${limitBytes / 1024 / 1024} MiB limit`,
+            { extensions: { code: 'BAD_USER_INPUT' } }
+          )
         }
         return await addKnowledgeFile(
           args.workspaceId,
           args.kbId,
           args.fileName,
           args.contentType,
-          args.content
+          args.content,
+          isB64
         )
       })
     },

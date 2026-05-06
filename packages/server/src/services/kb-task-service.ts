@@ -327,6 +327,53 @@ export async function listKbBindingsForAgent(
 }
 
 /**
+ * F7 · List documents in a KB. Returns metadata + content (callers
+ * decide whether to show full content). Used by the KB management UI.
+ */
+export async function listKbDocuments(
+  workspaceId: string,
+  kbId: string
+): Promise<Array<{
+  id: string
+  workspaceId: string
+  kbId: string
+  title: string
+  contentType: string
+  sourceUrl: string | null
+  content: string
+  metadata: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}>> {
+  return await getKbStore().listDocuments(kbId, workspaceId)
+}
+
+/**
+ * F7 · Delete a single document (and all its chunks via FK cascade).
+ * Authorization is performed at the resolver layer (workspace.write +
+ * KB ownership for private). Returns true when the document existed
+ * and was removed.
+ */
+export async function deleteKbDocument(
+  workspaceId: string,
+  kbId: string,
+  docId: string
+): Promise<boolean> {
+  // Verify the doc actually belongs to (workspaceId, kbId) — defense
+  // against trying to delete another workspace's doc by guessing its id.
+  const docs = await getKbStore().listDocuments(kbId, workspaceId)
+  const exists = docs.some((d) => d.id === docId)
+  if (!exists) return false
+  await getKbStore().removeDocument(docId)
+  auditLogger.info({
+    action: 'kb-task-service.deleteKbDocument.completed',
+    workflowId: workspaceId,
+    metadata: { kbId, docId }
+  })
+  return true
+}
+
+/**
  * F4 · List bindings for a KB. Used by the KB management UI to show
  * "this KB is wired to agents [A, B, C]".
  */
@@ -342,6 +389,108 @@ export async function listAgentBindingsForKb(
     [workspaceId, kbId]
   )
   return result.rows.map(rowToBinding)
+}
+
+/**
+ * F7 · List documents inside a KB. Returns shape suitable for the
+ * KB management UI: id / title / contentType / sizeChars / metadata
+ * for each row. Full content is omitted from this list to keep
+ * payloads small — clients fetch individual docs as needed (a future
+ * `getKnowledgeBaseDocument` query when there's UI demand).
+ */
+export type GatewayKbDocument = {
+  id: string
+  workspaceId: string
+  kbId: string
+  title: string
+  contentType: string
+  sourceUrl: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+  sizeChars: number
+}
+
+export async function listKnowledgeBaseDocuments(
+  workspaceId: string,
+  kbId: string
+): Promise<GatewayKbDocument[]> {
+  try {
+    const docs = await getKbStore().listDocuments(kbId, workspaceId)
+    return docs.map((d) => ({
+      id: d.id,
+      workspaceId: d.workspaceId,
+      kbId: d.kbId,
+      title: d.title,
+      contentType: d.contentType,
+      sourceUrl: d.sourceUrl,
+      metadata: d.metadata,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+      sizeChars: typeof d.content === 'string' ? d.content.length : 0
+    }))
+  } catch (err) {
+    auditLogger.warn({
+      action: 'kb-task-service.listKnowledgeBaseDocuments.failed',
+      workflowId: workspaceId,
+      metadata: { kbId, error: err instanceof Error ? err.message : String(err) }
+    })
+    return []
+  }
+}
+
+/**
+ * F7 · Delete one document from a KB. Cascade to chunks happens via
+ * the kb_chunks.doc_id ON DELETE CASCADE constraint in the schema.
+ *
+ * Authorization: caller's userId must own the parent KB if it's
+ * 'private'; for 'workspace'/'global' KBs the resolver's
+ * workspace.write check is sufficient. Returns true when a row was
+ * deleted, false when the doc didn't exist or the caller wasn't
+ * authorized (audit-logged).
+ */
+export async function deleteKnowledgeBaseDocument(args: {
+  workspaceId: string
+  kbId: string
+  docId: string
+  callerUserId: string
+}): Promise<boolean> {
+  await ensureKbDefinitionsTable()
+  // Verify KB ownership for private KBs.
+  const kbRow = await pool.query(
+    `SELECT visibility, owner_user_id FROM kb_definitions WHERE id = $1 AND workspace_id = $2`,
+    [args.kbId, args.workspaceId]
+  )
+  if (kbRow.rowCount === 0) return false
+  const kb = kbRow.rows[0] as { visibility: string; owner_user_id: string | null }
+  if (
+    kb.visibility === 'private'
+    && kb.owner_user_id
+    && kb.owner_user_id !== '__legacy__'
+    && kb.owner_user_id !== args.callerUserId
+  ) {
+    auditLogger.warn({
+      action: 'kb-task-service.deleteKnowledgeBaseDocument.forbidden',
+      workflowId: args.workspaceId,
+      userId: args.callerUserId,
+      metadata: { kbId: args.kbId, docId: args.docId }
+    })
+    throw new Error('FORBIDDEN: only owner can delete documents from a private KB')
+  }
+  // Verify the document is in this workspace before deleting.
+  const docRow = await pool.query(
+    `SELECT id FROM kb_documents WHERE id = $1 AND kb_id = $2 AND workspace_id = $3`,
+    [args.docId, args.kbId, args.workspaceId]
+  )
+  if (docRow.rowCount === 0) return false
+  await getKbStore().removeDocument(args.docId)
+  auditLogger.info({
+    action: 'kb-task-service.deleteKnowledgeBaseDocument.completed',
+    workflowId: args.workspaceId,
+    userId: args.callerUserId,
+    metadata: { kbId: args.kbId, docId: args.docId }
+  })
+  return true
 }
 
 /**
@@ -444,21 +593,33 @@ export async function addKnowledgeFile(
   kbId: string,
   fileName: string,
   contentType: string,
-  content: string
+  content: string,
+  /**
+   * F4 (phase 1) · When true, `content` is base64 — decoded to a
+   * Buffer and routed through the binary extractor (PDF / DOCX / XLSX).
+   * When false / omitted, `content` is treated as UTF-8 text (legacy
+   * txt / md / html / json path).
+   */
+  isBase64 = false
 ): Promise<GatewayKbTask> {
   const taskId = nanoid()
   const now = new Date().toISOString()
   const title = (fileName || `file-${taskId.slice(0, 6)}`).slice(0, 200)
   try {
-    if (!content.trim()) {
+    if (!content) {
       throw new Error('addKnowledgeFile: empty content')
+    }
+    const payload: string | Buffer = isBase64 ? Buffer.from(content, 'base64') : content
+    if (!isBase64 && typeof payload === 'string' && !payload.trim()) {
+      throw new Error('addKnowledgeFile: empty text content')
     }
     const { docId, chunkCount } = await getKbStore().addDocument({
       kbId,
       workspaceId,
       title,
-      content,
+      content: payload,
       contentType,
+      fileName,
       metadata: { kind: 'file', originalFileName: fileName }
     })
     auditLogger.info({

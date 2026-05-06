@@ -216,6 +216,38 @@ export const typeDefs = gql`
     visibility: String!
   }
 
+  type KbDocument {
+    id: ID!
+    workspaceId: ID!
+    kbId: ID!
+    title: String!
+    contentType: String!
+    sourceUrl: String
+    """ Full original content (may be large — clients should decide whether to fetch). """
+    content: String
+    metadata: JSON!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type KbDocument {
+    id: ID!
+    workspaceId: ID!
+    kbId: ID!
+    title: String!
+    contentType: String!
+    sourceUrl: String
+    metadata: JSON!
+    createdAt: String!
+    updatedAt: String!
+    """
+    F7 · Character length of the stored prose (NOT the original
+    binary file size — that's in metadata.originalSizeBytes when
+    the document came from a PDF/DOCX/XLSX upload).
+    """
+    sizeChars: Int!
+  }
+
   type KbAgentBinding {
     id: ID!
     workspaceId: ID!
@@ -449,6 +481,24 @@ export const typeDefs = gql`
     during the stream.
     """
     myKnowledgeEvidence(workspaceId: ID, limit: Int): [KnowledgeEvidenceRef!]!
+
+    """
+    F6 · GDPR / PIPL data portability. Returns the entire user-owned
+    data set as a JSON blob:
+      - all conversation_sessions / conversation_messages
+      - all memory_items (including archived for full audit)
+      - all kb_definitions + kb_documents the user owns
+
+    Excludes: embedding vectors (regeneratable from chunk content),
+    other users' data even when shared in the same workspace.
+
+    Auth: caller userId is enforced server-side; cannot export
+    another user's data.
+
+    Schema is versioned (current: schemaVersion=1). Frontend serves
+    this as a downloadable .json file via the Memory drawer.
+    """
+    exportMyData: JSON!
     workspaceContextSnapshot(workspaceId: ID!, conversationId: ID, query: String!, kbId: ID): WorkspaceContextSnapshot!
     kbTaskStatus(workspaceId: ID!, kbId: ID!): [KbTaskStatus!]!
     knowledgeBases(workspaceId: ID!): [KnowledgeBase!]!
@@ -457,6 +507,19 @@ export const typeDefs = gql`
     this to show "this KB is wired to N agents" + bind/unbind buttons.
     """
     knowledgeBaseAgentBindings(workspaceId: ID!, kbId: ID!): [KbAgentBinding!]!
+    """
+    F7 · List documents inside a KB. Returns metadata + size hints
+    for the UI list (does NOT return full content — clients fetch
+    individual docs as needed). Documents inherit the KB's visibility
+    so workspace.read is sufficient authorization.
+    """
+    knowledgeBaseDocuments(workspaceId: ID!, kbId: ID!): [KbDocument!]!
+    """
+    F7 · List documents in a KB. Used by the KB management UI to show
+    what's been ingested and offer per-document delete. Content is
+    omitted from the list (call kbDocument(id) for full content).
+    """
+    kbDocuments(workspaceId: ID!, kbId: ID!): [KbDocument!]!
     knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!
     knowledgeBaseSearch(workspaceId: ID!, kbId: ID!, query: String!, topK: Int): [KnowledgeEvidence!]!
     workspaces: [WorkspaceDirectoryItem!]!
@@ -571,20 +634,48 @@ export const typeDefs = gql`
       kbId: ID!
       agentId: String!
     ): Boolean!
+
+    """
+    F7 · Delete a single document from a KB. Cascades to its chunks
+    via kb_chunks.doc_id ON DELETE CASCADE. Authorization: caller
+    needs workspace.write AND must be the KB owner for 'private' KBs
+    (workspace + global KBs only require workspace.write).
+    Returns true when a row was removed.
+    """
+    deleteKnowledgeBaseDocument(
+      workspaceId: ID!
+      kbId: ID!
+      docId: ID!
+    ): Boolean!
+    """
+    F7 · Delete a document from a KB. Cascades to all chunks of that
+    document via FK ON DELETE CASCADE. Authorization: caller must have
+    workspace.write AND own the KB (for private) or own the document.
+    Returns true when deleted, false when not found.
+    """
+    deleteKbDocument(workspaceId: ID!, kbId: ID!, docId: ID!): Boolean!
     addKnowledgeSeed(workspaceId: ID!, kbId: ID!, text: String!): KbTask!
     importKnowledgeUrl(workspaceId: ID!, kbId: ID!, url: String!): KbTask!
     """
     F4 · In-process file import. Replaces the broken kb-proxy route that
     expected an external task service at port 4001.
 
-    Frontend reads the file via FileReader.readAsText() and posts the
-    contents directly. Supported content-types: text/plain, text/markdown,
-    text/html, application/json. PDF is NOT supported (requires pdf-parse
-    install — see kb-extractor.ts PDF_INSTALL_HINT).
+    Two transport modes:
+      - text mode (isBase64=false): content is UTF-8 string. Used for
+        text/plain, text/markdown, text/html, application/json.
+      - binary mode (isBase64=true): content is base64-encoded bytes.
+        Used for application/pdf,
+        application/vnd.openxmlformats-officedocument.wordprocessingml.document
+        (DOCX), application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+        (XLSX).
 
-    The fileName becomes the document title; content is chunked + embedded
-    via the same KbStore.addDocument pipeline used by addKnowledgeSeed,
-    so visibility / RLS / agent-binding propagate naturally.
+    The server decodes base64 → Buffer → routes through the matching
+    binary extractor (pdf-parse / mammoth / xlsx). Chunking + embedding
+    + visibility + agent-binding all propagate identically.
+
+    Frontend should:
+      - Use FileReader.readAsText for text formats (smaller payload)
+      - Use FileReader.readAsArrayBuffer + btoa for binary formats
     """
     addKnowledgeFile(
       workspaceId: ID!
@@ -592,6 +683,8 @@ export const typeDefs = gql`
       fileName: String!
       contentType: String!
       content: String!
+      """When true, content is base64-encoded bytes. Default false."""
+      isBase64: Boolean
     ): KbTask!
     saveCommunityPost(input: CommunityPostInput!): WorkspaceAsset!
     savePracticeSession(input: SavePracticeSessionInput!): WorkspaceAsset!

@@ -41,7 +41,9 @@ import { pool } from '../infrastructure/db/pool.js'
 import { embedText, toPgVector } from '../services/embedding-service.js'
 import {
   detectContentType,
+  extractBinary,
   extractText,
+  isBinaryContentType,
   normalizeContentType
 } from './kb-extractor.js'
 import type { KnowledgeSearchResult } from '@starlink/shared'
@@ -154,10 +156,17 @@ export interface AddDocumentInput {
   kbId: string
   workspaceId: string
   title: string
-  content: string
+  /**
+   * Document content. For text formats (txt/md/html/json) pass UTF-8
+   * string; for binary formats (pdf/docx/xlsx) pass a Node Buffer.
+   * extractor selection is driven by contentType + fileName sniffing.
+   */
+  content: string | Buffer
   contentType?: string
   sourceUrl?: string | null
   metadata?: Record<string, unknown>
+  /** Optional file name — used to disambiguate octet-stream uploads. */
+  fileName?: string
   /** Optional. When provided, upserts (replaces existing chunks). */
   docId?: string
 }
@@ -218,11 +227,27 @@ export class KbStore {
   async addDocument(input: AddDocumentInput): Promise<AddDocumentResult> {
     await this.ensureTables()
     const docId = input.docId ?? nanoid()
-    const resolvedContentType =
-      input.contentType && input.contentType !== 'text/plain'
-        ? normalizeContentType(input.contentType)
-        : detectContentType(input.content, input.contentType)
-    const prose = extractText(input.content, resolvedContentType)
+    const isBuffer = Buffer.isBuffer(input.content)
+
+    // Resolve content-type. For binary inputs (Buffer), respect the
+    // declared contentType (string heuristics on PDF bytes are
+    // unreliable). For text inputs, sniff via detectContentType.
+    const resolvedContentType = isBuffer
+      ? normalizeContentType(input.contentType ?? 'application/octet-stream')
+      : (input.contentType && input.contentType !== 'text/plain'
+          ? normalizeContentType(input.contentType)
+          : detectContentType(input.content as string, input.contentType))
+
+    // Route through the matching extractor. Binary path covers
+    // PDF / DOCX / XLSX; text path covers UTF-8 strings.
+    let prose: string
+    if (isBuffer || isBinaryContentType(resolvedContentType, input.fileName)) {
+      const buffer = isBuffer ? (input.content as Buffer) : Buffer.from(input.content as string, 'utf-8')
+      prose = await extractBinary(buffer, resolvedContentType, { fileName: input.fileName })
+    } else {
+      prose = extractText(input.content as string, resolvedContentType)
+    }
+
     const chunks = chunkText(prose)
     if (chunks.length === 0) {
       throw new Error('kb-store.addDocument: empty content after extraction + chunking')
@@ -232,7 +257,13 @@ export class KbStore {
     try {
       await client.query('BEGIN')
 
-      // Upsert document row.
+      // Upsert document row. Binary content (PDF/DOCX/XLSX) is stored
+      // as the EXTRACTED PROSE — original bytes are not persisted.
+      // Rationale: kb_documents.content is TEXT; storing raw PDF bytes
+      // there breaks utf-8 invariants. If the user later wants to
+      // re-extract with a better parser, they re-upload the file.
+      // Text content stays as-is.
+      const contentToStore = isBuffer ? prose : (input.content as string)
       await client.query(
         `INSERT INTO kb_documents (
            id, workspace_id, kb_id, title, content, content_type,
@@ -251,7 +282,7 @@ export class KbStore {
           input.workspaceId,
           input.kbId,
           input.title,
-          input.content,
+          contentToStore,
           // Persist the RESOLVED content type (after sniffing), not the
           // raw input arg — so listDocuments shows what was actually
           // detected. Original raw arg lives in metadata for audit.
@@ -259,7 +290,9 @@ export class KbStore {
           input.sourceUrl ?? null,
           JSON.stringify({
             ...(input.metadata ?? {}),
-            originalContentTypeArg: input.contentType ?? null
+            originalContentTypeArg: input.contentType ?? null,
+            originalFileName: input.fileName ?? null,
+            originalSizeBytes: isBuffer ? (input.content as Buffer).byteLength : null
           })
         ]
       )

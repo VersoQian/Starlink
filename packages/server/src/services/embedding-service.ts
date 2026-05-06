@@ -1,3 +1,5 @@
+import { isPiiRedactionEnabled, redactPii } from './pii-redactor.js'
+
 const STORAGE_EMBEDDING_DIMENSIONS = 1536
 const MAX_EMBEDDING_TEXT_LENGTH = Number(process.env.EMBEDDING_MAX_TEXT_LENGTH ?? '8000')
 
@@ -75,12 +77,18 @@ export function describeEmbeddingConfig(): {
 
 export async function embedText(text: string): Promise<EmbeddingResult> {
   const normalizedText = normalizeWhitespace(text).slice(0, MAX_EMBEDDING_TEXT_LENGTH)
+  // F5 · PII redaction (opt-in via USER_SKILL_REDACT_PII_ON_EMBED=true).
+  // Strips emails / phones / IDs / IPs / credit cards / URLs before
+  // embedding so the residual leak from embedding inversion can't
+  // recover those exact identifiers. See pii-redactor.ts for the full
+  // honest scope discussion (this is mitigation, not solution).
+  const redacted = isPiiRedactionEnabled() ? redactPii(normalizedText).redacted : normalizedText
   const dimensions = getEmbeddingDimensions()
   const apiKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY
 
-  if (apiKey && normalizedText && !isLocalHashForced()) {
+  if (apiKey && redacted && !isLocalHashForced()) {
     try {
-      return await embedRemote(normalizedText, apiKey, dimensions)
+      return await embedRemote(redacted, apiKey, dimensions)
     } catch (error) {
       // Throttled: log every 1st + every 100th failure. Production with
       // a misconfigured embedding endpoint would otherwise drown the log.
@@ -95,7 +103,7 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
   }
 
   return {
-    vector: createLocalEmbedding(normalizedText, dimensions),
+    vector: createLocalEmbedding(redacted, dimensions),
     provider: 'local-hash',
     model: `local-hash-${dimensions}`,
     dimensions
