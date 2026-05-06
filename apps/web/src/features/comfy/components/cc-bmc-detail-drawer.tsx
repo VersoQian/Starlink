@@ -257,20 +257,22 @@ export function CCBMCDetailDrawer() {
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {activeTab === 'overview' && (
             <>
-              {/* P10.5 · 摘要段（一句话核心结论）— always shown when
-                  there's any summary content. Visually distinct from
-                  详细分析 via italic + slightly muted ink. */}
+              {/* P10.6 · 摘要段（一句话导读，视觉上 LIGHTER than 详细）
+                  之前的版本把摘要做成 14px medium + 蓝色立柱，比详细分析
+                  还显眼 → 用户觉得"摘要和详细反了"。改回紧凑的 muted
+                  导读样式：12px 小字 + 灰色 + 行高 1.5，让人一眼读完
+                  就跳到主体。详细分析才是阅读重心。*/}
               {showSummary ? (
                 <Section label="核心摘要" sublabel="SUMMARY">
-                  <div className="prose prose-sm max-w-measure-body font-body text-[14px] leading-[1.55] text-stratum-navy font-medium border-l-2 border-stratum-blue/40 pl-4">
+                  <div className="prose prose-sm max-w-measure-body font-body text-[12px] leading-[1.5] text-stratum-muted">
                     <ReactMarkdown>{summary}</ReactMarkdown>
                   </div>
                 </Section>
               ) : null}
 
-              {/* 详细分析 — routed through the renderer registry so each
-                  agent's output gets its tailored treatment in the drawer
-                  surface (citations / severity / kind chips / etc). */}
+              {/* 详细分析 — 真正的阅读主体，full prose。Routed through
+                  the renderer registry so each agent's output gets its
+                  tailored treatment (citations / severity / kind chips). */}
               <Section label="详细分析" sublabel="DETAILED ANALYSIS">
                 <div className="max-w-measure-body">
                   {renderAgentOutput({
