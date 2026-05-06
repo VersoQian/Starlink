@@ -45,13 +45,34 @@ import type { Node } from 'reactflow'
 
 const COL = [80, 480, 880, 1280, 1680] as const
 
+/**
+ * Vertical band layout (top → down on canvas).
+ *
+ * The root note can carry the wizard-graduation STRONG seed, which
+ * inflates to ~500px tall (full 7-dimension summary). That broke the
+ * old layout (header=-120, top=200) — root overflowed into the BMC
+ * top row by ~170px. We now give root a 550px slot of its own and
+ * push insights / reports above accordingly.
+ *
+ *   reports:  -880  (200 tall)
+ *   gap:       40
+ *   insights: -640  (200 tall)
+ *   gap:       80
+ *   root:     -360  (500 tall, extends to ~+140)
+ *   gap:       60
+ *   bmc top:  200   (down to ~520)
+ *   bmc mid:  520
+ *   bmc bot:  900
+ *   conflicts: 1300
+ *   overflow:  2400
+ */
 const ROW = {
-  /** Top-most band: report cards. 200px tall + 40px gap → next row at -780. */
-  reportTop: -540,
-  /** Insight strip below report band. */
-  insightStrip: -280,
-  /** Root note + (deprecated) header band — alone at COL[2]. */
-  header: -120,
+  /** Top-most band: report cards. 200px tall + 40px gap to insights below. */
+  reportTop: -880,
+  /** Insight strip — 200px tall, 80px gap to root below. */
+  insightStrip: -640,
+  /** Root note — sized for ~500px tall STRONG-seed body, 60px gap to BMC top. */
+  header: -360,
   /** BMC main grid. */
   top: 200,
   mid: 520,
