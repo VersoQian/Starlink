@@ -13,12 +13,13 @@ import { CanvasPerspectiveToggle } from './canvas-perspective-toggle'
 import { CanvasChatDock } from './canvas-chat-dock'
 import { CanvasCitationPanel } from './canvas-citation-panel'
 import { MemoryDrawer } from './memory-drawer'
+import { CanvasWizardPanel } from './canvas-wizard-panel'
 import { CanvasHitlBanner } from './canvas-hitl-banner'
 import { CanvasPromptDialog } from './canvas-prompt-dialog'
 import { CanvasThinkingOverlay } from './canvas-thinking-overlay'
 import { EvidenceDrawer } from './evidence-drawer'
 import { KbUploadModal } from './kb-upload-modal'
-import { Brain, Database } from 'lucide-react'
+import { Brain, Database, ListChecks } from 'lucide-react'
 import { WorkspaceShell } from './workspace-shell'
 import type { PendingDecisionRequest } from './workspace-shell-context'
 import './panels/register-default-panels'
@@ -134,6 +135,12 @@ export function CanvasPage({
   const [citationOpen, setCitationOpen] = useState(false)
   const [kbModalOpen, setKbModalOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
+  // Inline AI wizard — auto-opens when URL has ?wizard=1 (link from /chat
+  // home CTA). Manual toggle available via "AI 引导" button on left rail.
+  const [wizardOpen, setWizardOpen] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return new URLSearchParams(window.location.search).get('wizard') === '1'
+  })
   // Conflict highlight is now driven by the store's focusedConflictId so
   // both the canvas (edge click) and the renderer chips
   // ([[critic:conflictId]] in report-writer output) can request the same
@@ -693,6 +700,18 @@ export function CanvasPage({
                 <Brain className="h-4 w-4" strokeWidth={1.75} />
                 <span className="font-body text-[11px] font-semibold">记忆 · Memory</span>
               </button>
+              {/* Inline 7-step wizard — replaces the standalone /wizard
+                  page UX so user can see canvas grow as they answer.
+                  Auto-opens when URL has ?wizard=1 (link from chat home). */}
+              <button
+                type="button"
+                onClick={() => setWizardOpen(true)}
+                className="absolute bottom-6 left-[330px] z-20 flex h-12 items-center gap-2 rounded-full bg-white px-4 shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue hover:border-stratum-blue/40 transition-colors pointer-events-auto"
+                aria-label="结构化向导"
+              >
+                <ListChecks className="h-4 w-4" strokeWidth={1.75} />
+                <span className="font-body text-[11px] font-semibold">AI 引导 · 7 步</span>
+              </button>
             </>
           ) : null}
         </div>
@@ -727,6 +746,11 @@ export function CanvasPage({
         <MemoryDrawer
           open={memoryOpen}
           onClose={() => setMemoryOpen(false)}
+          workspaceId={workspaceId}
+        />
+        <CanvasWizardPanel
+          open={wizardOpen}
+          onClose={() => setWizardOpen(false)}
           workspaceId={workspaceId}
         />
       </div>

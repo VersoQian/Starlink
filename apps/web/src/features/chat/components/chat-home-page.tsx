@@ -260,7 +260,7 @@ export function ChatHomePage() {
                 </p>
               </button>
               <a
-                href="/wizard"
+                href="/canvas/proj-001?wizard=1"
                 className="text-left rounded-xl border border-stratum-line bg-white px-4 py-3 shadow-sm transition-all hover:border-stratum-blue/40 hover:shadow-md hover:-translate-y-0.5"
               >
                 <ListChecks className="mb-1.5 h-4 w-4 text-stratum-blue" strokeWidth={1.75} />
@@ -268,7 +268,7 @@ export function ChatHomePage() {
                   7 步结构化向导
                 </p>
                 <p className="mt-0.5 font-body text-[11px] text-stratum-muted leading-relaxed">
-                  按客户/价值/收入逐步问，每步抽一个 BMC 节点
+                  AI 在画布旁边逐步问，每步把答案抽成 insight 节点
                 </p>
               </a>
               <a
