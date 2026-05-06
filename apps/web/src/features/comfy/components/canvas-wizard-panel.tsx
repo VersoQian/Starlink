@@ -65,7 +65,7 @@ const PROCESS_WIZARD_STEP = /* GraphQL */ `
 const START_CONVERSATION = /* GraphQL */ `
   mutation StartConversationFromWizard($workspaceId: ID!, $question: String!) {
     startConversation(workspaceId: $workspaceId, question: $question) {
-      conversationId
+      metadata { id }
     }
   }
 `

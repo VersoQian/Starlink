@@ -87,7 +87,7 @@ const WIZARD_CHAT_MUTATION = /* GraphQL */ `
 const WIZARD_CHAT_START_CONVERSATION = /* GraphQL */ `
   mutation StartConversationFromChatWizard($workspaceId: ID!, $question: String!) {
     startConversation(workspaceId: $workspaceId, question: $question) {
-      conversationId
+      metadata { id }
     }
   }
 `
