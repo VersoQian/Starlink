@@ -92,6 +92,57 @@ const SYSTEM_PROMPT = `你是一个商业模型分析助手。我会给你 7 个
 
 只引用 KB 中确实存在的片段；不要编造。citations 最多 2 条，snippet 必须是 KB 原文。`
 
+/**
+ * Module-scope helpers exported for unit testing. Strict pure functions
+ * — no side effects, no I/O. Used internally by WizardPrefillService.
+ */
+
+export function parsePrefillReply(raw: string): { items: PrefillItem[] } | null {
+  if (!raw) return null
+  // Strip markdown code fences if present.
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  try {
+    const parsed = JSON.parse(cleaned) as { items?: unknown[] }
+    if (!Array.isArray(parsed.items)) return null
+    return { items: parsed.items as PrefillItem[] }
+  } catch {
+    // Try to extract first {...} JSON block.
+    const m = cleaned.match(/\{[\s\S]*\}/)
+    if (!m) return null
+    try {
+      const parsed = JSON.parse(m[0]) as { items?: unknown[] }
+      if (!Array.isArray(parsed.items)) return null
+      return { items: parsed.items as PrefillItem[] }
+    } catch {
+      return null
+    }
+  }
+}
+
+export function normalisePrefillItem(raw: unknown): PrefillItem {
+  const r = raw as Partial<PrefillItem>
+  const status = r.status === 'covered' || r.status === 'partial' ? r.status : 'absent'
+  const draftAnswer = typeof r.draftAnswer === 'string' ? r.draftAnswer.slice(0, 600) : ''
+  const confidence = typeof r.confidence === 'number'
+    ? Math.max(0, Math.min(1, r.confidence))
+    : 0
+  const citations = Array.isArray(r.citations)
+    ? r.citations
+        .filter((c): c is PrefillCitation =>
+          !!c && typeof (c as PrefillCitation).docId === 'string' && typeof (c as PrefillCitation).snippet === 'string'
+        )
+        .slice(0, 2)
+        .map((c) => ({ docId: c.docId, snippet: c.snippet.slice(0, 200) }))
+    : []
+  return {
+    step: typeof r.step === 'string' ? r.step : '',
+    status,
+    draftAnswer,
+    citations,
+    confidence
+  }
+}
+
 interface DepsLike {
   llm: LLMClient
 }
@@ -183,7 +234,7 @@ export class WizardPrefillService {
         ],
         temperature: 0.1
       })
-      parsed = this.parseLlmReply(response.content ?? '')
+      parsed = parsePrefillReply(response.content ?? '')
     } catch (err) {
       auditLogger.warn({
         action: 'wizard-prefill.llm-failed',
@@ -207,7 +258,7 @@ export class WizardPrefillService {
     if (parsed?.items) {
       for (const item of parsed.items) {
         if (stepIds.includes(item.step)) {
-          itemsMap.set(item.step, this.normaliseItem(item))
+          itemsMap.set(item.step, normalisePrefillItem(item))
         }
       }
     }
@@ -264,51 +315,6 @@ export class WizardPrefillService {
     return sections.join('\n')
   }
 
-  private parseLlmReply(raw: string): { items: PrefillItem[] } | null {
-    if (!raw) return null
-    // Strip markdown code fences if present.
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-    try {
-      const parsed = JSON.parse(cleaned) as { items?: unknown[] }
-      if (!Array.isArray(parsed.items)) return null
-      return { items: parsed.items as PrefillItem[] }
-    } catch {
-      // Try to extract first {...} JSON block.
-      const m = cleaned.match(/\{[\s\S]*\}/)
-      if (!m) return null
-      try {
-        const parsed = JSON.parse(m[0]) as { items?: unknown[] }
-        if (!Array.isArray(parsed.items)) return null
-        return { items: parsed.items as PrefillItem[] }
-      } catch {
-        return null
-      }
-    }
-  }
-
-  private normaliseItem(raw: unknown): PrefillItem {
-    const r = raw as Partial<PrefillItem>
-    const status = r.status === 'covered' || r.status === 'partial' ? r.status : 'absent'
-    const draftAnswer = typeof r.draftAnswer === 'string' ? r.draftAnswer.slice(0, 600) : ''
-    const confidence = typeof r.confidence === 'number'
-      ? Math.max(0, Math.min(1, r.confidence))
-      : 0
-    const citations = Array.isArray(r.citations)
-      ? r.citations
-          .filter((c): c is PrefillCitation =>
-            !!c && typeof (c as PrefillCitation).docId === 'string' && typeof (c as PrefillCitation).snippet === 'string'
-          )
-          .slice(0, 2)
-          .map((c) => ({ docId: c.docId, snippet: c.snippet.slice(0, 200) }))
-      : []
-    return {
-      step: typeof r.step === 'string' ? r.step : '',
-      status,
-      draftAnswer,
-      citations,
-      confidence
-    }
-  }
 }
 
 // Avoid unused-import warning for listKbBindingsForAgent — referenced in
