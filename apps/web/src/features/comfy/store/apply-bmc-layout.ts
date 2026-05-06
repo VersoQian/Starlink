@@ -14,29 +14,54 @@
  *
  * Header strip (above row 1): root + insight notes.
  * Right column: agent avatars (market / product / finance).
- * Below bottom row: critic-output conflict-alert nodes, horizontally
- * distributed (5 per row, wraps to next row at index ≥ 5).
+ * Below bottom row: critic-output conflict-alert nodes.
  *
- * The card width is 340px, gap is 60px → cell column starts at:
+ * Card widths (max measured at runtime):
+ *   - BMC card:    340px wide × ~300px tall
+ *   - agent avatar: 360px × ~216px
+ *   - insight:     360px × ~200px
+ *   - report card: 420px × ~200px
+ *   - conflict:    320px × ~280px
+ *   - data-source: 340px × ~200px
+ *
+ * The BMC grid:
  *   col 0: x=80, col 1: x=480, col 2: x=880, col 3: x=1280, col 4: x=1680.
- * Row 1: y=200, row 2: y=520, row 3: y=900, conflicts: y=1280.
+ *
+ * COLLISION-AVOIDANCE STRATEGY (P-fix · 2026-05-06):
+ *   - Root sits ALONE at x=COL[2]=880, y=-120 (centre of header band).
+ *   - Insight strip uses 4 explicit X slots that SKIP the centre column
+ *     so insights never sit on top of root.
+ *   - Report card row uses 3 explicit X slots that also skip centre.
+ *   - When more than 4 insights / 3 reports exist, overflow goes to the
+ *     overflow band BELOW the conflict zone (rather than wrapping up
+ *     and racing the report band for vertical real estate).
+ *   - Avatar rail at x=COL[4]+460=2140 has its own column; nothing else
+ *     uses it.
+ *   - Data-source nodes stack BELOW avatars in the same right rail.
+ *   - Conflicts in 5×N grid below BMC, row height 320 to fit tall bodies.
  */
 
 import type { Node } from 'reactflow'
 
 const COL = [80, 480, 880, 1280, 1680] as const
+
 const ROW = {
-  /** Top-most band: the 420px-wide report-card lives here, alone. */
-  reportTop: -480,
-  /** Insight strip: synthesizer / orchestrator notes, horizontally chained. */
-  insightStrip: -260,
-  /** Root note + (deprecated) header band. */
+  /** Top-most band: report cards. 200px tall + 40px gap → next row at -780. */
+  reportTop: -540,
+  /** Insight strip below report band. */
+  insightStrip: -280,
+  /** Root note + (deprecated) header band — alone at COL[2]. */
   header: -120,
+  /** BMC main grid. */
   top: 200,
   mid: 520,
   bottom: 900,
   /** Conflict-alert row(s) live below the BMC bottom row. */
   conflicts: 1300,
+  /** Overflow band — for insights / reports that exceed their primary
+   *  slot count. Sits well below the assumed conflict footprint
+   *  (3 conflict rows × 320 = 960 → conflicts may extend to ~2260 max). */
+  overflow: 2400,
 } as const
 
 /** Vertical gap when conflicts wrap to a second row.
@@ -45,8 +70,23 @@ const ROW = {
  */
 const CONFLICT_ROW_HEIGHT = 320
 
-/** Insight strip horizontal pitch (360px wide + 40px gap). */
-const INSIGHT_PITCH = 400
+/** Overflow band horizontal pitch + vertical pitch. */
+const OVERFLOW_PITCH_X = 400
+const OVERFLOW_ROW_HEIGHT = 240
+
+/** Insight strip X slots — explicit list that SKIPS COL[2]=880 (root's
+ *  column) and stops at COL[4] before the avatar rail (COL[4]+460).
+ *  Result: at most 4 insights in the primary band; 5th+ overflows
+ *  below conflicts (no upward wrap that would collide with reports).
+ */
+const INSIGHT_X_SLOTS = [COL[0], COL[1], COL[3], COL[4]] as const
+
+/** Report card X slots — 420px wide cards need 460px pitch. With centre
+ *  column skipped + avatar rail off-limits, 3 slots fit cleanly:
+ *    slot 0: 80–500, slot 1: 540–960 (skip 880 root), slot 2: 1280–1700.
+ *  Beyond 3 reports, overflow below.
+ */
+const REPORT_X_SLOTS = [COL[0], COL[1] + 60, COL[3]] as const
 
 /** Approximate BMC bounding rect — used to shove unpositioned data-source
  *  nodes off the canvas main grid when the server doesn't pin them.
@@ -71,7 +111,7 @@ const POSITION_MAP: Record<string, { x: number; y: number }> = {
   'finance-cost-structure':        { x: COL[0] + 200, y: ROW.bottom }, // COST mid
   'finance-revenue-streams':       { x: COL[2] + 200, y: ROW.bottom }, // REV mid
 
-  // Right rail — agent avatars
+  // Right rail — agent avatars (their own column at x=2140, no neighbour)
   'avatar-market':                 { x: COL[4] + 460, y: ROW.top },
   'avatar-product':                { x: COL[4] + 460, y: ROW.mid },
   'avatar-finance':                { x: COL[4] + 460, y: ROW.bottom },
@@ -86,12 +126,31 @@ const isConflictNode    = (id: string) => id.startsWith('conflict-')
 const isInsightNode     = (id: string) => id.startsWith('insight-')
 const isReportNode      = (id: string) => id.startsWith('report-')
 const isDataSourceNode  = (id: string) => id.startsWith('data-source-') || id.startsWith('ds-')
+/** Mention-router output nodes (@critic / @synthesizer / @opponent /
+ *  @moderator / @general-responder etc.). They share the same visual
+ *  shape as insight-note but historically had unique id prefixes that
+ *  fell through `applyBmcLayout`'s match list, ending up at server-issued
+ *  positions that piled on top of the BMC cells.
+ */
+const isMentionNode = (id: string) =>
+  id.startsWith('mention-')
+  || id.startsWith('general-response-')
+  || id.startsWith('opponent-')
+  || id.startsWith('moderator-')
+  || id.startsWith('synthesizer-')
+  || id.startsWith('critic-')
+  || id.startsWith('deep-research-')
 
 export function applyBmcLayout<T extends Node>(nodes: T[]): T[] {
   let conflictOffset = 0
   let insightOffset = 0
-  let dataSourceOffset = 0
   let reportOffset = 0
+  let dataSourceOffset = 0
+  /** Combined overflow counter for insights + reports that exceed
+   *  their primary band's slot count — they all share the overflow
+   *  band below conflicts. Sharing the counter keeps the overflow
+   *  grid contiguous (no gaps). */
+  let overflowOffset = 0
 
   return nodes.map((node) => {
     const pos = POSITION_MAP[node.id]
@@ -99,29 +158,42 @@ export function applyBmcLayout<T extends Node>(nodes: T[]): T[] {
       return { ...node, position: pos }
     }
     if (matchHeader(node.id)) {
-      // Root note: above BMC top row, horizontally centred over the canvas.
+      // Root note: alone at COL[2], y=-120. Insight strip explicitly
+      // skips COL[2] so this position never collides.
       return { ...node, position: { x: COL[2], y: ROW.header } }
     }
+
     if (isReportNode(node.id)) {
-      // Report card is the comprehensive summary product. Pinned to its own
-      // top-most band so it doesn't compete with insights or root.
-      // 420px wide; multiple reports (re-generations) stack horizontally
-      // with 460px pitch (420 + 40 gap) starting at COL[1].
-      const x = COL[1] + reportOffset * 460
-      reportOffset += 1
-      return {
-        ...node,
-        position: { x, y: ROW.reportTop }
+      if (reportOffset < REPORT_X_SLOTS.length) {
+        const x = REPORT_X_SLOTS[reportOffset]
+        reportOffset += 1
+        return { ...node, position: { x, y: ROW.reportTop } }
       }
+      // Overflow: 4th+ report goes below conflicts.
+      const i = overflowOffset++
+      return placeOverflow(node, i)
     }
+
     if (isInsightNode(node.id)) {
-      // Insight strip: horizontally chained, between report-card and root.
-      // Starts at COL[0] so the leftmost insight aligns with the BMC grid
-      // origin; each subsequent insight steps 400px right.
-      const x = COL[0] + insightOffset * INSIGHT_PITCH
-      insightOffset += 1
-      return { ...node, position: { x, y: ROW.insightStrip } }
+      if (insightOffset < INSIGHT_X_SLOTS.length) {
+        const x = INSIGHT_X_SLOTS[insightOffset]
+        insightOffset += 1
+        return { ...node, position: { x, y: ROW.insightStrip } }
+      }
+      const i = overflowOffset++
+      return placeOverflow(node, i)
     }
+
+    if (isMentionNode(node.id)) {
+      // Mention-router output (@critic / @opponent / @moderator / etc.)
+      // — visually similar to insight-note but tagged separately so we
+      // can keep them out of the primary insight band when the user
+      // fires off many mentions in one session. They go straight to
+      // the overflow band.
+      const i = overflowOffset++
+      return placeOverflow(node, i)
+    }
+
     if (isConflictNode(node.id)) {
       // Conflict row(s) below bottom — 5 columns matching BMC top row,
       // wrap to second row at index ≥ 5. Row height widened to 320px to
@@ -137,10 +209,13 @@ export function applyBmcLayout<T extends Node>(nodes: T[]): T[] {
         }
       }
     }
+
     if (isDataSourceNode(node.id)) {
-      // Data-source nodes: pin to the right rail BELOW the avatar stack so
-      // they don't drift into the BMC area. If the server gave a position
-      // outside the BMC rect, trust it; otherwise stack vertically here.
+      // Data-source nodes: pin to the right rail BELOW the avatar stack
+      // (avatars occupy y=200/520/900). Stack at COL[4]+460 starting at
+      // y=ROW.bottom + 320 ≈ 1220 with 200px pitch.
+      // If the server already gave a position outside the BMC rect AND
+      // outside the avatar+overflow column, trust it.
       const sx = node.position?.x
       const sy = node.position?.y
       const hasServerPos = typeof sx === 'number' && typeof sy === 'number'
@@ -151,7 +226,23 @@ export function applyBmcLayout<T extends Node>(nodes: T[]): T[] {
       dataSourceOffset += 1
       return { ...node, position: { x: COL[4] + 460, y } }
     }
+
     // Unmatched — leave server-issued position untouched.
     return node
   })
+}
+
+/** Place an overflow node (excess insight or report) in a 5-wide grid
+ *  below conflicts. Grid pitch is 400px × 240px so neither cell type
+ *  (max 360 / 200) overlaps neighbours. */
+function placeOverflow<T extends Node>(node: T, index: number): T {
+  const col = index % 5
+  const row = Math.floor(index / 5)
+  return {
+    ...node,
+    position: {
+      x: COL[0] + col * OVERFLOW_PITCH_X,
+      y: ROW.overflow + row * OVERFLOW_ROW_HEIGHT
+    }
+  }
 }
