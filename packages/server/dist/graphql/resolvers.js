@@ -319,7 +319,7 @@ export const resolvers = {
     Mutation: {
         startConversation: async (_, args, ctx) => {
             return await resolveOrThrow(async () => {
-                const record = await ctx.conversationStore.startConversation(args.workspaceId, ctx.userId, args.question, args.kbId ?? undefined);
+                const record = await ctx.conversationStore.startConversation(args.workspaceId, ctx.userId, args.question, args.kbId ?? undefined, { headless: args.headless === true });
                 const metadata = conversationMetadataSchema.parse(record.metadata);
                 return {
                     metadata: {
@@ -391,6 +391,39 @@ export const resolvers = {
          * extractor's own dedup + confidence-update logic prevents double-
          * counting when this is called repeatedly in quick succession.
          */
+        /**
+         * Sprint 1.1 · KB-aware wizard pre-read.
+         *
+         * Authorization: workspace.read (KB visibility filter inside the
+         * service respects per-user private/workspace/global rules).
+         *
+         * Rate-limited 1/30s/user — fan-out search + 1 LLM call costs ~5K
+         * tokens; users normally fire once at wizard start.
+         */
+        prefillWizardFromKb: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                if (!ctx.userId) {
+                    throw new GraphQLError('prefillWizardFromKb: authentication required', {
+                        extensions: { code: 'UNAUTHENTICATED' }
+                    });
+                }
+                await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read');
+                assertOperationRateLimit(ctx.userId, 'prefillWizardFromKb', {
+                    minIntervalMs: 30_000
+                });
+                const service = ctx.wizardPrefillService;
+                if (!service) {
+                    throw new GraphQLError('prefillWizardFromKb: service not configured', {
+                        extensions: { code: 'INTERNAL_SERVER_ERROR' }
+                    });
+                }
+                return await service.prefill({
+                    workspaceId: args.workspaceId,
+                    userId: ctx.userId,
+                    kbId: args.kbId ?? undefined
+                });
+            });
+        },
         refreshUserSkills: async (_, args, ctx) => {
             return await resolveOrThrow(async () => {
                 if (!ctx.userId) {

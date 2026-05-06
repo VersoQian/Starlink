@@ -34,6 +34,28 @@ const AGENT_DISPATCH_TICKS: ReadonlyArray<string> = [
   'Synthesizer · 整合输出',
 ]
 
+/**
+ * Sprint 3.3 · map AGENT_TYPES enum value (e.g. 'Market_Agent') to a
+ * short Chinese display label. Falls back to a humanised version of the
+ * id when an unmapped agent emits.
+ */
+const AGENT_DISPLAY: Record<string, string> = {
+  Market_Agent: 'Market Agent',
+  Product_Agent: 'Product Agent',
+  Finance_Agent: 'Finance Agent',
+  Compliance_Agent: 'Compliance Agent',
+  Adversarial_Critic: 'Critic',
+  Orchestrator: 'Supervisor',
+  Synthesizer: 'Synthesizer',
+  Report_Writer: 'Report Writer'
+}
+
+function humanizeAgent(raw: string | null): string | null {
+  if (!raw) return null
+  if (AGENT_DISPLAY[raw]) return AGENT_DISPLAY[raw]
+  return raw.replace(/_/g, ' ')
+}
+
 interface SuggestionAction {
   /** Short imperative label, e.g. "查看冲突" */
   label: string
@@ -71,8 +93,14 @@ export function CanvasLiveCoach(props: Props) {
   const workflowStage = useComfyStore((s) => s.workflowStage)
   const macraNodes = useComfyStore((s) => s.macraNodes)
   const setChatInput = useComfyStore((s) => s.setChatInput)
+  const currentAgent = useComfyStore((s) => s.currentAgent)
+  const roundNumber = useComfyStore((s) => s.roundNumber)
+  const maxRounds = useComfyStore((s) => s.maxRounds)
+  const lastDeltaAt = useComfyStore((s) => s.lastDeltaAt)
+  const lastCompletionAt = useComfyStore((s) => s.lastCompletionAt)
   const [tickIndex, setTickIndex] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
 
   // Derive canvas content stats so the coach can suggest the right
   // next step based on what's already there. Cheap recomputation —
@@ -97,24 +125,93 @@ export function CanvasLiveCoach(props: Props) {
     return () => clearInterval(id)
   }, [workflowStage])
 
+  // Sprint 3.3 · advance "now" so quiet-stream stall detection ticks
+  // (during live work) and Sprint 4.4 · so completion banner expires
+  // cleanly after 12s.
+  useEffect(() => {
+    const isLive = workflowStage === 'thinking' || workflowStage === 'revising'
+    const completionAgeMs = lastCompletionAt ? Date.now() - lastCompletionAt : Infinity
+    const showingBanner =
+      (workflowStage === 'output' || workflowStage === 'cancelled') &&
+      completionAgeMs < 12_000
+    if (!isLive && !showingBanner) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [workflowStage, lastCompletionAt])
+
   const coachState: CoachState = useMemo(() => {
-    // Live ticker takes precedence regardless of canvas content.
+    // Sprint 3.3 · live ticker — prefer real agent + round signal,
+    // fall back to dimension cycle when stream hasn't emitted yet
+    // or has gone quiet (>8s since last delta = stall).
+    const agentLabel = humanizeAgent(currentAgent)
+    const sinceDeltaMs = lastDeltaAt ? now - lastDeltaAt : Infinity
+    const isQuiet = sinceDeltaMs > 8_000
+    const elapsedSec = lastDeltaAt && isQuiet ? Math.round(sinceDeltaMs / 1000) : null
+
     if (workflowStage === 'thinking') {
+      const round = roundNumber > 0 ? roundNumber : 1
+      const kicker = `LIVE · 第 ${round}/${maxRounds} 轮`
+      if (agentLabel && !isQuiet) {
+        return {
+          kicker,
+          headline: `${agentLabel} · 输出中`,
+          detail: `已 ${stats.bmc}/9 cells · ${stats.conflicts} 冲突 · ${stats.insights} 洞察`,
+          actions: []
+        }
+      }
+      // Stream silent or hasn't emitted yet — fall back to friendly ticker
       return {
-        kicker: 'LIVE · 8 AGENT 协作中',
-        headline: AGENT_DISPATCH_TICKS[tickIndex],
-        detail: '画布会逐步浮现节点；不要切走。',
+        kicker,
+        headline: agentLabel
+          ? `${agentLabel} · 计算中（${elapsedSec ?? '…'}s）`
+          : AGENT_DISPATCH_TICKS[tickIndex],
+        detail: '画布会逐步浮现节点；不要切走',
         actions: []
       }
     }
     if (workflowStage === 'revising') {
+      const round = roundNumber > 0 ? roundNumber : 1
       return {
-        kicker: 'LIVE · 修订冲突',
-        headline: '正在重写节点修复冲突',
+        kicker: `LIVE · 第 ${round}/${maxRounds} 轮 · 修订`,
+        headline: agentLabel ? `${agentLabel} · 修订中` : '正在重写节点修复冲突',
         detail: 'Critic 找到的问题正在被对应 agent 改正',
         actions: []
       }
     }
+    // Sprint 4.4 · transient completion banner — shows for 12s after a
+    // live stream wraps. Highlights what was added so the user notices
+    // the canvas changed (especially after they tab-away and back).
+    const completionAgeMs = lastCompletionAt ? now - lastCompletionAt : Infinity
+    const justCompleted =
+      (workflowStage === 'output' || workflowStage === 'cancelled') &&
+      completionAgeMs < 12_000
+    if (justCompleted && stats.total > 0) {
+      const parts: string[] = []
+      if (stats.bmc > 0) parts.push(`${stats.bmc} cells`)
+      if (stats.conflicts > 0) parts.push(`${stats.conflicts} 冲突`)
+      if (stats.insights > 0) parts.push(`${stats.insights} 洞察`)
+      if (stats.reports > 0) parts.push(`${stats.reports} 报告`)
+      const summary = parts.length > 0 ? parts.join(' · ') : '画布已更新'
+      return {
+        kicker: workflowStage === 'cancelled' ? 'STOPPED · 已停止' : '✓ 完成 · 本轮新增',
+        headline: summary,
+        detail: `共 ${roundNumber} 轮协作 · 点开任一节点查看详情`,
+        actions: [
+          stats.reports === 0 && stats.bmc >= 9
+            ? {
+                label: '生成报告',
+                onClick: () => {
+                  setChatInput('@report-writer 基于当前画布生成完整商业报告')
+                  props.onOpenChat()
+                },
+                severity: 'primary' as const,
+                icon: Sparkles
+              }
+            : { label: '查看画布', onClick: props.onOpenChat, severity: 'info' as const, icon: ArrowRight }
+        ]
+      }
+    }
+
     if (workflowStage === 'review') {
       return {
         kicker: 'HITL · 等你拍板',
@@ -207,7 +304,7 @@ export function CanvasLiveCoach(props: Props) {
         { label: '打开聊天', onClick: props.onOpenChat, severity: 'primary', icon: ArrowRight }
       ]
     }
-  }, [workflowStage, stats, tickIndex, setChatInput, props])
+  }, [workflowStage, stats, tickIndex, setChatInput, props, currentAgent, roundNumber, maxRounds, lastDeltaAt, lastCompletionAt, now])
 
   if (collapsed) {
     return (

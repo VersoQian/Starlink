@@ -369,6 +369,27 @@ interface MacraState {
   roundNumber: number
   maxRounds: number
   pendingInterrupt: { decision: string; conflicts: unknown[] } | null
+  /**
+   * Sprint 3.3 · Coach real progress.
+   * The agent that emitted the most-recent node delta in the current
+   * stream — coach shows this instead of cycling a static ticker.
+   * Set inside applyDelta when new nodes arrive; cleared on workflow
+   * completion / cancel / fresh session.
+   */
+  currentAgent: string | null
+  /**
+   * Sprint 3.3 · Last node delta timestamp (ms epoch) — Coach uses
+   * this to decide whether to show "<agent> 计算中" vs falling back
+   * to the heartbeat ticker when the stream goes quiet for >8s.
+   */
+  lastDeltaAt: number | null
+  /**
+   * Sprint 4.4 · Timestamp (ms epoch) when the most recent live
+   * stream transitioned into a terminal state (output/cancelled/
+   * failed). Coach uses this to show a transient completion banner
+   * for ~12s after pipeline ends.
+   */
+  lastCompletionAt: number | null
 
   // 详情面板状态
   detailPanel: {
@@ -558,6 +579,9 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   roundNumber: 0,
   maxRounds: 3,
   pendingInterrupt: null,
+  currentAgent: null,
+  lastDeltaAt: null,
+  lastCompletionAt: null,
   knowledgeEvidence: [],
   citations: {},
   evidenceDrawer: {
@@ -644,8 +668,16 @@ export const useComfyStore = create<MacraState>((set, get) => ({
       return
     }
 
+    // Sprint 3.3 · clear currentAgent when leaving live states.
+    const isLeavingLive =
+      (currentStage === 'thinking' || currentStage === 'revising') &&
+      stage !== 'thinking' &&
+      stage !== 'revising'
+
     set((state) => ({
       workflowStage: stage,
+      currentAgent: isLeavingLive ? null : state.currentAgent,
+      lastCompletionAt: isLeavingLive ? Date.now() : state.lastCompletionAt,
       workflowMeta: {
         startedAt:
           stage === 'thinking'
@@ -1353,7 +1385,9 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       nodeDataMap: new Map(),
       macraNodes: new Map(),
       roundNumber: 0,
-      pendingInterrupt: null
+      pendingInterrupt: null,
+      currentAgent: null,
+      lastDeltaAt: null
     })
 
     const workspaceId = get().workspaceId
@@ -1444,6 +1478,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         set((state) => {
           const newMacraNodes = new Map(state.macraNodes)
           let detectedRound = state.roundNumber
+          let detectedAgent: string | null = state.currentAgent
 
           delta.removedNodeIds?.forEach((nodeId) => {
             newMacraNodes.delete(nodeId)
@@ -1465,6 +1500,12 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
                   }
                 }
               }
+              // Sprint 3.3 · capture most-recent emitting agent for Coach.
+              // agentType is the AGENT_TYPES enum value (e.g. 'Market_Agent');
+              // Coach maps this to display name.
+              if (typeof macraData.agentType === 'string' && macraData.agentType.length > 0) {
+                detectedAgent = macraData.agentType
+              }
             }
           })
 
@@ -1478,7 +1519,9 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               edgeUpdates
             ),
             macraNodes: newMacraNodes,
-            roundNumber: detectedRound
+            roundNumber: detectedRound,
+            currentAgent: detectedAgent,
+            lastDeltaAt: Date.now()
           }
         })
       }
@@ -2204,6 +2247,8 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       lastCriticRun: null,
       roundNumber: 0,
       pendingInterrupt: null,
+      currentAgent: null,
+      lastDeltaAt: null,
       knowledgeEvidence: [],
       citations: {},
       evidenceDrawer: {

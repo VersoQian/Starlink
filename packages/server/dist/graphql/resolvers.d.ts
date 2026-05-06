@@ -741,6 +741,7 @@ export declare const resolvers: {
             workspaceId: string;
             question: string;
             kbId?: string | null;
+            headless?: boolean | null;
         }, ctx: GraphQLContext) => Promise<{
             metadata: {
                 createdAt: string;
@@ -878,6 +879,19 @@ export declare const resolvers: {
          * extractor's own dedup + confidence-update logic prevents double-
          * counting when this is called repeatedly in quick succession.
          */
+        /**
+         * Sprint 1.1 · KB-aware wizard pre-read.
+         *
+         * Authorization: workspace.read (KB visibility filter inside the
+         * service respects per-user private/workspace/global rules).
+         *
+         * Rate-limited 1/30s/user — fan-out search + 1 LLM call costs ~5K
+         * tokens; users normally fire once at wizard start.
+         */
+        prefillWizardFromKb: (_: unknown, args: {
+            workspaceId: string;
+            kbId?: string | null;
+        }, ctx: GraphQLContext) => Promise<import("../services/wizard-prefill-service.js").WizardPrefillResult>;
         refreshUserSkills: (_: unknown, args: {
             workspaceId: string;
         }, ctx: GraphQLContext) => Promise<number>;

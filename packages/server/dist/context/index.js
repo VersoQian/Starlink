@@ -13,6 +13,8 @@ import { ExecutionStore } from '../application/execution-store.js';
 import { GraphCompiler } from '../engine/graph-compiler.js';
 import { GraphExecutor } from '../engine/graph-executor.js';
 import { UserSkillExtractor } from '../services/user-skill-extractor.js';
+import { WizardPrefillService } from '../services/wizard-prefill-service.js';
+import { LLMClient } from '../services/llm-client.js';
 import { createWorkspaceMemoryStore, setWorkspaceMemoryStore } from '../infrastructure/memory/workspace-memory-store.js';
 import { AuthError, authenticateConnectionParams, authenticateExpress } from '../middleware/auth.js';
 const conversationEventBus = createConversationEventBus();
@@ -39,6 +41,12 @@ setWorkspaceMemoryStore(createWorkspaceMemoryStore({ conversationMemoryStore: sh
 // fire-and-forget call site.
 const sharedUserSkillExtractor = new UserSkillExtractor({
     memoryStore: sharedConversationMemoryStore
+});
+// Sprint 1.1 · single shared WizardPrefillService. The LLM client picks
+// up the same env config used by the Socratic coach (DEEPSEEK_API_KEY /
+// LLM_API_KEY etc.); no new env knobs.
+const sharedWizardPrefillService = new WizardPrefillService({
+    llm: new LLMClient()
 });
 // Flow infrastructure (initialized lazily)
 const flowStore = new FlowStore();
@@ -95,7 +103,8 @@ export async function createContext({ req }) {
         executionStore,
         graphCompiler,
         graphExecutor,
-        userSkillExtractor: sharedUserSkillExtractor
+        userSkillExtractor: sharedUserSkillExtractor,
+        wizardPrefillService: sharedWizardPrefillService
     };
 }
 export async function createWsContext(connectionParams) {
@@ -123,7 +132,8 @@ export async function createWsContext(connectionParams) {
         executionStore,
         graphCompiler,
         graphExecutor,
-        userSkillExtractor: sharedUserSkillExtractor
+        userSkillExtractor: sharedUserSkillExtractor,
+        wizardPrefillService: sharedWizardPrefillService
     };
 }
 export function getTaskEventStore() {

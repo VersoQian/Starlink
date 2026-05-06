@@ -62,7 +62,17 @@ export class ConversationStore {
             ? (this.hitlEnabled ? new HitlApprovalStore() : null)
             : hitlApprovalStore;
     }
-    async startConversation(workspaceId, userId, question, kbId) {
+    async startConversation(workspaceId, userId, question, kbId, 
+    /**
+     * Sprint 1.3 · Headless mode. When true, all critic interrupts are
+     * auto-resolved with `[ACCEPTED]` so the pipeline doesn't hang
+     * waiting for human-in-the-loop input. Used by the in-chat wizard
+     * graduation path (no human in the loop) + scripted runs.
+     *
+     * The auto-accept happens at HitlApprovalStore level (resume directive
+     * pre-set so the next interrupt-resume cycle finds it immediately).
+     */
+    options = {}) {
         await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
         // DEC-5 soft-lock: refuse to start a second conversation while another
         // is still running in this workspace. Without this, the two graphs
@@ -128,7 +138,8 @@ export class ConversationStore {
             traceId: id,
             baseGraph: existingGraph,
             knowledgeEvidence,
-            contextPrompt: contextSnapshot.promptBlock
+            contextPrompt: contextSnapshot.promptBlock,
+            headless: options.headless === true
         });
         let initialized = false;
         try {
@@ -180,7 +191,8 @@ export class ConversationStore {
                 workspaceId,
                 userId,
                 conversationId: id,
-                initialized
+                initialized,
+                headless: options.headless === true
             });
         }, 0);
         return record;
@@ -628,7 +640,7 @@ export class ConversationStore {
         return true;
     }
     async runConversationStream(options) {
-        let { stream, record, workspaceId, userId, conversationId, initialized } = options;
+        let { stream, record, workspaceId, userId, conversationId, initialized, headless = false } = options;
         let currentGraph = record.graph;
         const emittedTurnNodeIds = new Set();
         let currentPhase = null;
@@ -782,6 +794,23 @@ export class ConversationStore {
                     continue;
                 }
                 if (update.type === 'interrupt') {
+                    // Sprint 1.3 · headless mode (wizard graduation, scripted runs):
+                    // skip the human wait. Auto-resolve as `[ACCEPTED]` so the
+                    // pipeline continues immediately. Avoids the 10-min HITL_APPROVAL_TIMEOUT_MS
+                    // stall per round when no human is at the keyboard.
+                    if (headless) {
+                        const directive = parseHitlDecision('[ACCEPTED]');
+                        if (directive.kind !== 'invalid') {
+                            this.businessLangGraphService.setHitlResumeDirective(conversationId, directive);
+                        }
+                        record.metadata = {
+                            ...record.metadata,
+                            status: 'running',
+                            updatedAt: new Date()
+                        };
+                        await this.sessionStore.updateConversation(conversationId, record);
+                        continue;
+                    }
                     if (this.hitlEnabled) {
                         const userDecision = await this.waitForDecisionApproval({
                             conversationId,

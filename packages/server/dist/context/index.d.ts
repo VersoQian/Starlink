@@ -7,6 +7,7 @@ import { ExecutionStore } from '../application/execution-store.js';
 import { GraphCompiler } from '../engine/graph-compiler.js';
 import { GraphExecutor } from '../engine/graph-executor.js';
 import { UserSkillExtractor } from '../services/user-skill-extractor.js';
+import { WizardPrefillService } from '../services/wizard-prefill-service.js';
 export type GraphQLContext = {
     conversationStore: ConversationStore;
     taskEventStore: TaskEventStore;
@@ -20,6 +21,8 @@ export type GraphQLContext = {
     graphExecutor?: GraphExecutor;
     /** P3 · UserSkillExtractor exposed for demand-mode mutation (refreshUserSkills). */
     userSkillExtractor?: UserSkillExtractor;
+    /** Sprint 1.1 · KB-aware wizard prefill service (prefillWizardFromKb). */
+    wizardPrefillService?: WizardPrefillService;
 };
 export declare function createContext({ req }: ExpressContextFunctionArgument): Promise<GraphQLContext>;
 export declare function createWsContext(connectionParams?: Record<string, unknown>): Promise<GraphQLContext>;

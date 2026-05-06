@@ -43,7 +43,19 @@ export declare class ConversationStore {
     private readonly hitlApprovalTimeoutMs;
     private hitlDecisionUnsubscribe;
     constructor({ eventBus, runtimeRepository, businessLangGraphService, bmcFlowAdapter, toolRegistry, bmcFlowRuntime, hitlApprovalStore }: ConversationStoreDeps);
-    startConversation(workspaceId: string, userId: string, question: string, kbId?: string): Promise<ConversationRecord>;
+    startConversation(workspaceId: string, userId: string, question: string, kbId?: string, 
+    /**
+     * Sprint 1.3 · Headless mode. When true, all critic interrupts are
+     * auto-resolved with `[ACCEPTED]` so the pipeline doesn't hang
+     * waiting for human-in-the-loop input. Used by the in-chat wizard
+     * graduation path (no human in the loop) + scripted runs.
+     *
+     * The auto-accept happens at HitlApprovalStore level (resume directive
+     * pre-set so the next interrupt-resume cycle finds it immediately).
+     */
+    options?: {
+        headless?: boolean;
+    }): Promise<ConversationRecord>;
     getConversation(id: string, userId?: string): Promise<ConversationRecord | null>;
     listConversationRuntimeEvents(workspaceId: string, userId: string, conversationId?: string): Promise<ConversationEvent[]>;
     listConversationSessions(workspaceId: string, userId: string, limit?: number): Promise<{
