@@ -559,6 +559,13 @@ export const typeDefs = gql`
     existing behaviour).
     """
     startConversation(workspaceId: ID!, question: String!, kbId: ID, headless: Boolean): StartConversationPayload!
+    """
+    Reset the workspace canvas to empty. Used by the wizard graduation
+    path so a new BMC pipeline writes onto a clean slate instead of
+    piling on top of an old session's nodes (BMC + insights + mentions
+    + report cards). Returns true on success.
+    """
+    clearWorkspaceCanvas(workspaceId: ID!): Boolean!
     approveDecision(conversationId: ID!, decision: String): Boolean!
     # Phase 2.5 F5 · HITL resume; decision must begin with [ACCEPTED] or [EDIT_PLAN]:...
     resumeConversation(conversationId: ID!, decision: String!): ResumeConversationPayload!

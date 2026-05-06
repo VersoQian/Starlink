@@ -826,6 +826,9 @@ export declare const resolvers: {
                 }[];
             }[];
         }>;
+        clearWorkspaceCanvas: (_: unknown, args: {
+            workspaceId: string;
+        }, ctx: GraphQLContext) => Promise<boolean>;
         approveDecision: (_: unknown, args: {
             conversationId: string;
             decision?: string | null;

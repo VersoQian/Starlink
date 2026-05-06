@@ -1023,12 +1023,20 @@ export class ConversationStore {
         }
 
         if (update.type === 'interrupt') {
-          // Sprint 1.3 · headless mode (wizard graduation, scripted runs):
-          // skip the human wait. Auto-resolve as `[ACCEPTED]` so the
-          // pipeline continues immediately. Avoids the 10-min HITL_APPROVAL_TIMEOUT_MS
-          // stall per round when no human is at the keyboard.
+          // Sprint 1.3 + Issue 1 · headless mode (wizard graduation, scripted
+          // runs): skip the human wait. Auto-resolve as
+          // `[EDIT_PLAN]:auto-revise` so:
+          //   1. shouldHaltCriticLoop returns false → graph routes critic →
+          //      supervisor → agents for round 2 (auto-revision)
+          //   2. The supervisor sees an edit_plan directive with no dimension
+          //      and falls into auto-revision with the body as guidance preamble
+          // Sending [ACCEPTED] (the previous behavior) made the loop halt,
+          // which masked high-severity conflicts and prevented round 2 from
+          // ever firing. Avoids the 10-min HITL_APPROVAL_TIMEOUT_MS stall.
           if (headless) {
-            const directive = parseHitlDecision('[ACCEPTED]')
+            const directive = parseHitlDecision(
+              '[EDIT_PLAN]:auto-revise (headless graduation: re-run agents to address critic conflicts)'
+            )
             if (directive.kind !== 'invalid') {
               this.businessLangGraphService.setHitlResumeDirective(
                 conversationId,
@@ -1370,6 +1378,15 @@ export class ConversationStore {
     requiredPermission: 'workspace.read' | 'workspace.write' | 'workspace.publish' | 'workspace.manage'
   ) {
     return requireWorkspacePermission(userId, metadata, requiredPermission)
+  }
+
+  /**
+   * Public wrapper for the workspace.write permission check. Used by
+   * clearWorkspaceCanvas mutation (resolvers.ts) so a non-owner can't
+   * wipe someone else's canvas. Same path the private helper uses.
+   */
+  async assertWorkspaceWritePermission(workspaceId: string, userId: string): Promise<void> {
+    await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
   }
 
   private async assertWorkspacePermission(

@@ -41,6 +41,7 @@ import {
 import { buildUserSkillPrompt } from '../services/user-skill-prompt.js'
 import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
 import { parseHitlDecision } from '../application/hitl-resume.js'
+import { clearPersistedGraph } from '../application/canvas-persistence.js'
 
 // Lazy module-level singleton: constructed on first use, shares the same
 // `pool` (infrastructure/db/pool.ts) all other store consumers use, so no
@@ -449,6 +450,23 @@ export const resolvers = {
           knowledgeEvidence: record.knowledgeEvidence ?? [],
           citations: record.citations ?? []
         }
+      })
+    },
+    clearWorkspaceCanvas: async (
+      _: unknown,
+      args: { workspaceId: string },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        // Permission gate: caller must have workspace.write — uses the
+        // same path as other workspace-mutating ops via assertOpRateLimit
+        // and the conversation store's permission helper.
+        await ctx.conversationStore.assertWorkspaceWritePermission(
+          args.workspaceId,
+          ctx.userId
+        )
+        await clearPersistedGraph(args.workspaceId)
+        return true
       })
     },
     approveDecision: async (

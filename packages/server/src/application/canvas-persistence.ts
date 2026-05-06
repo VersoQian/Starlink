@@ -46,3 +46,20 @@ export async function persistCanvasGraph(graph: CanvasGraph): Promise<void> {
     [graph.workspaceId, JSON.stringify(graph.nodes), JSON.stringify(graph.edges)]
   )
 }
+
+/**
+ * Reset the workspace's persisted canvas to empty. Used when the user
+ * starts a new wizard graduation in a workspace that already has a BMC
+ * — without this, the new pipeline's nodes pile on top of the old session's
+ * insights / mention output / report-cards. Server-side delete avoids
+ * the "28 nodes in DOM after reload" duplicate-accumulation problem
+ * that client-side `archiveCurrentCanvasForFreshSession` (in-memory only)
+ * couldn't solve.
+ */
+export async function clearPersistedGraph(workspaceId: string): Promise<void> {
+  await ensureCanvasGraphTable()
+  await pool.query(
+    `UPDATE canvas_graphs SET nodes = '[]'::jsonb, edges = '[]'::jsonb, updated_at = NOW() WHERE workspace_id = $1`,
+    [workspaceId]
+  )
+}

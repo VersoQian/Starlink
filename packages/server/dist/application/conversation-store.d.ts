@@ -150,6 +150,12 @@ export declare class ConversationStore {
      */
     private ensureHitlDecisionSubscription;
     private assertPermissionFromMetadata;
+    /**
+     * Public wrapper for the workspace.write permission check. Used by
+     * clearWorkspaceCanvas mutation (resolvers.ts) so a non-owner can't
+     * wipe someone else's canvas. Same path the private helper uses.
+     */
+    assertWorkspaceWritePermission(workspaceId: string, userId: string): Promise<void>;
     private assertWorkspacePermission;
     private assertConversationBelongsToWorkspace;
     private assertConversationBelongsToWorkspaceOrSession;

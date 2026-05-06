@@ -117,6 +117,12 @@ const WIZARD_CHAT_START_CONVERSATION = /* GraphQL */ `
   }
 `
 
+const CLEAR_WORKSPACE_CANVAS_MUTATION = /* GraphQL */ `
+  mutation ClearWorkspaceCanvas($workspaceId: ID!) {
+    clearWorkspaceCanvas(workspaceId: $workspaceId)
+  }
+`
+
 // Undo / redo: a snapshot is a tuple of the four canvas-level slots
 // that user actions can mutate. We deliberately exclude streaming /
 // network state (workflowStage, evidenceDrawer, citations) — those are
@@ -988,6 +994,17 @@ ${firstStep.description}${draftHint}
         // Sprint 1.5 · archive existing canvas nodes so the new BMC
         // doesn't visually pile up on top of stale ones.
         get().archiveCurrentCanvasForFreshSession()
+        // Issue 3 · server-side wipe — the client-side archive only
+        // hides nodes in this tab; on reload the server's persisted
+        // canvas brings them all back. Clear the canvas_graphs row so
+        // the new pipeline writes onto a clean slate. Best-effort: if
+        // the mutation fails we still proceed, just with leftovers.
+        try {
+          const { getGraphQLClient: gql } = await import('@/shared/lib/graphql-client')
+          await gql().request(CLEAR_WORKSPACE_CANVAS_MUTATION, { workspaceId })
+        } catch (clearErr) {
+          console.warn('[wizard] clearWorkspaceCanvas failed', clearErr)
+        }
         // Sprint 2.3 · STRONG seed framing — 7 答案是用户亲口确认的事
         // 实，agents 不能改写、只能扩展/反驳。这避免初始 BMC 输出偏离
         // 用户的实际意图。

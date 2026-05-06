@@ -794,12 +794,18 @@ export class ConversationStore {
                     continue;
                 }
                 if (update.type === 'interrupt') {
-                    // Sprint 1.3 · headless mode (wizard graduation, scripted runs):
-                    // skip the human wait. Auto-resolve as `[ACCEPTED]` so the
-                    // pipeline continues immediately. Avoids the 10-min HITL_APPROVAL_TIMEOUT_MS
-                    // stall per round when no human is at the keyboard.
+                    // Sprint 1.3 + Issue 1 · headless mode (wizard graduation, scripted
+                    // runs): skip the human wait. Auto-resolve as
+                    // `[EDIT_PLAN]:auto-revise` so:
+                    //   1. shouldHaltCriticLoop returns false → graph routes critic →
+                    //      supervisor → agents for round 2 (auto-revision)
+                    //   2. The supervisor sees an edit_plan directive with no dimension
+                    //      and falls into auto-revision with the body as guidance preamble
+                    // Sending [ACCEPTED] (the previous behavior) made the loop halt,
+                    // which masked high-severity conflicts and prevented round 2 from
+                    // ever firing. Avoids the 10-min HITL_APPROVAL_TIMEOUT_MS stall.
                     if (headless) {
-                        const directive = parseHitlDecision('[ACCEPTED]');
+                        const directive = parseHitlDecision('[EDIT_PLAN]:auto-revise (headless graduation: re-run agents to address critic conflicts)');
                         if (directive.kind !== 'invalid') {
                             this.businessLangGraphService.setHitlResumeDirective(conversationId, directive);
                         }
@@ -1078,6 +1084,14 @@ export class ConversationStore {
     assertPermissionFromMetadata(metadata, userId, requiredPermission) {
         return requireWorkspacePermission(userId, metadata, requiredPermission);
     }
+    /**
+     * Public wrapper for the workspace.write permission check. Used by
+     * clearWorkspaceCanvas mutation (resolvers.ts) so a non-owner can't
+     * wipe someone else's canvas. Same path the private helper uses.
+     */
+    async assertWorkspaceWritePermission(workspaceId, userId) {
+        await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
+    }
     async assertWorkspacePermission(workspaceId, userId, requiredPermission) {
         // Pass userId as seedOwner so that auto-created workspaces (URL
         // navigation to an unknown id) immediately give the requesting user
@@ -1162,7 +1176,8 @@ function parseMemoryKind(kind) {
         || kind === 'insight'
         || kind === 'constraint'
         || kind === 'summary'
-        || kind === 'canvas') {
+        || kind === 'canvas'
+        || kind === 'user-skill') {
         return kind;
     }
     throw new Error(`INVALID_MEMORY_KIND:${kind}`);
