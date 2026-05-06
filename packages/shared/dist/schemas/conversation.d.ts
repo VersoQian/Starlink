@@ -1400,6 +1400,41 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
         phase: "decision";
         occurredAt: string;
     };
+}>, z.ZodObject<{
+    type: z.ZodLiteral<"agent/subagent-progress">;
+    conversationId: z.ZodString;
+    payload: z.ZodObject<{
+        /** LangGraph namespace path; entries are `<parentNode>:<subgraphCheckpointId>`. */
+        ns: z.ZodArray<z.ZodString, "many">;
+        /** Subgraph-internal node that produced the update (e.g. 'invoke-agent', 'parse'). */
+        nodeName: z.ZodString;
+        /** Top-level keys of the subgraph state that changed. */
+        payloadKeys: z.ZodArray<z.ZodString, "many">;
+    }, "strip", z.ZodTypeAny, {
+        ns: string[];
+        nodeName: string;
+        payloadKeys: string[];
+    }, {
+        ns: string[];
+        nodeName: string;
+        payloadKeys: string[];
+    }>;
+}, "strip", z.ZodTypeAny, {
+    type: "agent/subagent-progress";
+    conversationId: string;
+    payload: {
+        ns: string[];
+        nodeName: string;
+        payloadKeys: string[];
+    };
+}, {
+    type: "agent/subagent-progress";
+    conversationId: string;
+    payload: {
+        ns: string[];
+        nodeName: string;
+        payloadKeys: string[];
+    };
 }>]>;
 export declare const conversationMetadataSchema: z.ZodObject<{
     id: z.ZodString;

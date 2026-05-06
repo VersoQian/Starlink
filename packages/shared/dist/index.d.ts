@@ -16,3 +16,5 @@ export * from './tool-registry/types.js';
 export { BaseTool } from './tool-registry/tool.js';
 export * from './flow/types.js';
 export * from './execution/types.js';
+export * from './ideation-coach/index.js';
+export * from './user-skill/index.js';

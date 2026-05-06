@@ -747,6 +747,10 @@ export class BusinessLangGraphService {
           return [END]
         }
         const hasHighSeverity = state.conflicts.some((c) => c.severity === 'high')
+        // Sprint 2.2 · MAX_ROUNDS is now env-configurable (BMC_MAX_ROUNDS)
+        // and clamped to [1,5]. Default 3. Headless wizard graduations
+        // can override to 2 for faster turnaround at the cost of
+        // potentially leaving low-severity conflicts unresolved.
         if (hasHighSeverity && state.roundNumber < MAX_ROUNDS) {
           return ['supervisor']
         }

@@ -107,8 +107,26 @@ export const AGENT_SIGNATURE_TO_ID: Record<string, string> = {
 }
 
 // ============== Round / context limits ==============
-export const MAX_ROUNDS = 3
+/**
+ * Hard upper bound on supervisor → critic → revision loops. Default 3
+ * matches earlier behaviour. Overridable via env BMC_MAX_ROUNDS for
+ * faster smoke runs.
+ *
+ * Sprint 2.2 · Early-stop heuristic:
+ *   - If the round-N critic conflict count is >= round-(N-1) count,
+ *     no revision is happening — supervisor should end. Implemented
+ *     in business-langgraph.shouldStopEarly().
+ */
+export const MAX_ROUNDS = Math.max(1, Math.min(5, Number(process.env.BMC_MAX_ROUNDS ?? '3')))
 export const MAX_CONTEXT_CLAIMS_PER_CARD = 4
+
+// Sprint 2.1 · per-stage timeout (ms). When a single agent takes longer
+// than this, the supervisor downgrades to "skip and end". Prevents the
+// 24-min stalls observed in real demos.
+export const STAGE_TIMEOUT_MS = Math.max(
+  10_000,
+  Number(process.env.BMC_STAGE_TIMEOUT_MS ?? '90000')
+)
 
 // ============== Canvas layout ==============
 export const ROOT_POSITION = { x: 160, y: 160 }

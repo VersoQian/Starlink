@@ -401,7 +401,10 @@ export function CanvasPage({
       const cmd = trimmed.slice(1).split(/\s+/)[0]?.toLowerCase()
       if (cmd === 'wizard') {
         setChatInput('')
-        startWizardInChat()
+        // Sprint 1.2 · pass workspaceId so the wizard can pre-read KB.
+        // The store's startWizardInChat handles GraphQL prefill internally
+        // and falls back gracefully if no KB exists.
+        await startWizardInChat(workspaceId, true)
         return
       }
       if (cmd === 'cancel' && wizardChat.active) {
@@ -797,9 +800,10 @@ export function CanvasPage({
               // user sees BMC nodes appear as they answer). The
               // side-drawer wizard is still available via its own
               // floating button for users who prefer dedicated UI.
+              // Sprint 1.2 · KB pre-read enabled by default.
               const { startWizardInChat } = useComfyStore.getState()
               setChatOpen(true)
-              startWizardInChat()
+              void startWizardInChat(workspaceId, true)
             }}
             onOpenKb={() => setKbModalOpen(true)}
             onShowConflicts={() => {

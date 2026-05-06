@@ -162,6 +162,9 @@ export declare const resolvers: {
             userId: string;
             contextSnapshot: Record<string, unknown>;
             completedAt: string | null;
+            heartbeatAt?: string | null | undefined;
+            ownerPid?: string | null | undefined;
+            failureReason?: string | null | undefined;
         }[]>;
         conversationMessages: (_: unknown, args: {
             workspaceId: string;
@@ -192,20 +195,88 @@ export declare const resolvers: {
             content: string;
             id: string;
             workspaceId: string;
+            confidence: number;
             metadata: Record<string, unknown>;
             createdAt: string;
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
-            confidence: number;
             tags: string[];
             lastUsedAt: string | null;
             archivedAt: string | null;
         }[]>;
+        /**
+         * P2 · myMemories — user-scoped memory list. Always filters by
+         * ctx.userId (no override possible). Returns rows where:
+         *   - user_id = ctx.userId
+         *   - archived_at IS NULL
+         *   - workspace_id = $args.workspaceId   (when provided)
+         *     OR scope='user' AND workspace_id IS NULL  (cross-workspace
+         *     personal user-skill rows, when workspaceId omitted)
+         *   - kind = $args.kind   (when provided)
+         */
+        myMemories: (_: unknown, args: {
+            workspaceId?: string | null;
+            kind?: string | null;
+            query?: string | null;
+            limit?: number | null;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            workspaceId: string;
+            confidence: number;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace" | "agent";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+        }[]>;
+        /**
+         * P2 · myKnowledgeEvidence — reverse-lookup of "AI cited which KB
+         * chunks for me, where". Scans memory_items.metadata->>'knowledgeEvidence'
+         * JSONB for rows owned by ctx.userId.
+         */
+        myKnowledgeEvidence: (_: unknown, args: {
+            workspaceId?: string | null;
+            limit?: number | null;
+        }, ctx: GraphQLContext) => Promise<{
+            memoryItemId: string;
+            workspaceId: string;
+            docId: string;
+            snippet: string | null;
+            score: number | null;
+            citedAt: string;
+            sourceTitle: string;
+        }[]>;
+        /**
+         * F6 · Data portability (GDPR Art. 20 / PIPL Art. 45).
+         *
+         * Rate limit: 1 per 5 minutes per user — exports are expensive
+         * (full table scan on memory_items + sessions + messages) and
+         * users rarely need to export more than once per session.
+         */
+        exportMyData: (_: unknown, __: unknown, ctx: GraphQLContext) => Promise<{
+            schemaVersion: number;
+            exportedAt: string;
+            userId: string;
+            sessions: import("@starlink/shared").ConversationSession[];
+            messages: import("@starlink/shared").ConversationMessage[];
+            memoryItems: import("@starlink/shared").MemoryItem[];
+            knowledgeBases: Array<Record<string, unknown>>;
+            knowledgeDocuments: Array<Record<string, unknown>>;
+        }>;
         workspaceContextSnapshot: (_: unknown, args: {
             workspaceId: string;
             conversationId?: string | null;
@@ -236,16 +307,16 @@ export declare const resolvers: {
                 content: string;
                 id: string;
                 workspaceId: string;
+                confidence: number;
                 metadata: Record<string, unknown>;
                 createdAt: string;
                 updatedAt: string;
                 userId: string | null;
                 scope: "user" | "workspace" | "agent";
-                kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+                kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
                 sourceType: string;
                 sourceId: string | null;
                 importance: number;
-                confidence: number;
                 tags: string[];
                 lastUsedAt: string | null;
                 archivedAt: string | null;
@@ -258,9 +329,30 @@ export declare const resolvers: {
             }[];
             promptBlock: string;
         }>;
+        /**
+         * Runtime event backfill for WS subscription gap-fill.
+         *
+         * Client-side flow for gap-free delivery across reconnects:
+         *   1. Open WS, subscribe to `conversationProgress(workspaceId, conversationId)`.
+         *   2. Track the highest 1-based index seen so far (`lastSeenCursor`). The Nth event
+         *      received corresponds to cursor N. Persist this in client state.
+         *   3. On WS disconnect → reconnect:
+         *        a. Re-open subscription (buffer arriving live events client-side).
+         *        b. Issue `query conversationRuntimeEvents(workspaceId, conversationId,
+         *           sinceCursor: lastSeenCursor)` — returns only events with index > sinceCursor.
+         *        c. Merge backfilled events ahead of buffered live ones, dedupe by content
+         *           (event-bus is best-effort; duplicates are possible during the handoff window).
+         *        d. Resume normal live processing; bump `lastSeenCursor` for each new event.
+         *
+         * Note: cursor is positional within the workspace event ring buffer (capped by
+         *       CONVERSATION_RUNTIME_EVENT_LIMIT, default 400). If a client is offline long
+         *       enough for events to roll out of the buffer, sinceCursor=0 is implicitly the
+         *       safe-but-lossy fallback. A future extension may switch to monotonic IDs.
+         */
         conversationRuntimeEvents: (_: unknown, args: {
             workspaceId: string;
             conversationId?: string | null;
+            sinceCursor?: number | null;
         }, ctx: GraphQLContext) => Promise<({
             type: "graph/appended";
             conversationId: string;
@@ -454,6 +546,14 @@ export declare const resolvers: {
                 phase: "decision";
                 occurredAt: string;
             };
+        } | {
+            type: "agent/subagent-progress";
+            conversationId: string;
+            payload: {
+                ns: string[];
+                nodeName: string;
+                payloadKeys: string[];
+            };
         })[]>;
         kbTaskStatus: (_: unknown, args: {
             workspaceId: string;
@@ -471,6 +571,14 @@ export declare const resolvers: {
         knowledgeBases: (_: unknown, args: {
             workspaceId: string;
         }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase[]>;
+        knowledgeBaseAgentBindings: (_: unknown, args: {
+            workspaceId: string;
+            kbId: string;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").KbAgentBinding[]>;
+        knowledgeBaseDocuments: (_: unknown, args: {
+            workspaceId: string;
+            kbId: string;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKbDocument[]>;
         knowledgeBaseStatus: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
@@ -721,6 +829,29 @@ export declare const resolvers: {
             conversationId: string;
             decision?: string | null;
         }, ctx: GraphQLContext) => Promise<boolean>;
+        /**
+         * Phase 2.6 · HITL resume.
+         *
+         * Validates the decision string ([ACCEPTED] / [EDIT_PLAN][<dim>]:<body> /
+         * [REJECTED]) and routes through `conversationStore.approveDecision`,
+         * which (a) resolves the in-memory awaiter so the streaming `for await`
+         * loop continues and (b) dual-writes to the PG HITL store for cross-
+         * instance / post-restart visibility.
+         *
+         * The parsed directive is also picked up by the conversation-store's
+         * stream loop (after `waitForDecisionApproval` returns) and forwarded to
+         * `BusinessLangGraphService.setHitlResumeDirective`, where the supervisor
+         * consumes it on the next revision round to either halt the critic loop
+         * or scope revision to a single BMC dimension's owning agent.
+         */
+        resumeConversation: (_: unknown, args: {
+            conversationId: string;
+            decision: string;
+        }, ctx: GraphQLContext) => Promise<{
+            ok: boolean;
+            decisionKind: string;
+            message?: string;
+        }>;
         appendConversationMessage: (_: unknown, args: {
             input: {
                 conversationId: string;
@@ -738,6 +869,56 @@ export declare const resolvers: {
             createdAt: string;
             userId: string | null;
             role: "user" | "assistant" | "system" | "tool";
+        }>;
+        /**
+         * P3 · refreshUserSkills — demand-mode extraction trigger.
+         *
+         * Bypasses the usual throttle/tier selection so a user clicking
+         * "立即更新画像" in the Memory drawer gets immediate feedback. The
+         * extractor's own dedup + confidence-update logic prevents double-
+         * counting when this is called repeatedly in quick succession.
+         */
+        refreshUserSkills: (_: unknown, args: {
+            workspaceId: string;
+        }, ctx: GraphQLContext) => Promise<number>;
+        /**
+         * P2 · correctMemoryItem — user-driven correction of an inferred
+         * memory row. Three actions in priority order:
+         *   1. archive=true → soft-delete (sets archived_at)
+         *   2. newContent != null → update content; refreshes updatedAt;
+         *      stores user-correction marker in metadata so future
+         *      extractor passes don't auto-overwrite it
+         *   3. feedback != null → append to metadata.userFeedback array
+         *      (used as reinforcement signal by user-skill-extractor)
+         *
+         * Authorization: caller must own the row. Cross-user attempts
+         * throw FORBIDDEN.
+         */
+        correctMemoryItem: (_: unknown, args: {
+            input: {
+                itemId: string;
+                newContent?: string | null;
+                archive?: boolean | null;
+                feedback?: string | null;
+            };
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            workspaceId: string;
+            confidence: number;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace" | "agent";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
         }>;
         createMemoryItem: (_: unknown, args: {
             input: {
@@ -758,16 +939,16 @@ export declare const resolvers: {
             content: string;
             id: string;
             workspaceId: string;
+            confidence: number;
             metadata: Record<string, unknown>;
             createdAt: string;
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
-            confidence: number;
             tags: string[];
             lastUsedAt: string | null;
             archivedAt: string | null;
@@ -779,16 +960,16 @@ export declare const resolvers: {
             content: string;
             id: string;
             workspaceId: string;
+            confidence: number;
             metadata: Record<string, unknown>;
             createdAt: string;
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas";
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
-            confidence: number;
             tags: string[];
             lastUsedAt: string | null;
             archivedAt: string | null;
@@ -867,15 +1048,61 @@ export declare const resolvers: {
         }>;
         createKnowledgeBase: (_: unknown, args: {
             workspaceId: string;
+            name?: string | null;
+            visibility?: string | null;
         }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
         publishKnowledgeBase: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
         }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
+        /**
+         * F1 · Update a KB's visibility. Only the owner may invoke (enforced
+         * inside updateKnowledgeBaseVisibility — throws FORBIDDEN otherwise).
+         * Cascades to kb_chunks so vector search RLS + WHERE filters reflect
+         * the new state immediately.
+         */
+        /**
+         * F4 · Bind a KB to an agent for auto-search. Authorization:
+         * workspace.write enforced upstream; KB ownership for 'private'
+         * KBs enforced inside bindKbToAgent (throws FORBIDDEN).
+         */
+        bindKbToAgent: (_: unknown, args: {
+            workspaceId: string;
+            kbId: string;
+            agentId: string;
+            autoSearch?: boolean | null;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").KbAgentBinding>;
+        unbindKbFromAgent: (_: unknown, args: {
+            workspaceId: string;
+            kbId: string;
+            agentId: string;
+        }, ctx: GraphQLContext) => Promise<boolean>;
+        /**
+         * F7 · Delete a single KB document. Cascades to chunks via FK.
+         * Owner-check for private KBs is enforced inside
+         * deleteKnowledgeBaseDocument.
+         */
+        deleteKnowledgeBaseDocument: (_: unknown, args: {
+            workspaceId: string;
+            kbId: string;
+            docId: string;
+        }, ctx: GraphQLContext) => Promise<boolean>;
+        updateKnowledgeBaseVisibility: (_: unknown, args: {
+            kbId: string;
+            visibility: string;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKnowledgeBase>;
         addKnowledgeSeed: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
             text: string;
+        }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
+        addKnowledgeFile: (_: unknown, args: {
+            workspaceId: string;
+            kbId: string;
+            fileName: string;
+            contentType: string;
+            content: string;
+            isBase64?: boolean | null;
         }, ctx: GraphQLContext) => Promise<import("../services/kb-task-service.js").GatewayKbTask>;
         importKnowledgeUrl: (_: unknown, args: {
             workspaceId: string;
@@ -1041,6 +1268,105 @@ export declare const resolvers: {
             viewerPermissions: string[];
             canManage: boolean;
         }>;
+        reflectOnIdeation: (_: unknown, args: {
+            input: {
+                event: {
+                    type: string;
+                    kind?: string | null;
+                    label?: string | null;
+                    fromKind?: string | null;
+                    toKind?: string | null;
+                };
+                canvas: {
+                    nodes: Array<{
+                        id: string;
+                        kind: string;
+                        label: string;
+                        content: string;
+                    }>;
+                    edgeCount: number;
+                    nodeCountByKind: Record<string, number>;
+                };
+                recentChat: Array<{
+                    role: string;
+                    content: string;
+                }>;
+                firedMetaIds: string[];
+                workspaceId?: string | null;
+            };
+        }, context: GraphQLContext) => Promise<{
+            scaffold: string;
+            content: string;
+            source: "error" | "llm" | "scripted";
+            latencyMs: number | undefined;
+        }>;
+        processIdeationWizardStep: (_: unknown, args: {
+            input: {
+                step: string;
+                userAnswer: string;
+                canvas: {
+                    nodes: Array<{
+                        id: string;
+                        kind: string;
+                        label: string;
+                        content: string;
+                    }>;
+                    edgeCount: number;
+                };
+                recentChat: Array<{
+                    role: string;
+                    content: string;
+                }>;
+                workspaceId?: string | null;
+            };
+        }, context: GraphQLContext) => Promise<{
+            source: "error" | "llm" | "scripted";
+            extracted: {
+                content: string;
+                label: string;
+                kind: "core-idea" | "customer-pain" | "value-angle" | "hypothesis" | "validation-channel" | "revenue" | "risk" | "evidence" | "reflection";
+            };
+            nextQuestion: string;
+            nextStep: "validation" | "meta" | "done" | "core-idea" | "customer-pain" | "value-angle" | "hypothesis" | "revenue" | "risk";
+            latencyMs?: number | undefined;
+        }>;
+        /**
+         * Cancel a stale 'running' session. Authorization: caller must own
+         * the session (userId match) — we don't allow one user to cancel
+         * another user's session even within the same workspace.
+         *
+         * The session is marked 'failed' with the supplied reason (or a
+         * default user-cancellation message). Heartbeat-driven reaper would
+         * eventually do this for us when the gateway crashed, but exposing
+         * the explicit mutation lets the UI offer "clear stuck session"
+         * without waiting for the next reaper tick.
+         */
+        cancelStaleSession: (_: unknown, args: {
+            sessionId: string;
+            reason?: string | null;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "running" | "failed" | "completed" | "archived";
+            title: string;
+            id: string;
+            workspaceId: string;
+            createdAt: string;
+            updatedAt: string;
+            latestQuestion: string | null;
+            userId: string;
+            contextSnapshot: Record<string, unknown>;
+            completedAt: string | null;
+            heartbeatAt?: string | null | undefined;
+            ownerPid?: string | null | undefined;
+            failureReason?: string | null | undefined;
+        } | null>;
+        mentionAgent: (_: unknown, args: {
+            input: {
+                workspaceId: string;
+                conversationId?: string | null;
+                agentId: string;
+                message: string;
+            };
+        }, ctx: GraphQLContext) => Promise<import("../services/mention-router.js").MentionResult>;
     };
     Subscription: {
         flowExecutionProgress: {

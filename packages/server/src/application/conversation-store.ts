@@ -157,7 +157,17 @@ export class ConversationStore {
     workspaceId: string,
     userId: string,
     question: string,
-    kbId?: string
+    kbId?: string,
+    /**
+     * Sprint 1.3 · Headless mode. When true, all critic interrupts are
+     * auto-resolved with `[ACCEPTED]` so the pipeline doesn't hang
+     * waiting for human-in-the-loop input. Used by the in-chat wizard
+     * graduation path (no human in the loop) + scripted runs.
+     *
+     * The auto-accept happens at HitlApprovalStore level (resume directive
+     * pre-set so the next interrupt-resume cycle finds it immediately).
+     */
+    options: { headless?: boolean } = {}
   ): Promise<ConversationRecord> {
     await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
 
@@ -229,7 +239,8 @@ export class ConversationStore {
       traceId: id,
       baseGraph: existingGraph,
       knowledgeEvidence,
-      contextPrompt: contextSnapshot.promptBlock
+      contextPrompt: contextSnapshot.promptBlock,
+      headless: options.headless === true
     })
     let initialized = false
 
@@ -283,7 +294,8 @@ export class ConversationStore {
         workspaceId,
         userId,
         conversationId: id,
-        initialized
+        initialized,
+        headless: options.headless === true
       })
     }, 0)
 
@@ -840,8 +852,10 @@ export class ConversationStore {
     userId: string
     conversationId: string
     initialized: boolean
+    /** Sprint 1.3 · auto-accept HITL interrupts (no human in the loop). */
+    headless?: boolean
   }) {
-    let { stream, record, workspaceId, userId, conversationId, initialized } = options
+    let { stream, record, workspaceId, userId, conversationId, initialized, headless = false } = options
     let currentGraph = record.graph
     const emittedTurnNodeIds = new Set<string>()
     let currentPhase: SeminarPhase | null = null
@@ -1009,6 +1023,26 @@ export class ConversationStore {
         }
 
         if (update.type === 'interrupt') {
+          // Sprint 1.3 · headless mode (wizard graduation, scripted runs):
+          // skip the human wait. Auto-resolve as `[ACCEPTED]` so the
+          // pipeline continues immediately. Avoids the 10-min HITL_APPROVAL_TIMEOUT_MS
+          // stall per round when no human is at the keyboard.
+          if (headless) {
+            const directive = parseHitlDecision('[ACCEPTED]')
+            if (directive.kind !== 'invalid') {
+              this.businessLangGraphService.setHitlResumeDirective(
+                conversationId,
+                directive
+              )
+            }
+            record.metadata = {
+              ...record.metadata,
+              status: 'running',
+              updatedAt: new Date()
+            }
+            await this.sessionStore.updateConversation(conversationId, record)
+            continue
+          }
           if (this.hitlEnabled) {
             const userDecision = await this.waitForDecisionApproval({
               conversationId,
@@ -1145,6 +1179,8 @@ export class ConversationStore {
     baseGraph: CanvasGraph
     knowledgeEvidence: KnowledgeEvidence[]
     contextPrompt: string
+    /** Sprint 1.3 · headless mode short-circuits HITL waits (auto-accept). */
+    headless?: boolean
   }): AsyncGenerator<BusinessStreamUpdate> {
     if (
       this.bmcFlowAdapter

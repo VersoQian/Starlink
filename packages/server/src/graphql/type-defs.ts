@@ -552,7 +552,13 @@ export const typeDefs = gql`
   }
 
   type Mutation {
-    startConversation(workspaceId: ID!, question: String!, kbId: ID): StartConversationPayload!
+    """
+    Start a new BMC conversation. When headless=true, all critic
+    HITL interrupts auto-accept (no human wait); used by the in-chat
+    wizard graduation path. Default false (interactive mode preserves
+    existing behaviour).
+    """
+    startConversation(workspaceId: ID!, question: String!, kbId: ID, headless: Boolean): StartConversationPayload!
     approveDecision(conversationId: ID!, decision: String): Boolean!
     # Phase 2.5 F5 · HITL resume; decision must begin with [ACCEPTED] or [EDIT_PLAN]:...
     resumeConversation(conversationId: ID!, decision: String!): ResumeConversationPayload!
@@ -894,6 +900,39 @@ export const typeDefs = gql`
     latencyMs: Int
   }
 
+  """
+  KB-aware wizard pre-read result. Per the 7 wizard dimensions, indicates
+  whether the user's already-uploaded KB content covers that step:
+    - 'covered':  KB has clear evidence; draftAnswer is AI-extracted prose
+                  the user can confirm or edit
+    - 'partial':  KB has some hints but not a complete answer
+    - 'absent':   nothing in KB about this step; user must answer normally
+  """
+  type WizardPrefillItem {
+    step: String!
+    status: String!
+    draftAnswer: String!
+    citations: [WizardPrefillCitation!]!
+    confidence: Float!
+  }
+  type WizardPrefillCitation {
+    docId: String!
+    snippet: String!
+  }
+  type WizardPrefillResult {
+    items: [WizardPrefillItem!]!
+    """
+    Names of KBs sampled for this prefill (so the UI can show
+    "我读了 X、Y 文档"). Empty when no KB exists for the workspace.
+    """
+    kbNames: [String!]!
+    """
+    Total chunks scanned. Useful for the UI to show "scanned 12 chunks
+    in 3 docs across 2 KBs".
+    """
+    chunksScanned: Int!
+  }
+
   extend type Mutation {
     """
     Generate one Meflex-style reflection prompt against the current
@@ -911,6 +950,27 @@ export const typeDefs = gql`
     processIdeationWizardStep(
       input: ProcessIdeationWizardStepInput!
     ): IdeationWizardStepResult!
+
+    """
+    KB-aware wizard pre-read. When the user has uploaded KB content for
+    this workspace, this mutation samples relevant chunks (top-N per
+    wizard dimension via cosine retrieval), feeds them to the LLM, and
+    returns a per-step prefill: status (covered/partial/absent),
+    draft answer, supporting citations.
+
+    The frontend uses this to:
+      - Skip steps where KB already has the answer (status='covered',
+        confidence > 0.7) — user just confirms with a button
+      - Show partial drafts the user can edit
+      - Fall through to normal questions where KB is silent
+
+    Authorization: workspace.read; respects KB visibility (private KBs
+    only count when caller owns them).
+
+    Rate-limited 1 per 30 seconds per user — prefill is a fan-out
+    embedding query + 1 LLM call.
+    """
+    prefillWizardFromKb(workspaceId: ID!, kbId: ID): WizardPrefillResult!
 
     """
     Cancel a stale 'running' conversation session. Used by the frontend

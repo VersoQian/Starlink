@@ -53,6 +53,15 @@ export interface WizardChatState {
     answer: string
     extractedLabel: string | null
   }>
+  /** Sprint 1.2 · per-step KB prefill snapshot. When the user opts in
+   *  to KB pre-read, this map holds the AI-drafted answer per step.
+   *  Empty when prefill was skipped or KB had no relevant content. */
+  prefill: Record<string, {
+    status: 'covered' | 'partial' | 'absent'
+    draftAnswer: string
+    confidence: number
+    citations: Array<{ docId: string; snippet: string }>
+  }>
 }
 
 const META_CHECK_INTERVAL = 3
@@ -84,9 +93,25 @@ const WIZARD_CHAT_MUTATION = /* GraphQL */ `
   }
 `
 
+const WIZARD_KB_PREFILL_MUTATION = /* GraphQL */ `
+  mutation PrefillWizardFromKbInChat($workspaceId: ID!) {
+    prefillWizardFromKb(workspaceId: $workspaceId) {
+      kbNames
+      chunksScanned
+      items {
+        step
+        status
+        draftAnswer
+        confidence
+        citations { docId snippet }
+      }
+    }
+  }
+`
+
 const WIZARD_CHAT_START_CONVERSATION = /* GraphQL */ `
   mutation StartConversationFromChatWizard($workspaceId: ID!, $question: String!) {
-    startConversation(workspaceId: $workspaceId, question: $question) {
+    startConversation(workspaceId: $workspaceId, question: $question, headless: true) {
       metadata { id }
     }
   }
@@ -411,10 +436,18 @@ interface MacraState {
 
   /** In-chat 7-step wizard state. See WizardChatState comments. */
   wizardChat: WizardChatState
-  /** Open the in-chat wizard: appends an opening assistant message
-   *  and flips wizardChat.active so subsequent sends route through
-   *  submitWizardChatAnswer. */
-  startWizardInChat: () => void
+  /** Open the in-chat wizard. When `withKbPrefill` is true (default),
+   *  triggers the LLM pre-read of any KB content for the workspace
+   *  and shows a step-by-step suggestion preview the user can confirm
+   *  or override. Otherwise starts the legacy 7-step from-scratch flow.
+   */
+  startWizardInChat: (workspaceId?: string, withKbPrefill?: boolean) => Promise<void>
+
+  /** Sprint 1.5 · Archive (hide) all current canvas nodes so a new BMC
+   *  session has a clean visual slate. Nodes are NOT deleted from PG;
+   *  they're moved to a hidden bucket via `archivedAt` flag. Subsequent
+   *  pipelines emit fresh nodes that don't visually pile up. */
+  archiveCurrentCanvasForFreshSession: () => void
   /** Cancel the wizard mid-flow (chat returns to normal mode). */
   endWizardInChat: () => void
   /** Submit the user's answer for the current wizard step. Calls the
@@ -544,7 +577,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   toolRunStates: {},
   chatInput: '',
   chatMessages: createInitialChatMessages(),
-  wizardChat: { active: false, stepIndex: 0, history: [] },
+  wizardChat: { active: false, stepIndex: 0, history: [], prefill: {} },
   detailPanel: {
     isOpen: false,
     nodeId: null
@@ -672,25 +705,137 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     ])
   },
 
-  startWizardInChat: () => {
+  startWizardInChat: async (workspaceId, withKbPrefill = true) => {
     if (get().wizardChat.active) return
-    set({ wizardChat: { active: true, stepIndex: 0, history: [] } })
+    set({ wizardChat: { active: true, stepIndex: 0, history: [], prefill: {} } })
+
+    // Sprint 1.2 · KB pre-read. If the workspace has KB content, run
+    // a one-shot prefill and show the user a summary. The user can:
+    //   - 跳过覆盖步骤：在已 covered 的 step 直接输入 /next 或确认按钮
+    //   - 编辑草稿：textarea 已预填，按 Enter 提交
+    //   - 重新输入：清空 textarea 输入新内容
+    let prefillSummary: string | null = null
+    const prefill: WizardChatState['prefill'] = {}
+    if (workspaceId && withKbPrefill) {
+      try {
+        const { getGraphQLClient } = await import('@/shared/lib/graphql-client')
+        const client = getGraphQLClient()
+        const r = await client.request<{
+          prefillWizardFromKb: {
+            kbNames: string[]
+            chunksScanned: number
+            items: Array<{
+              step: string
+              status: 'covered' | 'partial' | 'absent'
+              draftAnswer: string
+              confidence: number
+              citations: Array<{ docId: string; snippet: string }>
+            }>
+          }
+        }>(WIZARD_KB_PREFILL_MUTATION, { workspaceId })
+        const result = r.prefillWizardFromKb
+        const covered = result.items.filter((i) => i.status === 'covered').length
+        const partial = result.items.filter((i) => i.status === 'partial').length
+        if (result.kbNames.length > 0 && (covered > 0 || partial > 0)) {
+          for (const item of result.items) {
+            prefill[item.step] = {
+              status: item.status,
+              draftAnswer: item.draftAnswer,
+              confidence: item.confidence,
+              citations: item.citations
+            }
+          }
+          prefillSummary = [
+            `📚 已读完 KB · ${result.kbNames.join(' / ')}（${result.chunksScanned} 个 chunk）`,
+            ``,
+            ...result.items.map((it, i) => {
+              const stepLabel = WIZARD_CHAT_STEPS[i]?.label ?? it.step
+              const icon = it.status === 'covered' ? '✓' : it.status === 'partial' ? '◐' : '○'
+              const note = it.status === 'covered'
+                ? `已找到答案（信心 ${(it.confidence * 100).toFixed(0)}%）`
+                : it.status === 'partial'
+                ? `部分覆盖（信心 ${(it.confidence * 100).toFixed(0)}%）`
+                : '需要你来回答'
+              return `${icon} **${stepLabel}** — ${note}`
+            }),
+            ``,
+            `> 我会把已找到的答案预填到每一步。你可以直接 Enter 确认、或修改后提交。`
+          ].join('\n')
+          set({ wizardChat: { active: true, stepIndex: 0, history: [], prefill } })
+        }
+      } catch (err) {
+        // KB prefill is opt-in / best-effort; absence shouldn't break wizard.
+        // eslint-disable-next-line no-console
+        console.warn('[wizard] KB prefill skipped:', err)
+      }
+    }
+
+    if (prefillSummary) {
+      get().appendChatMessage({
+        role: 'assistant',
+        content: prefillSummary,
+        source: 'llm',
+        isWizard: true
+      })
+    }
+
     const firstStep = WIZARD_CHAT_STEPS[0]
+    const firstStepPrefill = prefill[firstStep.id]
+    const draftHint =
+      firstStepPrefill && firstStepPrefill.status !== 'absent' && firstStepPrefill.draftAnswer
+        ? `\n\n💡 **从 KB 抽到的草稿**（直接 Enter 确认，或修改）：\n> ${firstStepPrefill.draftAnswer}`
+        : ''
     get().appendChatMessage({
       role: 'assistant',
       content: `**STEP 1/${WIZARD_CHAT_STEPS.length} · ${firstStep.label}**
 
-${firstStep.description}
+${firstStep.description}${draftHint}
 
 > 直接在下面输入答案，详细一点说，多两句话比一句话好；输入 \`/cancel\` 退出向导。`,
       source: 'scripted',
       isWizard: true
     })
+
+    // Sprint 1.2 · pre-fill the chat input box with the KB draft so user
+    // can hit Enter to confirm.
+    if (firstStepPrefill?.draftAnswer && firstStepPrefill.status !== 'absent') {
+      get().setChatInput(firstStepPrefill.draftAnswer)
+    }
+  },
+
+  archiveCurrentCanvasForFreshSession: () => {
+    // Mark all macra nodes archived in metadata (UI-side hide). The
+    // server-side canvas_graphs row keeps full history; pipelines just
+    // overwrite based on id, so we drop the visible references in the
+    // store. Useful before kicking off a new wizard graduation so the
+    // user sees only the new session's output.
+    const { macraNodes, nodes, edges } = get()
+    const archivedAt = new Date().toISOString()
+    const archivedMacra = new Map<string, MacraNodeData>()
+    macraNodes.forEach((m, id) => {
+      archivedMacra.set(id, {
+        ...m,
+        metadata: { ...(m.metadata ?? {}), archivedAt }
+      })
+    })
+    set({
+      // Clear the visible ReactFlow state so the canvas looks fresh.
+      // Server-persisted snapshot is untouched; replay can rehydrate.
+      nodes: [],
+      edges: [],
+      // Keep macraNodes in memory so the user can "undo" if needed,
+      // but they're hidden from canvas. Future improvement: store in
+      // a separate `archivedMacraNodes` slot rather than mutating.
+      macraNodes: archivedMacra
+    })
+    // Keep editor & selection state out of the way.
+    void nodes
+    void edges
   },
 
   endWizardInChat: () => {
     if (!get().wizardChat.active) return
-    set({ wizardChat: { active: false, stepIndex: 0, history: [] } })
+    set({ wizardChat: { active: false, stepIndex: 0, history: [], prefill: {} } })
     get().appendChatMessage({
       role: 'assistant',
       content: '✗ 已退出向导。继续 @ agent 自由提问，或重新输入 `/wizard` 开始 7 步引导。',
@@ -774,7 +919,7 @@ ${firstStep.description}
 
       if (isLast) {
         // 7 steps done — auto-graduate to BMC pipeline.
-        set({ wizardChat: { active: false, stepIndex: 0, history: [] } })
+        set({ wizardChat: { active: false, stepIndex: 0, history: [], prefill: {} } })
         const summary = nextHistory
           .map((h, i) => `${i + 1}. ${WIZARD_CHAT_STEPS[i]?.label ?? h.step}：${h.answer}`)
           .join('\n')
@@ -782,12 +927,17 @@ ${firstStep.description}
           role: 'assistant',
           content: `✓ 7 步采集完成。已抽 ${nextHistory.filter((h) => h.extractedLabel).length} 条线索到画布。
 
-**下一步**：8 个 agent 开始协作生成完整 BMC，画布会逐步浮现内容。`,
+**下一步**：8 个 agent 开始协作生成完整 BMC（headless 模式不卡 HITL）。画布会清空旧节点后逐步浮现新内容。`,
           source: 'scripted',
           isWizard: true
         })
-        // Kick off the BMC pipeline with stitched answers.
-        const seed = `用户已通过 7 步向导描述了商业想法，请基于以下结构化输入生成完整 BMC：\n\n${summary}`
+        // Sprint 1.5 · archive existing canvas nodes so the new BMC
+        // doesn't visually pile up on top of stale ones.
+        get().archiveCurrentCanvasForFreshSession()
+        // Sprint 2.3 · STRONG seed framing — 7 答案是用户亲口确认的事
+        // 实，agents 不能改写、只能扩展/反驳。这避免初始 BMC 输出偏离
+        // 用户的实际意图。
+        const seed = `[用户亲述 · 不可改写] 以下 7 段是用户通过结构化向导逐步确认的商业意图。请将每段视作 ground-truth user-attested fact，agents 在生成 BMC 时必须严格基于这些事实展开（可以扩展、补充、反驳，但不能改写或忽略）：\n\n${summary}\n\n---\n\n请基于以上结构化输入生成完整 BMC（9 维度），并在每个 cell 中明确引用对应的 wizard 答案编号。`
         try {
           const startMod = await import('@/shared/lib/graphql-client')
           await startMod.getGraphQLClient().request(WIZARD_CHAT_START_CONVERSATION, {
@@ -808,16 +958,27 @@ ${firstStep.description}
         const extractedLine = extracted
           ? `✓ 抽到「${extracted.label}」→ 已加到画布\n\n`
           : ''
+        // Sprint 1.2 · attach KB-derived draft for the upcoming step
+        // when prefill exists. Non-absent entries pre-populate the
+        // input so user can confirm with Enter.
+        const nextPrefill = wizardChat.prefill?.[nextStep.id]
+        const nextDraftHint =
+          nextPrefill && nextPrefill.status !== 'absent' && nextPrefill.draftAnswer
+            ? `\n\n💡 **从 KB 抽到的草稿**（直接 Enter 确认，或修改）：\n> ${nextPrefill.draftAnswer}`
+            : ''
         appendChatMessage({
           role: 'assistant',
           content: `${extractedLine}**STEP ${nextIndex + 1}/${WIZARD_CHAT_STEPS.length} · ${nextStep.label}**
 
-${result?.nextQuestion ?? nextStep.description}
+${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
 
 > 输入 \`/cancel\` 退出向导。`,
           source: extracted ? 'llm' : 'scripted',
           isWizard: true
         })
+        if (nextPrefill?.draftAnswer && nextPrefill.status !== 'absent') {
+          get().setChatInput(nextPrefill.draftAnswer)
+        }
       }
     } catch (err) {
       appendChatMessage({

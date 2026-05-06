@@ -14,6 +14,8 @@ import { ExecutionStore } from '../application/execution-store.js'
 import { GraphCompiler } from '../engine/graph-compiler.js'
 import { GraphExecutor } from '../engine/graph-executor.js'
 import { UserSkillExtractor } from '../services/user-skill-extractor.js'
+import { WizardPrefillService } from '../services/wizard-prefill-service.js'
+import { LLMClient } from '../services/llm-client.js'
 import {
   createWorkspaceMemoryStore,
   setWorkspaceMemoryStore
@@ -37,6 +39,8 @@ export type GraphQLContext = {
   graphExecutor?: GraphExecutor
   /** P3 · UserSkillExtractor exposed for demand-mode mutation (refreshUserSkills). */
   userSkillExtractor?: UserSkillExtractor
+  /** Sprint 1.1 · KB-aware wizard prefill service (prefillWizardFromKb). */
+  wizardPrefillService?: WizardPrefillService
 }
 
 const conversationEventBus = createConversationEventBus()
@@ -67,6 +71,13 @@ setWorkspaceMemoryStore(
 // fire-and-forget call site.
 const sharedUserSkillExtractor = new UserSkillExtractor({
   memoryStore: sharedConversationMemoryStore
+})
+
+// Sprint 1.1 · single shared WizardPrefillService. The LLM client picks
+// up the same env config used by the Socratic coach (DEEPSEEK_API_KEY /
+// LLM_API_KEY etc.); no new env knobs.
+const sharedWizardPrefillService = new WizardPrefillService({
+  llm: new LLMClient()
 })
 
 // Flow infrastructure (initialized lazily)
@@ -127,7 +138,8 @@ export async function createContext(
     executionStore,
     graphCompiler,
     graphExecutor,
-    userSkillExtractor: sharedUserSkillExtractor
+    userSkillExtractor: sharedUserSkillExtractor,
+    wizardPrefillService: sharedWizardPrefillService
   }
 }
 
@@ -155,7 +167,8 @@ export async function createWsContext(connectionParams?: Record<string, unknown>
     executionStore,
     graphCompiler,
     graphExecutor,
-    userSkillExtractor: sharedUserSkillExtractor
+    userSkillExtractor: sharedUserSkillExtractor,
+    wizardPrefillService: sharedWizardPrefillService
   }
 }
 
