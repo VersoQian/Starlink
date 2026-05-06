@@ -95,6 +95,17 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
   const config = AGENT_CONFIG[agentType]
   const isInteractive = nodeData?.isInteractive ?? true
 
+  // Map AGENT_TYPES enum value (e.g. "Market_Agent") → mention-router id
+  // (e.g. "market-agent"). Used to route the avatar's per-node chat to
+  // the real backend agent via the mentionAgent GraphQL mutation.
+  const agentMentionId = (() => {
+    if (agentType === AGENT_TYPES.MARKET) return 'market-agent'
+    if (agentType === AGENT_TYPES.PRODUCT) return 'product-agent'
+    if (agentType === AGENT_TYPES.FINANCE) return 'finance-agent'
+    if (agentType === AGENT_TYPES.CRITIC) return 'critic-agent'
+    return null
+  })()
+
   const handleSendMessage = useCallback(async () => {
     if (!inputMessage.trim() || isProcessing) return
 
@@ -105,17 +116,49 @@ export const AgentAvatarNode = memo(function AgentAvatarNode({ id, data }: NodeP
     setChatMessages(prev => [...prev, { role: 'user', content: userMessage }])
 
     try {
-      // Fallback: 模拟回复
-      setTimeout(() => {
-        const mockResponse = `作为 ${config.name}，我收到了你的问题："${userMessage}"。\n\n这是一个模拟回复（API未就绪）。实际部署时，我会根据专业领域给出深度分析。`
-        setChatMessages(prev => [...prev, { role: 'agent', content: mockResponse }])
+      // Real LLM path: call mentionAgent GraphQL mutation against the
+      // running backend agent. Replaces the previous mock fallback that
+      // returned "API未就绪" copy regardless of actual server state.
+      if (!agentMentionId) {
+        setChatMessages(prev => [...prev, {
+          role: 'agent',
+          content: `（${config.name} 未注册到 mention router；请通过画布顶部 chat dock 用 @ 唤起其他 agent）`
+        }])
         setIsProcessing(false)
-      }, 1000)
+        return
+      }
+      const workspaceId = useComfyStore.getState().workspaceId
+      if (!workspaceId) {
+        setChatMessages(prev => [...prev, { role: 'agent', content: '⚠ workspaceId 未设置，无法调用 agent。' }])
+        setIsProcessing(false)
+        return
+      }
+      const { getGraphQLClient } = await import('@/shared/lib/graphql-client')
+      const data = await getGraphQLClient().request<{
+        mentionAgent: { agentId: string; reply: string; refused: boolean; refusalReason: string | null }
+      }>(
+        /* GraphQL */ `
+          mutation AvatarMention($input: MentionAgentInput!) {
+            mentionAgent(input: $input) {
+              agentId reply refused refusalReason
+            }
+          }
+        `,
+        { input: { workspaceId, agentId: agentMentionId, message: userMessage } }
+      )
+      const m = data.mentionAgent
+      const reply = m.reply || (m.refused ? (m.refusalReason ?? '已拒绝') : '(空响应)')
+      setChatMessages(prev => [...prev, { role: 'agent', content: reply }])
+      setIsProcessing(false)
     } catch (error) {
       console.error('Agent 对话失败:', error)
+      setChatMessages(prev => [...prev, {
+        role: 'agent',
+        content: `⚠ 调用失败：${error instanceof Error ? error.message : String(error)}`
+      }])
       setIsProcessing(false)
     }
-  }, [inputMessage, isProcessing, config.name])
+  }, [inputMessage, isProcessing, config.name, agentMentionId])
 
   return (
     <>

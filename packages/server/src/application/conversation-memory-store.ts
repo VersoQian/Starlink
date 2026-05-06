@@ -87,6 +87,11 @@ type CaptureConversationOutcomeInput = {
   evidenceCount?: number
 }
 
+function clamp01(value: number): number {
+  if (Number.isNaN(value)) return 0
+  return Math.max(0, Math.min(1, value))
+}
+
 const runtimeDdlEnabled = process.env.CONVERSATION_MEMORY_RUNTIME_DDL === 'true'
 
 const initTables = runtimeDdlEnabled ? pool.query(`
@@ -726,6 +731,29 @@ export class ConversationMemoryStore {
     }
 
     if (graphSummary) {
+      // Derive importance + confidence from REAL pipeline signals,
+      // not hardcoded values. Previous behavior wrote 0.78 / 0.74
+      // for every canvas summary regardless of quality, leading
+      // users to ask "why is memory always 74%".
+      //
+      // Importance ∝ how complete the canvas is (BMC cells / 9).
+      // Confidence ∝ structural completeness (BMC + edges) and is
+      // penalised by unresolved high-severity conflicts (which
+      // signal that the canvas is unstable).
+      const bmcCount = input.graph.nodes.filter((n) => {
+        const meta = (n.data as { meta?: { macraType?: string } } | undefined)?.meta
+        return meta?.macraType === 'cc-bmc-card'
+      }).length
+      const conflictCount = input.graph.nodes.filter((n) => {
+        const meta = (n.data as { meta?: { macraType?: string } } | undefined)?.meta
+        return meta?.macraType === 'conflict-alert'
+      }).length
+      const edgeCount = input.graph.edges.length
+      const bmcRatio = Math.min(1, bmcCount / 9)
+      const importance = clamp01(0.4 + 0.5 * bmcRatio + (edgeCount > 4 ? 0.1 : 0))
+      // Conflicts cap confidence: 0 conflicts → +0, 1-2 → -0.1, 3-4 → -0.2, ≥5 → -0.3
+      const conflictPenalty = conflictCount === 0 ? 0 : Math.min(0.3, 0.05 + 0.05 * conflictCount)
+      const confidence = clamp01(0.5 + 0.4 * bmcRatio - conflictPenalty)
       memories.push(await this.upsertMemory({
         workspaceId: input.workspaceId,
         userId: input.userId,
@@ -735,13 +763,18 @@ export class ConversationMemoryStore {
         content: graphSummary,
         sourceType: 'canvas',
         sourceId: input.conversationId,
-        importance: 0.78,
-        confidence: 0.74,
+        importance,
+        confidence,
         tags: ['canvas', 'summary'],
         metadata: {
           question,
           nodeCount: input.graph.nodes.length,
-          edgeCount: input.graph.edges.length
+          edgeCount,
+          bmcCount,
+          conflictCount,
+          // Persist the contributing signals so future readers can
+          // explain why a given memory got its score.
+          scoreReason: `bmc=${bmcCount}/9 · conflicts=${conflictCount} · edges=${edgeCount}`
         }
       }))
     }
