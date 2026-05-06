@@ -1468,6 +1468,7 @@ function parseMemoryKind(kind?: string | null): MemoryKind | undefined {
     || kind === 'constraint'
     || kind === 'summary'
     || kind === 'canvas'
+    || kind === 'user-skill'
   ) {
     return kind
   }
