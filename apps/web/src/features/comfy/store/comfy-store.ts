@@ -1566,9 +1566,13 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as MacraNodeData['type'],
           label: typeof data.title === 'string' ? data.title : '未命名',
           content: typeof data.content === 'string' ? data.content : '',
-          summary: typeof meta.summary === 'string'
-            ? meta.summary
-            : (typeof data.content === 'string' ? data.content : ''),
+          // P11 fix · summary 不能 fallback 到 data.content。当 server 端
+          // meta.summary 缺席（旧数据 + orchestrator 主路径都不产 summary
+          // 字段），之前的代码用 data.content 兜底 → drawer 的 derivedSummary
+          // 第一个 if 分支永远命中（拿到非空字符串），后面写好的 heading/
+          // bullet/sentence 提取永远不执行。修：缺席时返回 '' 让 derivedSummary
+          // 走它的多级提取策略。
+          summary: typeof meta.summary === 'string' ? meta.summary : '',
           fullContent: typeof meta.fullContent === 'string'
             ? meta.fullContent
             : (typeof data.content === 'string' ? data.content : ''),
@@ -1799,7 +1803,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
               label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
               content: typeof dataObj.content === 'string' ? dataObj.content : '',
-              summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+              summary: typeof meta.summary === 'string' ? meta.summary : '',
               fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
               domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
               metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
@@ -1837,7 +1841,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
           label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
           content: typeof dataObj.content === 'string' ? dataObj.content : '',
-          summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+          summary: typeof meta.summary === 'string' ? meta.summary : '',
           fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
           domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
           metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
@@ -1952,7 +1956,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
               label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
               content: typeof dataObj.content === 'string' ? dataObj.content : '',
-              summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
+              summary: typeof meta.summary === 'string' ? meta.summary : '',
               fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
               domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
               metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
