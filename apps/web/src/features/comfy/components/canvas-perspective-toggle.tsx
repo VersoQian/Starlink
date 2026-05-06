@@ -14,13 +14,15 @@ import { useState } from 'react'
 
 type Perspective = 'perspectives' | 'timeline' | 'heatmap'
 
-// P10.3 · shortened labels per user request "tab 太长了 短一点".
-// Original: Perspectives / Timeline / Heatmap (~280px wide)
-// Now:      视图 / 时序 / 热度 (~140px wide, halves footprint)
+// These labels are functional names with specific semantics:
+// - Perspectives: multi-angle view switcher
+// - Timeline:     time-axis playback of agent activity
+// - Heatmap:      density / activity heatmap overlay
+// Don't shorten to single Chinese chars — the meaning gets lost.
 const TABS: ReadonlyArray<{ id: Perspective; label: string }> = [
-  { id: 'perspectives', label: '视图' },
-  { id: 'timeline',     label: '时序' },
-  { id: 'heatmap',      label: '热度' },
+  { id: 'perspectives', label: 'Perspectives' },
+  { id: 'timeline',     label: 'Timeline' },
+  { id: 'heatmap',      label: 'Heatmap' },
 ]
 
 export function CanvasPerspectiveToggle() {
