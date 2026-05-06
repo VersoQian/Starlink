@@ -168,8 +168,13 @@ export function CanvasFlow({
         />
       </ReactFlow>
 
-      {/* Bottom-left keyboard hint */}
-      <div className="absolute bottom-6 left-6 z-[2] flex items-center gap-3 bg-white/80 backdrop-blur-md border border-stratum-line rounded-full px-4 py-1.5 pointer-events-none shadow-sm">
+      {/* Bottom keyboard hint — moved out of bottom-left corner because
+          the floating KB / Memory / Wizard buttons (bottom-6 left-6 in
+          comfy-canvas-page.tsx) sit there at z-20 and were covering this
+          hint. Now positioned bottom-2 right-1/2 +translate-x-1/2 (just
+          above minimap which sits at bottom-right). Hidden on very small
+          viewports where space is tight. */}
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[2] hidden md:flex items-center gap-3 bg-white/80 backdrop-blur-md border border-stratum-line rounded-full px-4 py-1.5 pointer-events-none shadow-sm">
         <span className="font-instr text-[10px] uppercase tracking-[0.18em] text-stratum-muted">
           按住 <kbd className="font-instr text-[10px] text-stratum-ink bg-stratum-surface-low border border-stratum-line rounded px-1.5 py-0.5 mx-1">SPACE</kbd> 拖动 · 滚轮缩放 · ⌘<kbd className="font-instr text-[10px] text-stratum-ink bg-stratum-surface-low border border-stratum-line rounded px-1.5 py-0.5 mx-1">Z</kbd>撤销
         </span>

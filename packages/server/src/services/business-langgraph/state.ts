@@ -30,6 +30,20 @@ export const MacraNodeDataSchema = z.object({
   type: z.enum(['cc-bmc-card', 'agent-avatar', 'insight-note', 'conflict-alert', 'data-source', 'report-card']),
   label: z.string().max(50),
   content: z.string(),
+  /**
+   * Issue C fix · separate one-line summary from the multi-paragraph
+   * content body. Drawer's 摘要 section reads this; if missing, drawer
+   * derives from content's first sentence.
+   */
+  summary: z.string().max(240).optional(),
+  /**
+   * Issue C fix · explicit full body (markdown) when agent splits
+   * summary vs detail. When set, takes precedence over `content` for
+   * the drawer's "详细内容" section. Back-compat: agents that only
+   * write `content` work unchanged — drawer treats content as the
+   * full body.
+   */
+  fullContent: z.string().optional(),
   domain: z.enum(Object.values(CC_BMC_DOMAINS) as [string, ...string[]]).optional(),
   metadata: z.object({
     agent_signature: z.enum(Object.values(AGENT_TYPES) as [string, ...string[]]).optional(),

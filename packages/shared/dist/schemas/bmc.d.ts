@@ -94,44 +94,94 @@ export declare const bmcCompactContextSchema: z.ZodObject<{
     }[];
     notes?: string[] | undefined;
 }>;
-export declare const bmcAnalysisCardSchema: z.ZodObject<{
+export declare const bmcAnalysisCardSchema: z.ZodEffects<z.ZodObject<{
     domain: z.ZodEnum<["客户细分", "客户关系", "渠道通路", "价值主张", "收入来源", "关键业务", "核心资源", "重要合作", "成本结构"]>;
+    /**
+     * One-line conclusion (≤60 chars). Surfaces as the BMC card title and
+     * the drawer "摘要" section. Optional for back-compat with older agent
+     * outputs that only emit content; the drawer derives summary from
+     * content's first sentence when missing.
+     */
+    summary: z.ZodOptional<z.ZodString>;
+    /**
+     * Detailed analysis (3-6 paragraphs / 200-600 chars). Drawer's full
+     * detail section. May be empty when the agent only has a 1-sentence
+     * answer (then summary holds the result, content stays "").
+     */
     content: z.ZodString;
     confidence: z.ZodNumber;
 }, "strip", z.ZodTypeAny, {
     content: string;
     domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
     confidence: number;
+    summary?: string | undefined;
 }, {
     content: string;
     domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
     confidence: number;
+    summary?: string | undefined;
+}>, {
+    content: string;
+    domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
+    confidence: number;
+    summary?: string | undefined;
+}, {
+    content: string;
+    domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
+    confidence: number;
+    summary?: string | undefined;
 }>;
 export declare const bmcAnalysisSchema: z.ZodObject<{
-    bmcCards: z.ZodArray<z.ZodObject<{
+    bmcCards: z.ZodArray<z.ZodEffects<z.ZodObject<{
         domain: z.ZodEnum<["客户细分", "客户关系", "渠道通路", "价值主张", "收入来源", "关键业务", "核心资源", "重要合作", "成本结构"]>;
+        /**
+         * One-line conclusion (≤60 chars). Surfaces as the BMC card title and
+         * the drawer "摘要" section. Optional for back-compat with older agent
+         * outputs that only emit content; the drawer derives summary from
+         * content's first sentence when missing.
+         */
+        summary: z.ZodOptional<z.ZodString>;
+        /**
+         * Detailed analysis (3-6 paragraphs / 200-600 chars). Drawer's full
+         * detail section. May be empty when the agent only has a 1-sentence
+         * answer (then summary holds the result, content stays "").
+         */
         content: z.ZodString;
         confidence: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
         content: string;
         domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
         confidence: number;
+        summary?: string | undefined;
     }, {
         content: string;
         domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
         confidence: number;
+        summary?: string | undefined;
+    }>, {
+        content: string;
+        domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
+        confidence: number;
+        summary?: string | undefined;
+    }, {
+        content: string;
+        domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
+        confidence: number;
+        summary?: string | undefined;
     }>, "many">;
 }, "strip", z.ZodTypeAny, {
     bmcCards: {
         content: string;
         domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
         confidence: number;
+        summary?: string | undefined;
     }[];
 }, {
     bmcCards: {
         content: string;
         domain: "客户细分" | "客户关系" | "渠道通路" | "价值主张" | "收入来源" | "关键业务" | "核心资源" | "重要合作" | "成本结构";
         confidence: number;
+        summary?: string | undefined;
     }[];
 }>;
 export type CcBmcDomain = z.infer<typeof ccBmcDomainSchema>;

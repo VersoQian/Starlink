@@ -424,7 +424,7 @@ export function CanvasLiveCoach(props: Props) {
         type="button"
         onClick={() => setCollapsed(false)}
         aria-label="展开 AI 教练"
-        className="absolute top-6 right-6 z-20 flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 shadow-lg text-white hover:bg-stratum-navy-soft transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
+        className="absolute top-[88px] right-6 z-20 flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 shadow-lg text-white hover:bg-stratum-navy-soft transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] active:translate-y-px pointer-events-auto"
       >
         <Lightbulb className="h-3.5 w-3.5 text-stratum-sky" strokeWidth={2} fill="#89CEFF" />
         <span className="font-mono text-[10px] font-bold uppercase tracking-[0.14em]">COACH</span>
@@ -436,7 +436,7 @@ export function CanvasLiveCoach(props: Props) {
 
   return (
     <aside
-      className="absolute top-6 right-6 z-20 w-[300px] max-w-[40vw] rounded-xl bg-white shadow-lg border border-stratum-line pointer-events-auto"
+      className="absolute top-[88px] right-6 z-20 w-[300px] max-w-[40vw] rounded-xl bg-white shadow-lg border border-stratum-line pointer-events-auto"
       aria-label="AI 教练"
     >
       <header className="flex items-center justify-between px-3 py-2 border-b-[0.5px] border-stratum-line bg-stratum-surface-low/40 rounded-t-xl">

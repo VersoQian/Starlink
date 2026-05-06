@@ -37,9 +37,21 @@ export const bmcCompactContextSchema = z.object({
 });
 export const bmcAnalysisCardSchema = z.object({
     domain: ccBmcDomainSchema,
-    content: z.string().min(1),
+    /**
+     * One-line conclusion (≤60 chars). Surfaces as the BMC card title and
+     * the drawer "摘要" section. Optional for back-compat with older agent
+     * outputs that only emit content; the drawer derives summary from
+     * content's first sentence when missing.
+     */
+    summary: z.string().max(120).optional(),
+    /**
+     * Detailed analysis (3-6 paragraphs / 200-600 chars). Drawer's full
+     * detail section. May be empty when the agent only has a 1-sentence
+     * answer (then summary holds the result, content stays "").
+     */
+    content: z.string(),
     confidence: z.number().min(0).max(1)
-});
+}).refine((card) => (card.summary && card.summary.trim().length > 0) || card.content.trim().length > 0, { message: 'card must have either summary or content (both empty is invalid)' });
 export const bmcAnalysisSchema = z.object({
     bmcCards: z.array(bmcAnalysisCardSchema)
 });

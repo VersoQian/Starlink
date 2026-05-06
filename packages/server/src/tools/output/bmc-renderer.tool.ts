@@ -10,6 +10,9 @@ import {
 
 type BmcRendererCard = {
   domain?: string
+  /** One-line conclusion (≤60 chars). Issue-C fix: separate summary from content. */
+  summary?: string
+  /** Detailed body (3-6 paragraphs). May be empty if the agent only has 1 line. */
   content?: string
   confidence?: number
 }
@@ -116,6 +119,13 @@ function renderCardNode(card: BmcRendererCard, index: number): CanvasNode[] {
   const layout = DOMAIN_LAYOUT[domain]
   if (!layout) return []
 
+  // Issue C fix · pass through summary/fullContent so the BMC drawer
+  // can render two distinct sections (摘要 vs 详细分析) instead of
+  // collapsing them into a single repeated paragraph.
+  // Back-compat: if agent only emits content, drawer derives summary
+  // from first sentence client-side.
+  const cardSummary = typeof card.summary === 'string' ? card.summary : ''
+  const cardContent = typeof card.content === 'string' ? card.content : ''
   return [{
     id: `bmc-${layout.id}`,
     type: 'note',
@@ -123,12 +133,19 @@ function renderCardNode(card: BmcRendererCard, index: number): CanvasNode[] {
     data: {
       type: 'note',
       title: domain,
-      content: typeof card.content === 'string' ? card.content : '',
+      // The visible card body should show whichever is richer. Prefer
+      // content (the detailed body) when present, else fall back to
+      // summary (the one-liner).
+      content: cardContent || cardSummary,
       variant: 'insight',
       meta: {
         macraType: 'cc-bmc-card',
         domain,
         agentType: DOMAIN_AGENT[domain],
+        // Drawer reads summary + fullContent off meta. Both populated
+        // makes the two-section layout work correctly.
+        summary: cardSummary,
+        fullContent: cardContent,
         metadata: {
           agent_signature: DOMAIN_AGENT[domain],
           confidence: normalizeConfidence(card.confidence)
