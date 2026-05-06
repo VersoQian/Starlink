@@ -886,7 +886,14 @@ ${firstStep.description}${draftHint}
       // Keep macraNodes in memory so the user can "undo" if needed,
       // but they're hidden from canvas. Future improvement: store in
       // a separate `archivedMacraNodes` slot rather than mutating.
-      macraNodes: archivedMacra
+      macraNodes: archivedMacra,
+      // P9 Block 5a · close detail panel and clear focused conflict so
+      // user doesn't see a drawer pointing to an archived node (which
+      // null-derefs in the drawer component when it tries to find the
+      // node in the now-emptied nodes[] array).
+      detailPanel: { isOpen: false, nodeId: null },
+      focusedConflictId: null,
+      pendingInterrupt: null
     })
     // Keep editor & selection state out of the way.
     void nodes
@@ -1003,7 +1010,16 @@ ${firstStep.description}${draftHint}
           const { getGraphQLClient: gql } = await import('@/shared/lib/graphql-client')
           await gql().request(CLEAR_WORKSPACE_CANVAS_MUTATION, { workspaceId })
         } catch (clearErr) {
+          // P9 Block 4a · surface to user, not just console.warn —
+          // canvas was already archived locally; if server clear fails
+          // user sees a blank canvas with no explanation.
           console.warn('[wizard] clearWorkspaceCanvas failed', clearErr)
+          appendChatMessage({
+            role: 'assistant',
+            content: `⚠ 服务端画布清理失败（不影响本地刷新视觉效果）：${clearErr instanceof Error ? clearErr.message : String(clearErr)}`,
+            source: 'error',
+            isWizard: true
+          })
         }
         // Sprint 2.3 · STRONG seed framing — 7 答案是用户亲口确认的事
         // 实，agents 不能改写、只能扩展/反驳。这避免初始 BMC 输出偏离
@@ -1497,7 +1513,9 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             ? meta.fullContent
             : (typeof data.content === 'string' ? data.content : ''),
           domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-          metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+          metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
+            ? (meta.metadata as Record<string, unknown>)
+            : {},
           agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
           severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
           conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
@@ -1724,7 +1742,9 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
               fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
               domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-              metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+              metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
+            ? (meta.metadata as Record<string, unknown>)
+            : {},
               agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
               severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
               conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
@@ -1760,7 +1780,9 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
           fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
           domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-          metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+          metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
+            ? (meta.metadata as Record<string, unknown>)
+            : {},
           agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
           severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
           conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
@@ -1825,8 +1847,19 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       // Heartbeat sanity check — server's reaper marks stale sessions
       // failed within 75s, but we add a softer client-side gate to avoid
       // re-attaching to a session that's about to be reaped.
+      // P9 Block 4d · validate ISO format. new Date("invalid").getTime()
+      // returns NaN, and `NaN > 90_000` is always false → without this
+      // guard, malformed timestamps would pass through and we'd reconnect
+      // to truly stale sessions.
       if (running.heartbeatAt) {
-        const ageMs = Date.now() - new Date(running.heartbeatAt).getTime()
+        const hbTime = new Date(running.heartbeatAt).getTime()
+        if (Number.isNaN(hbTime)) {
+          console.warn(
+            `[reattachToActiveSession] invalid heartbeatAt format: ${running.heartbeatAt}; skipping`
+          )
+          return null
+        }
+        const ageMs = Date.now() - hbTime
         if (ageMs > 90_000) {
           console.warn(
             `[reattachToActiveSession] skip stale session ${running.id} (heartbeat ${Math.round(ageMs / 1000)}s ago)`
@@ -1862,7 +1895,9 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               summary: typeof meta.summary === 'string' ? meta.summary : (typeof dataObj.content === 'string' ? dataObj.content : ''),
               fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
               domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-              metadata: (meta.metadata as Record<string, unknown> | undefined) || {},
+              metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
+            ? (meta.metadata as Record<string, unknown>)
+            : {},
               agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
               severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
               conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
@@ -1931,7 +1966,11 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       })
 
       // Tear watcher when conversation ends. Don't block the action.
-      watcher.done.catch(() => {}).finally(() => {
+      // P9 Block 4c · log subscription death so silent disconnects don't
+      // leave Coach hanging at "thinking" forever with no diagnostic.
+      watcher.done.catch((err) => {
+        console.error('[reattachToActiveSession] subscription died', err)
+      }).finally(() => {
         const cur = get().currentConversationId
         if (cur === running.id) {
           set({ currentConversationId: null })
