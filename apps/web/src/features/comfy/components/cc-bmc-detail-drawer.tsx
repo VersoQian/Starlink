@@ -88,28 +88,51 @@ export function CCBMCDetailDrawer() {
   }
 
   const fullContent = nodeWithDetails?.fullContent || nodeData.content || ''
-  // Derive summary: prefer agent-supplied meta.summary, else extract the
-  // first complete sentence from the first paragraph (terminated by 。！？.!?).
-  // Single-sentence summary is more useful than a 280-char prefix, which
-  // duplicates the start of the detail body verbatim.
+  // P10.7 · derivedSummary 必须真正 SHORT — 之前的版本对 markdown bullet
+  // 列表（无句号终止符）只能 fallback 到整段文字，导致摘要 = 详细 全文，
+  // 用户看到两段相同内容觉得"反了"。
+  // 新策略，按优先级：
+  //   1. 服务端 meta.summary（如有，agent 显式产出）
+  //   2. 第一行的 markdown 标题（去除 # 前缀），如 "## 核心价值" → "核心价值"
+  //   3. 第一个 bullet/list item 的内容
+  //   4. 第一句完整句子（。！？.!?）
+  //   5. 最后兜底：前 60 字 + …
+  // 严格 ≤80 字，保证视觉上"摘要"明显短于"详细内容"。
   const derivedSummary = (() => {
     if (typeof nodeWithDetails?.summary === 'string' && nodeWithDetails.summary.trim().length > 0) {
-      return nodeWithDetails.summary
+      const s = nodeWithDetails.summary.trim()
+      return s.length > 100 ? s.slice(0, 100).trimEnd() + '…' : s
     }
     if (!fullContent) return ''
-    const firstPara = fullContent.split(/\n\s*\n/)[0]?.trim() ?? ''
-    if (!firstPara) return ''
-    // Prefer the first complete sentence (CN/EN punctuation) over a raw slice
-    const sentenceMatch = firstPara.match(/^[\s\S]+?[。！？.!?](?=\s|$)/)
-    const candidate = sentenceMatch?.[0]?.trim() ?? firstPara
-    return candidate.length > 200 ? candidate.slice(0, 200).trimEnd() + '…' : candidate
+    const trimmed = fullContent.trim()
+
+    // 2. Markdown heading (## title)
+    const headingMatch = trimmed.match(/^#{1,6}\s+(.+?)(?:\n|$)/)
+    if (headingMatch?.[1]) {
+      const h = headingMatch[1].trim()
+      return h.length > 80 ? h.slice(0, 80).trimEnd() + '…' : h
+    }
+
+    // 3. First bullet (- item / * item / 1. item / · item)
+    const bulletMatch = trimmed.match(/^\s*(?:[-*·]|\d+\.)\s+(.+?)(?:\n|$)/m)
+    if (bulletMatch?.[1]) {
+      const b = bulletMatch[1].replace(/[*_`]/g, '').trim()
+      if (b.length > 0) return b.length > 80 ? b.slice(0, 80).trimEnd() + '…' : b
+    }
+
+    // 4. First sentence
+    const firstPara = trimmed.split(/\n\s*\n/)[0]?.trim() ?? ''
+    const sentenceMatch = firstPara.match(/^[\s\S]+?[。！？.!?](?=\s|$|\n)/)
+    if (sentenceMatch?.[0]) {
+      const s = sentenceMatch[0].trim()
+      return s.length > 80 ? s.slice(0, 80).trimEnd() + '…' : s
+    }
+
+    // 5. Hard fallback — first 60 chars
+    const flat = trimmed.replace(/\n+/g, ' ').replace(/\s+/g, ' ')
+    return flat.length > 60 ? flat.slice(0, 60).trimEnd() + '…' : flat
   })()
-  // P10.5 · per user request, drawer ALWAYS shows both 摘要 + 详细内容
-  // sections. Previous behaviour suppressed 摘要 when it equalled the
-  // start of fullContent (to avoid visual repetition), but user wants
-  // the two-section structure to be unconditional — the 摘要 read is
-  // useful even when redundant, and the visual hierarchy of "结论 →
-  // 论证" is more important than avoiding the repetition.
+  // 摘要永远展示（即使从内容派生），保持双段结构。
   const showSummary = Boolean(derivedSummary && derivedSummary.trim().length > 0)
   const summary = derivedSummary
   const byline = nodeData.domain ? BYLINE_BY_DOMAIN[nodeData.domain] : undefined
