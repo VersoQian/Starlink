@@ -1,5 +1,5 @@
 /**
- * Frontend agent registry — single source of truth for the 11 backend
+ * Frontend agent registry — single source of truth for the 12 backend
  * agents that can be surfaced to users via @-mention.
  *
  * Each entry mirrors a backend agent.yaml and adds the UI metadata the
@@ -39,7 +39,7 @@ import type { AgentByline } from '@/shared/design-system/tokens-v2'
 // Types
 // ============================================================================
 
-/** All 11 backend agent ids. Source of truth: packages/server/src/agents/<dir>/agent.yaml `id:` field. */
+/** All 12 backend agent ids. Source of truth: packages/server/src/agents/<dir>/agent.yaml `id:` field. */
 export type AgentId =
   | 'market-agent'
   | 'product-agent'

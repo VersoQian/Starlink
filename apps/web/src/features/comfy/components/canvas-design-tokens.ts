@@ -1,5 +1,26 @@
 /**
- * Canvas 设计系统 tokens（refresh-2026-04）
+ * Canvas 设计系统 tokens（v1 · refresh-2026-04）
+ *
+ * ⚠️ DESIGN SYSTEM 分裂提醒（P8 audit 发现）：
+ *
+ *   v1（这个文件）: TOKENS / NODE_HUE / IDEATION_HUE / NODE
+ *   v2（新的）:   `src/shared/design-system/tokens-v2.ts`
+ *                 → ink / paper / press / rules / bylineAccent / editorialTokens
+ *
+ * 两套 token 服务于**不同的视觉系统**，互不冲突：
+ *   • v1 这一套是给 features/comfy/components/panels/* 的"工具面板"
+ *     和 features/ideation/* 的旧 BMC 视图用的（cyan-on-slate dev-tool 美学）
+ *   • v2 是 Editorial Boardroom 框架（ink-on-paper 报刊美学），
+ *     用在 cc-bmc-card-node / canvas-live-coach / report-card-node 等
+ *     v2 surface 上
+ *
+ * 不要混用 — 给 v2 surface 加 token 时去 tokens-v2.ts，给 panel 加 token
+ * 来这里。如果未来要让两套统一，是一次大重构（20+ 文件迁移），不在
+ * cleanup 范围内。
+ *
+ * ============================================================
+ * v1 历史背景（保留）
+ * ============================================================
  *
  * 现状：原画布堆叠 amber + cyan + emerald + slate 4 套渐变 + 多层阴影 + glow
  *       视觉过载，"AI 工具感" 被 "游戏 UI 感" 盖过。
