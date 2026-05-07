@@ -165,6 +165,21 @@ export const EMPTY_SEEDED_STATE: SeededBusinessState = {
  *
  *   See `docs/blackboard-model.md` for a full architecture diagram.
  */
+/**
+ * P11.10 · Moderator verdict — the workshop facilitator's per-round
+ * decision to continue iterating or accept the current canvas.
+ *
+ *   'continue' → critic conflicts warrant another revision round; route
+ *                back to supervisor so generators can address them.
+ *   'accept'   → conflicts are absent or low-impact; finalize the
+ *                canvas and END the run.
+ *
+ * Set by runModerator after critic. Reads by the moderator-conditional
+ * edge that replaces the older critic-conditional. Null when moderator
+ * hasn't run (legacy / non-BMC intents that bypass moderator).
+ */
+export type ModeratorVerdict = 'continue' | 'accept' | null
+
 export const BusinessState = Annotation.Root({
   traceId: Annotation<string>(),
   workspaceId: Annotation<string>(),
@@ -182,7 +197,8 @@ export const BusinessState = Annotation.Root({
   financeNodes: Annotation<MacraNodeData[]>(),
   agentAvatars: Annotation<MacraNodeData[]>(),
   conflicts: Annotation<CriticConflict[]>(),
-  edges: Annotation<CanvasEdge[]>()
+  edges: Annotation<CanvasEdge[]>(),
+  moderatorVerdict: Annotation<ModeratorVerdict>()
 })
 
 export type BusinessStateType = typeof BusinessState.State

@@ -75,6 +75,7 @@ import {
   type CrossContext,
   type Intent,
   type MacraNodeData,
+  type ModeratorVerdict,
   type SupervisorDirective
 } from './business-langgraph/state.js'
 import {
@@ -602,6 +603,19 @@ export class BusinessLangGraphService {
             }
           }
 
+          // P11.10 · Moderator narration node — emitted as a generalNode
+          // by runModerator. We pluck the moderator-prefixed entry out
+          // of the new generalNodes (the rest belong to general-responder
+          // / deep-research and are handled by their own dispatch above).
+          if (nodeName === 'moderator' && payload.generalNodes) {
+            const moderatorNodes = (payload.generalNodes as MacraNodeData[]).filter((n) =>
+              n.id.startsWith('moderator-')
+            )
+            for (const node of moderatorNodes) {
+              yield { type: 'delta', delta: builder.addMacraNode(node) }
+            }
+          }
+
           // Critic
           if (nodeName === 'critic' && payload.conflicts) {
             const conflicts = payload.conflicts as MacraNodeData[]
@@ -756,6 +770,7 @@ export class BusinessLangGraphService {
       .addNode('financeAgent', async (state) => this.runFinanceAgent(state))
       .addNode('synthesizer', async (state) => this.runSynthesizer(state))
       .addNode('critic', async (state) => this.runCritic(state))
+      .addNode('moderator', async (state) => this.runModerator(state))
       .addEdge(START, 'supervisor')
       .addConditionalEdges('supervisor', (state) => {
         const intent = state.intent?.intent || 'general'
@@ -781,16 +796,22 @@ export class BusinessLangGraphService {
       .addEdge('productAgent', 'synthesizer')
       .addEdge('financeAgent', 'synthesizer')
       .addEdge('synthesizer', 'critic')
+      // P11.10 · critic now flows into moderator, which is the workshop
+      // facilitator that decides whether the round's conflicts warrant
+      // another revision pass or the canvas is acceptable. detect_conflicts
+      // intent still short-circuits to END since the user is asking for a
+      // critique-only run, not iterative refinement.
       .addConditionalEdges('critic', (state) => {
         if (state.intent?.intent === 'detect_conflicts') {
           return [END]
         }
-        const hasHighSeverity = state.conflicts.some((c) => c.severity === 'high')
-        // Sprint 2.2 · MAX_ROUNDS is now env-configurable (BMC_MAX_ROUNDS)
-        // and clamped to [1,5]. Default 3. Headless wizard graduations
-        // can override to 2 for faster turnaround at the cost of
-        // potentially leaving low-severity conflicts unresolved.
-        if (hasHighSeverity && state.roundNumber < MAX_ROUNDS) {
+        return ['moderator']
+      })
+      .addConditionalEdges('moderator', (state) => {
+        // moderator wrote a verdict on this round's outcome. 'continue' →
+        // back to supervisor for the next revision round (capped by
+        // MAX_ROUNDS). 'accept' or null (LLM unavailable) → end the run.
+        if (state.moderatorVerdict === 'continue' && state.roundNumber < MAX_ROUNDS) {
           return ['supervisor']
         }
         return [END]
@@ -2880,6 +2901,138 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     return edges
   }
 
+  // ============== Moderator (P11.10) ==============
+
+  /**
+   * Workshop facilitator. Runs after critic on the main BMC path. Reads
+   * the round's conflicts + BMC scope and decides whether the round's
+   * findings warrant another revision pass ('continue') or the canvas
+   * is acceptable ('accept').
+   *
+   * Also emits a 1-2 sentence narration as an insight-note so users see
+   * the workshop's decision-making in real time on the canvas. The
+   * narration is the "moderator visible" UX touchpoint — without it, the
+   * moderator's verdict would only manifest as the next-round transition
+   * (or absence thereof), which is invisible.
+   *
+   * Falls back to the legacy hard-coded heuristic (high-severity present?)
+   * when the LLM is unavailable or errors. The fallback path also writes
+   * the verdict so the conditional edge always sees a non-null value.
+   */
+  private async runModerator(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
+    const startedAt = Date.now()
+
+    const conflicts = state.conflicts ?? []
+    const highCount = conflicts.filter((c) => c.severity === 'high').length
+    const moderateCount = conflicts.filter((c) => c.severity === 'medium' || (c.severity as unknown) === 'moderate').length
+    const lowCount = conflicts.filter((c) => c.severity === 'low').length
+    const round = state.roundNumber
+    const atCap = round >= MAX_ROUNDS
+
+    // Heuristic fallback (used when LLM unavailable or fails). Continue if
+    // there's any high-severity conflict and we have rounds left; otherwise
+    // accept.
+    let verdict: ModeratorVerdict = highCount > 0 && !atCap ? 'continue' : 'accept'
+    let narration = atCap
+      ? `已到达最大修订轮次（第 ${round} 轮，含 ${highCount} 个高、${moderateCount} 个中、${lowCount} 个低严重性冲突），按既有画布定稿。`
+      : highCount > 0
+        ? `本轮检出 ${highCount} 个高严重性冲突，建议进入第 ${round + 1} 轮修订。`
+        : `本轮检出 ${conflicts.length} 个低/中严重性问题，画布逻辑自洽，可接受当前版本。`
+
+    if (this.model) {
+      try {
+        const conflictDigest = conflicts
+          .slice(0, 6)
+          .map((c, i) => `  ${i + 1}. [${c.severity ?? '?'}] ${c.label ?? c.id}: ${(c.content ?? '').slice(0, 80)}`)
+          .join('\n')
+
+        const bmcCount =
+          (state.marketNodes?.length ?? 0) +
+          (state.productNodes?.length ?? 0) +
+          (state.financeNodes?.length ?? 0)
+
+        const prompt = `你是 Multi-Agent 商业模型研讨会的常驻主持人 (Moderator)。本轮 critic 已完成冲突检测。
+
+## 现状
+- 当前轮次：第 ${round} 轮（最大 ${MAX_ROUNDS} 轮）
+- BMC 已生成单元格：${bmcCount} / 9
+- 冲突总数：${conflicts.length}（高 ${highCount}、中 ${moderateCount}、低 ${lowCount}）
+
+## 冲突摘要
+${conflictDigest || '（无冲突）'}
+
+## 任务
+作为研讨会主持人，判断：
+- "continue" = 仍有需要 generator 修订的高/中严重性冲突，应进入下一轮
+- "accept" = 冲突可接受或已达最大轮次，画布定稿
+
+输出 JSON: { "verdict": "continue" | "accept", "narration": "1-2 句给用户看的研讨会决策说明，含具体数字" }`
+
+        const moderatorSchema = z.object({
+          verdict: z.enum(['continue', 'accept']),
+          narration: z.string().min(8).max(240)
+        })
+
+        const structured = this.model.withStructuredOutput(moderatorSchema, {
+          name: 'ModeratorVerdict',
+          method: 'jsonMode'
+        })
+
+        const response = await structured.invoke([
+          new SystemMessage(prompt),
+          new HumanMessage('请以 JSON 输出 verdict + narration。')
+        ])
+
+        // Honour MAX_ROUNDS cap even if LLM says continue.
+        const llmVerdict = response.verdict === 'continue' && atCap ? 'accept' : response.verdict
+        verdict = llmVerdict
+        narration = response.narration
+      } catch (err) {
+        auditLogger.warn({
+          action: 'business-langgraph.moderator.llm-failed',
+          requestId: state.traceId,
+          workflowId: state.workspaceId,
+          userId: state.userId,
+          metadata: { err: err instanceof Error ? err.message : String(err), fallback: 'heuristic' }
+        })
+      }
+    }
+
+    // Emit moderator narration as an insight-note so the user sees the
+    // round-end decision visually on the canvas.
+    const narrationNode: MacraNodeData = {
+      id: `moderator-${nanoid(8)}`,
+      type: 'insight-note',
+      label: verdict === 'continue' ? '主持人 · 进入下一轮' : '主持人 · 画布定稿',
+      content: narration,
+      metadata: {
+        agent_signature: 'Moderator',
+        confidence: 'medium',
+        source: 'moderator-verdict',
+        tags: [verdict, `round-${round}`]
+      }
+    }
+
+    this.emitGenerationOutput(state, 'moderator', [narrationNode])
+
+    this.logTrace({
+      step: 'moderator',
+      traceId: state.traceId,
+      workspaceId: state.workspaceId,
+      userId: state.userId,
+      status: 'completed',
+      durationMs: Date.now() - startedAt,
+      metadata: { round, verdict, conflicts: conflicts.length, highCount, moderateCount, lowCount, atCap }
+    })
+
+    return {
+      moderatorVerdict: verdict,
+      // append narration node into agentAvatars / a generic insight slot.
+      // Reuse generalNodes so frontend hydrates it via existing routing.
+      generalNodes: [...(state.generalNodes ?? []), narrationNode]
+    }
+  }
+
   // ============== LLM-Driven Critic ==============
 
   private async runCritic(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
@@ -3161,7 +3314,8 @@ ${workspaceContext}
       financeNodes: seed.financeNodes,
       agentAvatars: seed.agentAvatars,
       conflicts: seed.conflicts,
-      edges: seed.edges
+      edges: seed.edges,
+      moderatorVerdict: null
     }
   }
 

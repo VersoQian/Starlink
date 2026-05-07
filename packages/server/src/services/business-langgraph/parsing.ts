@@ -676,7 +676,8 @@ export function createBlankState(params: {
     financeNodes: [],
     agentAvatars: [],
     conflicts: [],
-    edges: []
+    edges: [],
+    moderatorVerdict: null
   }
 }
 
