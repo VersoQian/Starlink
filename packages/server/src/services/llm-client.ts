@@ -137,7 +137,23 @@ export class LLMClient {
   constructor(options?: { baseURL?: string; apiKey?: string; defaultModel?: string }) {
     this.baseURL = options?.baseURL ?? process.env.LLM_BASE_URL ?? 'https://api.openai.com/v1'
     this.apiKey = options?.apiKey ?? process.env.LLM_API_KEY ?? ''
-    this.defaultModel = options?.defaultModel ?? process.env.LLM_MODEL ?? 'gpt-4o-mini'
+    // P11.18 · pick a sensible default by sniffing baseURL — saves 16+
+    // dimension-action callers from hardcoding `model:` themselves.
+    // OpenAI baseURL → gpt-4o-mini; DeepSeek → deepseek-chat;
+    // SiliconFlow → Qwen2.5-7B (commonly available); else fall back to
+    // OpenAI's smallest. LLM_MODEL env wins over the sniff.
+    const explicitModel = options?.defaultModel ?? process.env.LLM_MODEL
+    if (explicitModel) {
+      this.defaultModel = explicitModel
+    } else if (this.baseURL.includes('deepseek')) {
+      this.defaultModel = 'deepseek-chat'
+    } else if (this.baseURL.includes('siliconflow')) {
+      this.defaultModel = 'Qwen/Qwen2.5-7B-Instruct'
+    } else if (this.baseURL.includes('dashscope') || this.baseURL.includes('aliyuncs')) {
+      this.defaultModel = 'qwen-turbo'
+    } else {
+      this.defaultModel = 'gpt-4o-mini'
+    }
   }
 
   /**
