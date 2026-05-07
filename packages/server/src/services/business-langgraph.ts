@@ -2178,7 +2178,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 - content: **详细分析 markdown**（300-800 字完整论证，含数据、趋势、子项、案例、建议；这是抽屉"详细分析"段渲染的原始内容）
 - metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 
-**关键约束**：summary 必须是 content 的浓缩，而不是首段或单一标题。两者**都用 markdown**，前端会做完整渲染（含 GFM 表格、列表、引用）。
+**关键约束**：
+1. summary 必须是 content 的浓缩，而不是首段或单一标题。两者**都用 markdown**，前端会做完整渲染（含 GFM 表格、列表、引用）。
+2. **严格 JSON 合法性**：content 与 summary 是 JSON 字符串值，**禁止**在字符串内部使用未转义的 ASCII 双引号 \`"\`。需要引用时统一使用中文引号 「」 或单引号 \`'\`。所有换行使用 \\n 转义，**禁止**字面换行。
 
 示例：
 [
@@ -2333,7 +2335,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 - content: **详细分析 markdown**（200-500 字完整论证，含子项 / 数据 / 案例；详情抽屉"详细分析"段渲染原始 markdown）
 - metadata: { agent_signature: "Product_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 
-**关键**：summary 是 content 的浓缩，不是首段或单一标题。两者都用 markdown，前端做完整渲染（含 GFM 表格、列表）。
+**关键**：
+1. summary 是 content 的浓缩，不是首段或单一标题。两者都用 markdown，前端做完整渲染（含 GFM 表格、列表）。
+2. **严格 JSON 合法性**：content 与 summary 是 JSON 字符串值，**禁止**在字符串内部使用未转义的 ASCII 双引号 \`"\`。需要引用时统一使用中文引号 「」 或单引号 \`'\`。所有换行使用 \\n 转义，**禁止**字面换行。
 
 示例：
 [
@@ -2485,7 +2489,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
 - content: **详细分析 markdown**（300-600 字完整数字论证，含 % / 单价 / 趋势 / 风险 / 敏感性；详情抽屉"详细分析"段渲染原始 markdown）
 - metadata: { agent_signature: "Finance_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
 
-**关键**：summary 是 content 的浓缩，前端两段都做 markdown 渲染（含 GFM 表格 / 列表）。
+**关键**：
+1. summary 是 content 的浓缩，前端两段都做 markdown 渲染（含 GFM 表格 / 列表）。
+2. **严格 JSON 合法性**：content 与 summary 是 JSON 字符串值，**禁止**在字符串内部使用未转义的 ASCII 双引号 \`"\`。需要引用时统一使用中文引号 「」 或单引号 \`'\`。所有换行使用 \\n 转义，**禁止**字面换行。
 
 示例：
 [

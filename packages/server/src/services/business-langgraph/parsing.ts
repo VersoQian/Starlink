@@ -166,7 +166,10 @@ function partialRecoveryParseObjects(
     const objStr = extractBalancedObject(cleaned, cursor)
     if (!objStr) break
     try {
-      const cleanedObj = objStr.replace(/,(\s*[}\]])/g, '$1')
+      let cleanedObj = objStr.replace(/,(\s*[}\]])/g, '$1')
+      // P11.9 · same control-char escaping as the main parse path so
+      // recovered objects with raw markdown newlines also succeed.
+      cleanedObj = escapeControlCharsInJsonStrings(cleanedObj)
       const node = JSON.parse(cleanedObj) as MacraNodeData
       // Lightweight shape check: must look like a cc-bmc-card cell
       if (
@@ -192,6 +195,58 @@ function partialRecoveryParseObjects(
   return nodes
 }
 
+/**
+ * P11.9 / J1 · Tolerant JSON preprocessor.
+ *
+ * Walk the input char-by-char tracking string-vs-non-string state. When
+ * inside a JSON string (between unescaped double quotes) replace literal
+ * control chars with their escaped equivalents:
+ *   - 0x0A (\n) → \\n
+ *   - 0x0D (\r) → \\r
+ *   - 0x09 (\t) → \\t
+ *
+ * This catches the common LLM failure where the model emits multi-line
+ * markdown inside a content field as raw newlines instead of escaped
+ * \\n. JSON.parse rejects that with "Bad control character in string
+ * literal" — by escaping during preprocess we make the string parseable.
+ *
+ * Outside strings (in keys, structural characters, whitespace) we leave
+ * everything alone — newlines there are valid JSON whitespace.
+ */
+function escapeControlCharsInJsonStrings(input: string): string {
+  let out = ''
+  let inString = false
+  let escape = false
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i]
+    if (escape) {
+      // Previous char was an unescaped backslash; this char is part of
+      // the escape sequence (e.g. \", \\, \n already-escaped). Pass
+      // through untouched.
+      out += c
+      escape = false
+      continue
+    }
+    if (c === '\\' && inString) {
+      out += c
+      escape = true
+      continue
+    }
+    if (c === '"') {
+      out += c
+      inString = !inString
+      continue
+    }
+    if (inString) {
+      if (c === '\n') { out += '\\n'; continue }
+      if (c === '\r') { out += '\\r'; continue }
+      if (c === '\t') { out += '\\t'; continue }
+    }
+    out += c
+  }
+  return out
+}
+
 export function extractAndParseJSON(content: string, agentName: string): MacraNodeData[] {
   try {
     // 1. 移除 Markdown 代码块标记
@@ -212,6 +267,10 @@ export function extractAndParseJSON(content: string, agentName: string): MacraNo
     // 3. 清理常见的 JSON 格式问题
     jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1')
 
+    // 3a. P11.9 · escape literal control chars inside string values so
+    //     LLM output with raw markdown newlines parses successfully.
+    jsonStr = escapeControlCharsInJsonStrings(jsonStr)
+
     // 4. 解析 JSON
     const nodes = JSON.parse(jsonStr) as MacraNodeData[]
 
@@ -227,7 +286,9 @@ export function extractAndParseJSON(content: string, agentName: string): MacraNo
   } catch (error) {
     // Per-cell partial recovery: don't lose ALL cells just because ONE has
     // a syntax error somewhere in the JSON.
-    const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '')
+    let cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '')
+    // P11.9 · pre-escape control chars before recovery scan as well.
+    cleanedContent = escapeControlCharsInJsonStrings(cleanedContent)
     const recovered = partialRecoveryParseObjects(cleanedContent, agentName)
     if (recovered.length > 0) {
       auditLogger.warn({
