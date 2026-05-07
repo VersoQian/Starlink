@@ -738,6 +738,14 @@ function macraToCanvasData(m: MacraNodeData): unknown {
       severity: m.severity,
       conflictType: m.conflictType,
       isInteractive: m.isInteractive,
+      // P11.15 · pass through summary + fullContent so mention-appended
+      // BMC cells render the 核心摘要 / 详细分析 split in the drawer just
+      // like main-pipeline cells (canvas-builder.addMacraNode already
+      // does this). Without it, drawer's extractMacraNodeData would
+      // see no meta.summary and the drawer's 5-tier derivedSummary
+      // fallback would kick in — usable but inconsistent.
+      summary: (m as { summary?: string }).summary ?? '',
+      fullContent: (m as { fullContent?: string }).fullContent ?? '',
       metadata: m.metadata ?? {}
     }
   }

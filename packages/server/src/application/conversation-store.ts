@@ -683,11 +683,16 @@ export class ConversationStore {
         })
       )
       const newEdges: CanvasEdge[] = result.appendedEdges.map((e) =>
+        // P11.15 · preserve `kind` through mention persistence so the
+        // bmc-structure / llm-insight / user-drawn / revision tag
+        // survives the DB round-trip and the frontend renders the
+        // correct visual style.
         canvasEdgeSchema.parse({
           id: e.id,
           source: e.source,
           target: e.target,
-          label: e.label ?? null
+          label: e.label ?? null,
+          kind: e.kind
         })
       )
       const updatedGraph: CanvasGraph = {
@@ -765,11 +770,17 @@ export class ConversationStore {
     await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
 
     const id = input.id ?? nanoid()
+    // P11.15 · user-drawn edges get kind='user-drawn' so the frontend
+    // renders them in mid-gray solid (vs. light-gray dashed for the
+    // rule-based BMC structure edges). This is the only edge-creation
+    // path users hit directly via the connectNodes mutation; all other
+    // edges originate from buildBMCEdges / synthesizer / mention-router.
     const parsed = canvasEdgeSchema.parse({
       id,
       source: input.source,
       target: input.target,
-      label: input.label ?? null
+      label: input.label ?? null,
+      kind: 'user-drawn' as const
     })
 
     const baseGraph = await this.getGraph(workspaceId)
