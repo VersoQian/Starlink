@@ -183,6 +183,29 @@ async function start() {
     })
   })
 
+  // P11.18 · DEV-ONLY: inject synthetic SLO samples for visual testing.
+  // Requires NODE_ENV !== 'production'. Pass ?agent=&errors=&total= to
+  // populate the in-memory ring with a controlled mix. Lets us screenshot
+  // the degraded-red chip path without crashing real agents.
+  if (process.env.NODE_ENV !== 'production') {
+    app.post('/internal/dev/inject-slo', async (req, res) => {
+      const agentId = String(req.query.agent ?? 'demo-agent')
+      const total = Math.max(1, Math.min(200, Number(req.query.total) || 12))
+      const errors = Math.max(0, Math.min(total, Number(req.query.errors) || 6))
+      const { recordAgentInvocation } = await import(
+        './infrastructure/observability/agent-slo-tracker.js'
+      )
+      for (let i = 0; i < total; i++) {
+        recordAgentInvocation(
+          agentId,
+          50 + Math.floor(Math.random() * 100),
+          i < errors ? 'error' : 'success'
+        )
+      }
+      res.json({ injected: total, errors, agentId })
+    })
+  }
+
   // P11.18 · /metrics — Prometheus text-format export. Scrape-friendly
   // for any Prom-based stack (Grafana, VictoriaMetrics, OTel-collector
   // prometheus receiver). Returns content-type text/plain; version=0.0.4

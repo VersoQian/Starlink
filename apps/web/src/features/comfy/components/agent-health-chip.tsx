@@ -35,9 +35,14 @@ type HealthResponse = {
 const POLL_MS = 30_000
 const HEALTH_URL = (() => {
   // Server is on PORT 4000 in dev; in prod it's reverse-proxied so
-  // same-origin /health/agents works. Detect dev via window.location.
+  // same-origin /health/agents works. In dev, any port that ISN'T
+  // 4000 means the frontend is on a different origin and should
+  // cross-domain to localhost:4000 directly. Override via env if
+  // the backend lives elsewhere.
   if (typeof window === 'undefined') return '/health/agents'
-  if (window.location.port === '3000' || window.location.port === '3001') {
+  const envOverride = process.env.NEXT_PUBLIC_API_BASE_URL
+  if (envOverride) return `${envOverride.replace(/\/$/, '')}/health/agents`
+  if (window.location.port && window.location.port !== '4000') {
     return 'http://localhost:4000/health/agents'
   }
   return '/health/agents'
