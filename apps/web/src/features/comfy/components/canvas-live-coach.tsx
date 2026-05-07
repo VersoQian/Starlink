@@ -89,6 +89,12 @@ interface Props {
   onShowConflicts: () => void
   /** Open the chat dock. */
   onOpenChat: () => void
+  /**
+   * P11.18 anti-overlap · when the right-side citation/insight panel
+   * (340px) is open, shift this floating column to the left of it
+   * so the COACH chip + 向导/记忆/资料 buttons don't get covered.
+   */
+  shiftLeftForPanel?: boolean
 }
 
 export function CanvasLiveCoach(props: Props) {
@@ -459,9 +465,18 @@ export function CanvasLiveCoach(props: Props) {
     </div>
   )
 
+  // P11.18 · when the right-side citation panel (340px wide,
+  // right-4 to right-edge) is open, shift this column left so it
+  // sits to the LEFT of the panel rather than getting covered.
+  // Citation panel width 340 + right-4 padding 16 + 16 gap = 372px
+  // offset from the right edge.
+  const positionClass = props.shiftLeftForPanel
+    ? 'absolute top-[88px] right-[372px] z-20 flex flex-col gap-2 items-end transition-[right] duration-200'
+    : 'absolute top-[88px] right-6 z-20 flex flex-col gap-2 items-end transition-[right] duration-200'
+
   if (collapsed) {
     return (
-      <div className="absolute top-[88px] right-6 z-20 flex flex-col gap-2 items-end">
+      <div className={positionClass}>
         <button
           type="button"
           onClick={() => setCollapsed(false)}
@@ -479,7 +494,7 @@ export function CanvasLiveCoach(props: Props) {
   const isLive = workflowStage === 'thinking' || workflowStage === 'revising'
 
   return (
-    <div className="absolute top-[88px] right-6 z-20 flex flex-col gap-2 items-end">
+    <div className={positionClass}>
     <aside
       className="w-[300px] max-w-[40vw] rounded-xl bg-white shadow-lg border border-stratum-line pointer-events-auto"
       aria-label="AI 教练"

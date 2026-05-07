@@ -680,7 +680,7 @@ export function CanvasPage({
   )
 
   const freeformContent = (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full flex flex-col">
       <CanvasFlow
         // Conflict-alert nodes are not rendered on canvas. Instead, each
         // conflict is shown as a red dashed edge between the two BMC
@@ -822,6 +822,7 @@ export function CanvasPage({
         {!wizardOpen ? (
           <CanvasLiveCoach
             workspaceId={workspaceId}
+            shiftLeftForPanel={citationOpen}
             onOpenWizard={() => {
               // Primary path: in-chat wizard (one continuous thread,
               // user sees BMC nodes appear as they answer). The
