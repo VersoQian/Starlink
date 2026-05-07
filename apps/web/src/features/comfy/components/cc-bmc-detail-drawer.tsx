@@ -377,6 +377,28 @@ export function CCBMCDetailDrawer() {
                         </dd>
                       </div>
                     )}
+                    {/* P11.11 · sub-agent provenance. Each BMC cell records
+                        which dimension-action sub-agents the parent main
+                        agent invoked during its ReAct loop to produce
+                        this cell. Renders as a chip list so the user
+                        sees the workshop's actual collaboration. */}
+                    {Array.isArray((nodeData.metadata as { subAgentsInvoked?: unknown }).subAgentsInvoked)
+                      && ((nodeData.metadata as { subAgentsInvoked: string[] }).subAgentsInvoked).length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <dt className="text-stratum-muted">SUB-AGENTS · 协作子专家</dt>
+                        <dd className="flex flex-wrap gap-1">
+                          {((nodeData.metadata as { subAgentsInvoked: string[] }).subAgentsInvoked).map((tool) => (
+                            <span
+                              key={tool}
+                              className="font-instr text-[10px] tabular-nums text-stratum-navy border-[0.5px] border-stratum-line px-1.5 py-0.5 normal-case tracking-normal bg-stratum-surface-low/40"
+                              title={tool}
+                            >
+                              {tool}
+                            </span>
+                          ))}
+                        </dd>
+                      </div>
+                    )}
                   </dl>
                 </Section>
               )}

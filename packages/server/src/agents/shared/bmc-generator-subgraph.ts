@@ -207,6 +207,36 @@ export function buildBmcGeneratorSubgraph(
       agentType: cfg.agentType,
       round: state.roundNumber
     })
+
+    // P11.11 · Sub-agent visibility. Walk all AIMessages in the ReAct
+    // session and collect tool names invoked. Attach to each generated
+    // node's metadata.subAgentsInvoked so the frontend drawer can render
+    // "本 cell 由以下 sub-agent 协作生成: persona-clusterer / market-sizer / ...".
+    // The metadata schema is .passthrough() so this extra field is preserved.
+    const subAgentsInvoked: string[] = []
+    const seen = new Set<string>()
+    for (const msg of state.messages) {
+      if (msg._getType() !== 'ai') continue
+      const toolCalls = (msg as AIMessage).tool_calls ?? []
+      for (const tc of toolCalls) {
+        const name = (tc as { name?: string }).name
+        if (typeof name === 'string' && !seen.has(name)) {
+          seen.add(name)
+          subAgentsInvoked.push(name)
+        }
+      }
+    }
+
+    if (subAgentsInvoked.length > 0) {
+      for (const node of validated) {
+        const existing = (node.metadata ?? {}) as Record<string, unknown>
+        ;(node.metadata as Record<string, unknown>) = {
+          ...existing,
+          subAgentsInvoked
+        }
+      }
+    }
+
     return { [cfg.outputField]: validated } as Partial<BmcGeneratorStateType>
   }
 
