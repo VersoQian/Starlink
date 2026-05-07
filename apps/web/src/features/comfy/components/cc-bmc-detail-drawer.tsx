@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { useComfyStore } from '../store'
 import { X, FileText, MessageSquare, Edit3, Link2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { QuizPanel, type QuizQuestion } from './quiz-panel'
 import { renderAgentOutput } from '../registries/agent-output-renderer-registry'
 
@@ -100,8 +101,12 @@ export function CCBMCDetailDrawer() {
   // 严格 ≤80 字，保证视觉上"摘要"明显短于"详细内容"。
   const derivedSummary = (() => {
     if (typeof nodeWithDetails?.summary === 'string' && nodeWithDetails.summary.trim().length > 0) {
-      const s = nodeWithDetails.summary.trim()
-      return s.length > 100 ? s.slice(0, 100).trimEnd() + '…' : s
+      // P11.6 · server-supplied summary is now an LLM-distilled structured
+      // 3-5 item markdown list (cell-summarizer.ts). Render it in full —
+      // the drawer has plenty of vertical room and clipping a structured
+      // list to 100 chars produced the trailing "(3…" we shipped before.
+      // Preserve raw markdown so <ReactMarkdown> renders proper <ul><li>.
+      return nodeWithDetails.summary.trim()
     }
     if (!fullContent) return ''
     const trimmed = fullContent.trim()
@@ -287,8 +292,31 @@ export function CCBMCDetailDrawer() {
                   就跳到主体。详细分析才是阅读重心。*/}
               {showSummary ? (
                 <Section label="核心摘要" sublabel="SUMMARY">
-                  <div className="prose prose-sm max-w-measure-body font-body text-[12px] leading-[1.5] text-stratum-muted">
-                    <ReactMarkdown>{summary}</ReactMarkdown>
+                  {/* P11.6 · summary is now a structured 3-5 item markdown
+                      list from the cell-summarizer (deepseek-v4-flash).
+                      Custom <li> rendering puts the bold label flush-left
+                      with a hairline rule between rows so the structure is
+                      visually scannable instead of a wall of comma-prose. */}
+                  <div className="max-w-measure-body font-body text-[12.5px] leading-[1.55] text-stratum-ink">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        ul: ({ children }) => (
+                          <ul className="m-0 p-0 list-none divide-y-[0.5px] divide-stratum-line border-y-[0.5px] border-stratum-line">
+                            {children}
+                          </ul>
+                        ),
+                        li: ({ children }) => (
+                          <li className="px-0 py-2 text-stratum-ink [&_strong]:text-stratum-navy [&_strong]:font-display [&_strong]:font-[700] [&_strong]:tracking-tight">
+                            {children}
+                          </li>
+                        ),
+                        p: ({ children }) => <span>{children}</span>,
+                        strong: ({ children }) => <strong>{children}</strong>,
+                      }}
+                    >
+                      {summary}
+                    </ReactMarkdown>
                   </div>
                 </Section>
               ) : null}

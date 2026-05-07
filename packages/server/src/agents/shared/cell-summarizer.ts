@@ -49,45 +49,67 @@ export interface SummarizerDeps {
   llm: LLMClient
 }
 
-const SYSTEM_PROMPT = `你是商业模型画布（BMC）的"卡片摘要员"。你的唯一任务是把一段 BMC 单元格的详细分析（markdown）压缩成一段精华摘要（markdown）。
+const SYSTEM_PROMPT = `你是商业模型画布（BMC）的"卡片摘要员"。你的唯一任务是把一段 BMC 单元格的详细分析（markdown）压缩成一份**结构化要点列表**（markdown unordered list）。
 
 ## 输出要求
 
-1. **长度**：120-180 个汉字（含 markdown 语法），单段或最多含 1 个短列表（≤ 3 项）。
-2. **覆盖度**：原文每一个 H2 / H3 / 编号小节的核心 takeaway 都必须被提到（用一个短句即可），允许使用同义改写。
-3. **保留**：关键数字、百分比、金额、专有名词、Wizard N 编号、引用标记必须保留。
-4. **markdown**：用 \`**关键词**\` 加粗 2-3 个核心概念；不需要 H2/H3。如有 ≥ 3 个并列点可用短列表。
-5. **禁止**：禁止省略号（…/...）、禁止 \`# 标题\`、禁止 "本摘要"/"以下"等元描述、禁止重复 cell 标题作为开头。
+1. **格式**：必须是 markdown 短列表，每行一项，行首 \`- \`。共 3-5 个要点，**禁止单段落输出**。
+2. **每项结构**：\`- **标签**：一句话核心结论（含数字/比例/专有名词）\`。标签 4-8 字概括该要点的主题，结论一句话不超过 60 字。
+3. **覆盖度**：每条要点对应原文一个核心子节（H2 / H3 / 编号小节）的 takeaway，确保**所有重要子节都被覆盖**。
+4. **保留**：关键数字、百分比、金额、专有名词、Wizard N 编号、引用标记必须保留在结论里。
+5. **总长度**：3-5 项合计 200-450 个汉字（含 markdown 语法），单项不要过长。
+6. **禁止**：禁止省略号（…/...）、禁止 \`# 标题\`、禁止"本摘要/以下/综上"等元描述、禁止纯叙述段落、禁止把单项内容拆成多行。
+
+## 示例
+
+输入：一段关于"开发者社区获客 50% / AI 工具聚合平台 30% / 社交媒体 20%"的 800 字详细分析。
+
+正确输出：
+- **核心渠道**：开发者社区贡献 50% 流量，主战场为 GitHub 开源模板 + 掘金/V2EX 内容
+- **次级渠道**：AI 工具聚合平台贡献 30%，依托 Product Hunt + 国内导航站
+- **辅助渠道**：社交媒体贡献 20%，B 站实操视频 + 小红书图文 + Twitter KOL
+- **转化路径**：免费模板 → 注册 → 7 天试用 → 付费转化
+- **关键指标**：注册转化率 ≥ 15%，付费转化率 ≥ 5%
 
 ## 输出格式
 
-直接输出 markdown 文本，不要包裹代码块、不要 JSON、不要前缀。第一句应直接陈述结论。`
+直接输出 markdown 列表，不要包裹代码块、不要 JSON、不要前缀。第一行立即是 \`- **\` 开头。`
 
 function buildUserPrompt(content: string, opts: SummarizeCellOptions): string {
   const labelLine = opts.label ? `\n卡片标题：${opts.label}` : ''
   const domainLine = opts.domain ? `\nBMC 维度：${opts.domain}` : ''
-  return `请为下面这张 BMC 卡片的"详细分析"写一段精华摘要。${labelLine}${domainLine}
+  return `请为下面这张 BMC 卡片的"详细分析"产出**结构化要点列表**（3-5 个 markdown 短列表项）。${labelLine}${domainLine}
 
 ==== 详细分析（待压缩）====
 
 ${content}
 
-==== 现在输出精华摘要（120-180 字 markdown，单段或短列表，无省略号）====`
+==== 现在输出结构化要点列表（必须 markdown \`- **标签**：结论\` 格式，3-5 项，无省略号）====`
 }
 
 /**
  * Strip leading code fences / "摘要：" prefixes / trailing whitespace so the
  * raw markdown drops cleanly into the drawer's prose renderer.
+ *
+ * Validates that the output is a markdown short-list (3-5 `- ` items).
+ * Returns null if the output is not a valid list — caller should fall back
+ * to the agent's original summary.
  */
-function postProcess(raw: string): string {
+function postProcess(raw: string): string | null {
   let s = raw.trim()
   // Strip ```markdown ... ``` or ``` ... ``` wrappers
   const fence = s.match(/^```(?:markdown)?\s*\n([\s\S]*?)\n```\s*$/)
   if (fence) s = fence[1].trim()
-  // Strip leading "摘要：" / "总结：" prefixes
-  s = s.replace(/^(摘要|总结|核心摘要|精华摘要)\s*[:：]\s*/, '')
+  // Strip leading "摘要：" / "总结：" prefixes that the model occasionally adds
+  s = s.replace(/^(摘要|总结|核心摘要|精华摘要|要点列表|要点)\s*[:：]?\s*\n?/, '')
   // Collapse runs of trailing ellipsis (defensive — prompt forbids them)
   s = s.replace(/[…\.]{2,}\s*$/, '').trim()
+
+  // Validate: must contain 3-5 markdown bullet items at the top level
+  const bulletLines = s.split('\n').filter((line) => /^\s*[-*]\s+/.test(line))
+  if (bulletLines.length < 3 || bulletLines.length > 6) {
+    return null
+  }
   return s
 }
 
@@ -121,6 +143,9 @@ export async function summarizeCellMarkdown(
   const raw = response.content ?? ''
   const summary = postProcess(raw)
 
+  if (!summary) {
+    throw new Error(`cell-summarizer: output not a valid 3-5 item list (${raw.length} raw chars)`)
+  }
   if (summary.length < MIN_SUMMARY_CHARS) {
     throw new Error(`cell-summarizer: output too short (${summary.length} chars)`)
   }
