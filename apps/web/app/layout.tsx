@@ -4,8 +4,12 @@ import { Providers } from '@/shared/components'
 import { fontVariables } from '@/shared/design-system/typography'
 
 export const metadata: Metadata = {
-  title: 'Kuse Research Canvas',
-  description: '多模态协作研究画布'
+  title: 'starlink · 智绘画布',
+  description: 'starlink · Multi-Agent Strategy Canvas — 12-agent CC-BMC workshop',
+  icons: {
+    icon: '/favicon-32.png',
+    shortcut: '/favicon-32.png'
+  }
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

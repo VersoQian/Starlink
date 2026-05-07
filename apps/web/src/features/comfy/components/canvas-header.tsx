@@ -82,20 +82,27 @@ export function CanvasHeader({
       }`}
       style={{ animationDelay: '0.1s' }}
     >
-      {/* Brand — Manrope-styled headline + sky-blue kicker */}
+      {/* Brand — starlink constellation glyph + Fraunces headline + mono kicker.
+          Logo generated via nano-banana / gemini-3-pro-image (P11.16),
+          paper-white square with 3 dots in triangle constellation, apex
+          press-red. */}
       <div className="flex items-center gap-3 min-w-0">
-        <span
-          aria-hidden="true"
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-stratum-navy text-white text-[18px] leading-none shrink-0"
-        >
-          ◇
-        </span>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/starlink-icon.png"
+          alt="starlink"
+          // P11.16 · max-w-none escapes Tailwind preflight's
+          // `img,video { max-width: 100% }` which would clamp the
+          // 32px logo to 0 when the parent flex column collapses
+          // under min-w-0 + truncating siblings.
+          className="h-8 w-8 max-w-none rounded-[2px] object-cover shrink-0 border-[0.5px] border-stratum-line"
+        />
         <div className="flex flex-col leading-tight min-w-0">
           <h1 className="font-display font-[700] text-stratum-navy text-[17px] tracking-tight leading-tight truncate">
-            智绘画布 · Strategy Canvas
+            starlink · 智绘画布
           </h1>
           <p className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-blue truncate">
-            MACRA · BUSINESS INTELLIGENCE
+            STRATEGY CANVAS · MACRA SYSTEM
           </p>
         </div>
       </div>
