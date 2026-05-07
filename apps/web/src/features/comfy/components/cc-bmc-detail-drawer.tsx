@@ -65,7 +65,7 @@ const BYLINE_BY_DOMAIN: Record<string, { glyph: string; tint: string }> = {
 
 const TAB_BASE =
   'inline-flex items-center gap-1.5 px-3 py-1.5 font-instr text-[10px] uppercase tracking-kicker transition-colors'
-const TAB_ACTIVE = 'bg-stratum-navy text-ink'
+const TAB_ACTIVE = 'bg-stratum-navy text-white'
 const TAB_IDLE   = 'bg-transparent text-stratum-muted hover:text-stratum-navy'
 
 export function CCBMCDetailDrawer() {

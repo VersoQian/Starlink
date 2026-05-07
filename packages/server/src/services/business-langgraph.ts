@@ -41,6 +41,8 @@ import { getCheckpointer } from '../infrastructure/langgraph/checkpointer.js'
 import { LruCache } from '../infrastructure/utils/lru-cache.js'
 import { runDebate } from '../agents/shared/debate-orchestrator.js'
 import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
+import { distillSummariesForCells } from '../agents/shared/cell-summarizer.js'
+import { LLMClient } from './llm-client.js'
 import { trace, context as otelContext, SpanStatusCode, type Context as OtelContext } from '@opentelemetry/api'
 import { getTracer } from '../infrastructure/telemetry/otel-init.js'
 
@@ -164,6 +166,43 @@ export class BusinessLangGraphService {
    * later revision round falls back to auto-revision.
    */
   private readonly hitlResumeDirectives = new Map<string, HitlResumeDirective>()
+
+  /**
+   * P11.5 / B3 · lazy-init LLMClient for the post-generator cell-summarizer
+   * distillation pass. Uses the cheap-fast tier (deepseek-v4-flash by default,
+   * configurable via BMC_SUMMARIZER_MODEL). One LLMClient instance is shared
+   * across all cells in the run for connection pooling.
+   */
+  private summarizerLLM: LLMClient | null = null
+
+  private getSummarizerLLM(): LLMClient {
+    if (!this.summarizerLLM) {
+      this.summarizerLLM = new LLMClient()
+    }
+    return this.summarizerLLM
+  }
+
+  /**
+   * P11.5 / B3 · distill the `summary` field of each cc-bmc-card in the
+   * supplied node array using a dedicated cheap-fast LLM. Replaces the
+   * generator agent's inline summary with a focused digest. On per-cell
+   * failure, keeps the agent's original summary as a fallback. Disabled
+   * when BMC_SUMMARIZER_ENABLED=false.
+   */
+  private async distillCellSummaries(
+    state: BusinessStateType,
+    nodes: MacraNodeData[]
+  ): Promise<MacraNodeData[]> {
+    return distillSummariesForCells(
+      nodes,
+      {
+        traceId: state.traceId,
+        workspaceId: state.workspaceId,
+        userId: state.userId
+      },
+      { llm: this.getSummarizerLLM() }
+    )
+  }
 
   constructor(
     model: BusinessModel | null = createLLMModel(),
@@ -2083,8 +2122,9 @@ ${snippets}
           })
         )
         if (projected) {
-          this.emitGenerationOutput(state, 'marketAgent', projected.marketNodes ?? [])
-          return projected
+          const distilled = await this.distillCellSummaries(state, projected.marketNodes ?? [])
+          this.emitGenerationOutput(state, 'marketAgent', distilled)
+          return { marketNodes: distilled }
         }
       } catch (err) {
         auditLogger.error({
@@ -2189,8 +2229,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
         }
       })
       // P0.2.3: legacy LLM path also emits handoff so benchmark metrics aren't 0.
-      this.emitGenerationOutput(state, 'marketAgent', validatedNodes, extractUsageMetadata(response))
-      return { marketNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
+      const distilledMarket = await this.distillCellSummaries(state, validatedNodes)
+      this.emitGenerationOutput(state, 'marketAgent', distilledMarket, extractUsageMetadata(response))
+      return { marketNodes: this.applyCitationParsing(distilledMarket, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runMarketAgent',
@@ -2235,8 +2276,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           })
         )
         if (projected) {
-          this.emitGenerationOutput(state, 'productAgent', projected.productNodes ?? [])
-          return projected
+          const distilled = await this.distillCellSummaries(state, projected.productNodes ?? [])
+          this.emitGenerationOutput(state, 'productAgent', distilled)
+          return { productNodes: distilled }
         }
       } catch (err) {
         auditLogger.error({
@@ -2341,8 +2383,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           usage: extractUsageMetadata(response)
         }
       })
-      this.emitGenerationOutput(state, 'productAgent', validatedNodes, extractUsageMetadata(response))
-      return { productNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
+      const distilledProduct = await this.distillCellSummaries(state, validatedNodes)
+      this.emitGenerationOutput(state, 'productAgent', distilledProduct, extractUsageMetadata(response))
+      return { productNodes: this.applyCitationParsing(distilledProduct, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runProductAgent',
@@ -2387,8 +2430,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           })
         )
         if (projected) {
-          this.emitGenerationOutput(state, 'financeAgent', projected.financeNodes ?? [])
-          return projected
+          const distilled = await this.distillCellSummaries(state, projected.financeNodes ?? [])
+          this.emitGenerationOutput(state, 'financeAgent', distilled)
+          return { financeNodes: distilled }
         }
       } catch (err) {
         auditLogger.error({
@@ -2491,8 +2535,9 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
           usage: extractUsageMetadata(response)
         }
       })
-      this.emitGenerationOutput(state, 'financeAgent', validatedNodes, extractUsageMetadata(response))
-      return { financeNodes: this.applyCitationParsing(validatedNodes, state.knowledgeEvidence) }
+      const distilledFinance = await this.distillCellSummaries(state, validatedNodes)
+      this.emitGenerationOutput(state, 'financeAgent', distilledFinance, extractUsageMetadata(response))
+      return { financeNodes: this.applyCitationParsing(distilledFinance, state.knowledgeEvidence) }
     } catch (error) {
       auditLogger.error({
         action: 'business-langgraph.runFinanceAgent',
