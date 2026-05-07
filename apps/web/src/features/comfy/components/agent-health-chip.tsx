@@ -91,23 +91,42 @@ export function AgentHealthChip() {
       <button
         type="button"
         onClick={() => setOpen((p) => !p)}
-        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] shadow-sm transition-colors ${
+        // Editorial brutalist chip: 1.5px navy border establishes weight
+        // even when idle (was border-stratum-line, too thin to register).
+        // Status-LED dot replaces the lucide Activity icon — squarer,
+        // more "instrument panel" than chatbot. Mono kicker `SLO ·`
+        // prefix gives the chip a clear identity.
+        className={`group flex items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] transition-colors ${
           degraded
-            ? 'border-[#B33028] bg-[#B33028] text-white hover:bg-[#9a2820]'
-            : 'border-stratum-line bg-white text-stratum-muted hover:text-stratum-ink'
+            ? 'border-press bg-press text-white hover:bg-press-active'
+            : 'border-stratum-navy bg-white text-stratum-navy hover:bg-stratum-surface-low'
         }`}
-        aria-label={degraded ? `${data.degradedCount} agent(s) degraded` : 'Agent health'}
+        aria-label={degraded ? `${data.degradedCount} agent(s) degraded` : 'Agent SLO health panel'}
       >
-        <Icon className="h-3 w-3" strokeWidth={2} />
-        {degraded ? `${data.degradedCount} DEGRADED` : `${data.agents.length} AGENT${data.agents.length === 1 ? '' : 'S'}`}
+        {degraded ? (
+          <AlertTriangle className="h-3 w-3" strokeWidth={2.25} />
+        ) : (
+          // 6px LED — sharp filled circle reads as a status indicator
+          // rather than a generic icon. Subtle pulse on hover hints
+          // "this is live" without being noisy in idle state.
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 rounded-full bg-stratum-blue group-hover:animate-pulse"
+          />
+        )}
+        <span className="tabular-nums">
+          {degraded
+            ? `${data.degradedCount} DEGRADED`
+            : `SLO · ${data.agents.length}`}
+        </span>
       </button>
 
       {open && (
-        <div className="absolute bottom-10 right-0 w-[420px] max-h-[60vh] overflow-y-auto rounded-[1px] border-[1.5px] border-stratum-navy bg-white shadow-2xl">
-          <div className="sticky top-0 flex items-center justify-between border-b-[1px] border-stratum-line bg-stratum-surface-low px-4 py-3">
+        <div className="absolute bottom-10 right-0 w-[420px] max-h-[60vh] overflow-y-auto border-[1.5px] border-stratum-navy bg-white shadow-2xl">
+          <div className="sticky top-0 flex items-center justify-between border-b-[1.5px] border-stratum-navy bg-stratum-surface-low px-4 py-3">
             <div className="flex items-center gap-2">
               <Icon
-                className={`h-4 w-4 ${degraded ? 'text-[#B33028]' : 'text-stratum-muted'}`}
+                className={`h-4 w-4 ${degraded ? 'text-press' : 'text-stratum-blue'}`}
                 strokeWidth={1.75}
               />
               <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-stratum-navy">
@@ -126,13 +145,13 @@ export function AgentHealthChip() {
 
           <ul className="divide-y divide-stratum-line">
             {data.agents.map((a) => (
-              <li key={a.agentId} className={`px-4 py-3 ${a.degraded ? 'bg-[#FDF1F0]' : ''}`}>
+              <li key={a.agentId} className={`px-4 py-3 ${a.degraded ? 'bg-press-wash/40' : ''}`}>
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="font-mono text-[12px] font-medium text-stratum-ink truncate">
                     {a.agentId}
                   </span>
                   {a.degraded && (
-                    <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#B33028]">
+                    <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-press">
                       degraded
                     </span>
                   )}
@@ -140,7 +159,7 @@ export function AgentHealthChip() {
                 <div className="mt-1.5 grid grid-cols-3 gap-x-2 gap-y-0.5 font-mono text-[10px] tabular-nums text-stratum-muted">
                   <span>p50: <span className="text-stratum-ink">{a.latencyP50Ms}ms</span></span>
                   <span>p95: <span className="text-stratum-ink">{a.latencyP95Ms}ms</span></span>
-                  <span>err: <span className={a.errorRate > 0 ? 'text-[#B33028]' : 'text-stratum-ink'}>{(a.errorRate * 100).toFixed(1)}%</span></span>
+                  <span>err: <span className={a.errorRate > 0 ? 'text-press' : 'text-stratum-ink'}>{(a.errorRate * 100).toFixed(1)}%</span></span>
                   <span className="col-span-3 text-stratum-muted/70">
                     n={a.totals.invocations} · errors={a.totals.errors} · fallbacks={a.totals.fallbacks} · window={a.windowSize}
                   </span>

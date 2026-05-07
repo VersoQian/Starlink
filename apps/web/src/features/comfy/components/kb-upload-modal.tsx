@@ -379,14 +379,19 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
                     <option value="workspace">👥 工作区 · 所有成员可搜</option>
                     <option value="global">🌐 全局 · 所有用户可搜</option>
                   </select>
+                  {/* Solid navy CTA. Was a dashed-ghost button which read
+                      as the same visual weight as the visibility selector
+                      next to it — there's no clear "which one is the
+                      action?" signal. Inverted ink-on-paper resolves the
+                      hierarchy: dropdown chooses scope, button fires. */}
                   <button
                     type="button"
                     onClick={() => createMutation.mutate()}
                     disabled={createMutation.isPending}
-                    className="flex items-center gap-1.5 rounded-lg border border-dashed border-stratum-line bg-white px-3 py-2 text-stratum-muted hover:border-stratum-blue/40 hover:text-stratum-blue transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-lg bg-stratum-navy px-3 py-2 text-white hover:bg-stratum-navy-soft transition-[background-color,transform] duration-150 active:scale-[0.98] disabled:opacity-50 disabled:hover:bg-stratum-navy"
                   >
-                    <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                    <span className="font-body text-[12px] font-medium">
+                    <Plus className="h-3.5 w-3.5 text-stratum-sky" strokeWidth={2} />
+                    <span className="font-body text-[12px] font-semibold">
                       {createMutation.isPending ? '创建中…' : '新建知识库'}
                     </span>
                   </button>
@@ -412,7 +417,11 @@ export function KbUploadModal({ open, workspaceId, onClose, onAnalyze }: Props) 
                   {activeKb.status}
                 </span>
               </div>
-              <nav role="tablist" className="flex items-center gap-1 mb-3 border-b border-stratum-line">
+              {/* Segmented control: each tab is a sharp 1.5px box that flips
+                  to inverted ink on activation. Replaces the previous
+                  underlined nav-link pattern (which read as passive label
+                  navigation, not a tactile mode switch). */}
+              <nav role="tablist" className="flex items-stretch -mb-px mb-3 isolate">
                 <SourceTabBtn id="text" current={sourceTab} setTab={setSourceTab} icon={Pencil} label="文本笔记" />
                 <SourceTabBtn id="url"  current={sourceTab} setTab={setSourceTab} icon={Globe}  label="导入 URL" />
                 <SourceTabBtn id="file" current={sourceTab} setTab={setSourceTab} icon={Upload} label="上传文件" />
@@ -595,10 +604,14 @@ function SourceTabBtn({
       role="tab"
       aria-selected={isActive}
       onClick={() => setTab(id)}
-      className={`flex items-center gap-1.5 px-3 py-2 -mb-px font-body text-[12px] font-semibold transition-colors ${
+      // Sharp segmented box — 1.5px borders share edges between siblings
+      // via -ml-[1.5px] so the active state cleanly overlays without a
+      // double-rule. Active flips to inverted ink (paper-on-ink) — gives
+      // the tactile "tap a key" feedback the previous underline lacked.
+      className={`relative -ml-[1.5px] flex items-center gap-1.5 px-3.5 py-2 border-[1.5px] font-body text-[12px] font-semibold transition-colors first:ml-0 first:rounded-l-md last:rounded-r-md ${
         isActive
-          ? 'border-b-2 border-stratum-blue text-stratum-navy'
-          : 'border-b-2 border-transparent text-stratum-muted hover:text-stratum-navy'
+          ? 'z-10 border-stratum-navy bg-stratum-navy text-white'
+          : 'border-stratum-line bg-white text-stratum-muted hover:z-10 hover:border-stratum-navy/50 hover:text-stratum-navy'
       }`}
     >
       <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />

@@ -193,7 +193,11 @@ async function start() {
     app.post('/internal/dev/inject-slo', async (req, res) => {
       const agentId = String(req.query.agent ?? 'demo-agent')
       const total = Math.max(1, Math.min(200, Number(req.query.total) || 12))
-      const errors = Math.max(0, Math.min(total, Number(req.query.errors) || 6))
+      // Important: don't use `|| 6` — that treats explicit `errors=0` as
+      // falsy. Use ?? to honour 0 as "inject pure successes for the
+      // healthy-state demo".
+      const errorsRaw = req.query.errors == null ? 6 : Number(req.query.errors)
+      const errors = Math.max(0, Math.min(total, errorsRaw))
       const { recordAgentInvocation } = await import(
         './infrastructure/observability/agent-slo-tracker.js'
       )
