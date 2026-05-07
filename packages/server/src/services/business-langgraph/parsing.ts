@@ -233,6 +233,29 @@ function escapeControlCharsInJsonStrings(input: string): string {
       continue
     }
     if (c === '"') {
+      // P11.14 · smart inner-quote escaping. When inside a string and we
+      // encounter `"`, look ahead past whitespace to determine whether
+      // this is the LEGITIMATE string terminator (followed by `,` `}`
+      // `]` `:` or end-of-input) or an INNER unescaped quote inside the
+      // value (followed by alphanumeric / Chinese chars / etc).
+      //
+      // LLMs frequently emit content like "...知道很多道理却教不好孩子..."
+      // where the inner ASCII double quotes are unescaped, prematurely
+      // terminating the JSON string. This look-ahead heuristic escapes
+      // them back to \" so JSON.parse succeeds.
+      if (inString) {
+        let j = i + 1
+        while (j < input.length && (input[j] === ' ' || input[j] === '\t' || input[j] === '\n' || input[j] === '\r')) {
+          j++
+        }
+        const nextNonWs = j < input.length ? input[j] : ''
+        const isStringTerminator = nextNonWs === ',' || nextNonWs === '}' || nextNonWs === ']' || nextNonWs === ':' || nextNonWs === ''
+        if (!isStringTerminator) {
+          // Inner quote — escape and stay in-string.
+          out += '\\"'
+          continue
+        }
+      }
       out += c
       inString = !inString
       continue

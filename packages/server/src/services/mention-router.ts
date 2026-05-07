@@ -272,15 +272,48 @@ export class MentionRouter {
       seed
     })
 
+    // P11.14 · chatFallback UX polish. Strip the agent's internal
+    // monologue ("工作区没有任何历史记忆..." / "按照约束我需要输出反问")
+    // and append a tip on how to recover. The clean form is:
+    //   "我需要先了解 X 才能补这个维度。
+    //
+    //    💡 再次 @-mention 我并补充信息（如 'B2B SaaS, 月费 99 元'）"
+    const cleanChatFallback = (raw: string): string => {
+      let s = raw.trim()
+      // Drop sentence-level meta-monologue lines that LLMs insert before
+      // the actual question. Heuristic: drop any line ending with a
+      // period/句号 that contains internal-state keywords.
+      const droppableLine = /(工作区|历史记忆|信息严重不足|按照约束|根据规则|我需要(?!先了解|你))/
+      const lines = s.split('\n')
+      const filtered: string[] = []
+      let droppedAny = false
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!droppedAny && trimmed && droppableLine.test(trimmed) && !/[?？]\s*$/.test(trimmed)) {
+          droppedAny = true
+          continue
+        }
+        filtered.push(line)
+      }
+      s = filtered.join('\n').trim()
+      // Strip leading horizontal rule markers if they're now stranded.
+      s = s.replace(/^---\s*\n?/g, '').trim()
+      // Append the recovery hint if not already there.
+      if (!/再.*@.*补充|再次 @|再 @ 一次/.test(s)) {
+        s = `${s}\n\n💡 **再次 @ 我并补充上述信息**（例如 "B2B SaaS / 月费 99 元 / 目标是 AI 创业者"），我会立刻生成 BMC cell。`
+      }
+      return s
+    }
+
     // P11.12 · Fix B chatFallback. When agent produces 0 cells but has a
     // prose reply (e.g. asking for clarification), surface that reply
-    // verbatim so the user can read the agent's actual question and
-    // re-mention with more context. Falls back to generic refusal only
-    // when neither cells nor chat text are available.
+    // (after UX cleanup) so the user can read the agent's actual question
+    // and re-mention with more context. Falls back to generic refusal
+    // only when neither cells nor chat text are available.
     const reply =
       nodes.length === 0
         ? (chatFallback.length > 0
-            ? chatFallback
+            ? cleanChatFallback(chatFallback)
             : `${entry.id} 暂未给出新的维度更新。`)
         : `生成 ${nodes.length} 张 ${entry.bmcSelf} 维度卡片：\n\n` +
           nodes

@@ -448,6 +448,16 @@ interface MacraState {
   knowledgeEvidence: KnowledgeEvidence[]
   setKnowledgeEvidence: (evidence: KnowledgeEvidence[]) => void
 
+  /**
+   * P11.14 · sub-agent live activity. Server emits 'agent/subagent-progress'
+   * events from the BMC ReAct subgraph's internal nodes (call-llm, tools,
+   * parse). Wire-panel widget displays the most recent so users see
+   * "市场分析专家 · 调用 web-search…" while the workshop runs. Cleared
+   * on conversation completion / failure / explicit reset.
+   */
+  subAgentActivity: { parentNode: string; nodeName: string; ts: number } | null
+  setSubAgentActivity: (next: { parentNode: string; nodeName: string; ts: number } | null) => void
+
   // Cell-level citations (Stage 3 创新核心 UI)
   citations: Record<string /* cardId */, CardCitation[]>
   setCardCitation: (cardId: string, citation: CardCitation) => void
@@ -640,6 +650,8 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   lastDeltaAt: null,
   lastCompletionAt: null,
   knowledgeEvidence: [],
+  subAgentActivity: null,
+  setSubAgentActivity: (next) => set({ subAgentActivity: next }),
   citations: {},
   evidenceDrawer: {
     isOpen: false,
@@ -1745,10 +1757,26 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             get().setCardCitation(data.cardId, data.citation)
           }
         },
+        // P11.14 · wire-panel data feed. Catch the lightweight
+        // subagent-progress events emitted by the BMC ReAct subgraph's
+        // internal nodes (call-llm, tools, parse) and stash the latest
+        // in store.subAgentActivity for the floating wire widget.
+        onEvent: (event) => {
+          if (event.type !== 'agent/subagent-progress') return
+          const payload = event.payload as
+            | { ns?: string[]; nodeName?: string; payloadKeys?: string[] }
+            | undefined
+          if (!payload || !Array.isArray(payload.ns) || typeof payload.nodeName !== 'string') return
+          const parentNode = (payload.ns[0] ?? '').split(':')[0] || '_unknown_'
+          set({ subAgentActivity: { parentNode, nodeName: payload.nodeName, ts: Date.now() } })
+        },
         loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId)
       })
       activeSubscription = watcher.cancel
       await watcher.done.finally(() => {
+        // P11.14 · clear sub-agent activity on stream-end (success or fail)
+        // so the wire widget doesn't show stale "x is calling y" forever.
+        set({ subAgentActivity: null })
         if (activeSubscription === watcher.cancel) {
           activeSubscription = null
         }

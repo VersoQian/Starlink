@@ -15,6 +15,7 @@ import { CanvasCitationPanel } from './canvas-citation-panel'
 import { MemoryDrawer } from './memory-drawer'
 import { CanvasWizardPanel } from './canvas-wizard-panel'
 import { CanvasLiveCoach } from './canvas-live-coach'
+import { SubAgentWireWidget } from './sub-agent-wire-widget'
 import { CanvasHitlBanner } from './canvas-hitl-banner'
 import { CanvasPromptDialog } from './canvas-prompt-dialog'
 import { CanvasThinkingOverlay } from './canvas-thinking-overlay'
@@ -678,19 +679,25 @@ export function CanvasPage({
   )
 
   const freeformContent = (
-    <CanvasFlow
-      // Conflict-alert nodes are not rendered on canvas. Instead, each
-      // conflict is shown as a red dashed edge between the two BMC
-      // cells it implicates (see buildConflictEdges). Click an edge →
-      // open Insight Panel · 审查 tab + auto-expand the conflict.
-      nodes={nodesWithoutConflicts}
-      edges={edgesWithConflicts}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
-      onEdgeClick={handleEdgeClick}
-      isAnimating={isAnimating}
-    />
+    <div className="relative h-full w-full">
+      <CanvasFlow
+        // Conflict-alert nodes are not rendered on canvas. Instead, each
+        // conflict is shown as a red dashed edge between the two BMC
+        // cells it implicates (see buildConflictEdges). Click an edge →
+        // open Insight Panel · 审查 tab + auto-expand the conflict.
+        nodes={nodesWithoutConflicts}
+        edges={edgesWithConflicts}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onEdgeClick={handleEdgeClick}
+        isAnimating={isAnimating}
+      />
+      {/* P11.14 · floating wire widget shows live sub-agent activity
+          (market-agent → web-search…, product-agent → 解析输出, ...).
+          Positions itself bottom-left of the canvas. */}
+      <SubAgentWireWidget />
+    </div>
   )
 
   // Standalone (chromeless) — honour for BOTH viewModes so flipping the
