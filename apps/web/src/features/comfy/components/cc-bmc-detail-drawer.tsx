@@ -377,6 +377,33 @@ export function CCBMCDetailDrawer() {
                         </dd>
                       </div>
                     )}
+                    {/* P11.13 / T4.1 · revision badge. BMC cells emerge in
+                        round 1 by default; when critic finds high-severity
+                        conflicts the supervisor re-runs the relevant agent
+                        in round 2 / 3, overwriting the cell in-place via
+                        last-write-wins reducer. We surface "this cell was
+                        revised in round N" via the round-N tag and the
+                        stage='review' field so users see workshop history
+                        even though the prior-round content is gone. */}
+                    {(() => {
+                      const tags = (nodeData.metadata as { tags?: unknown }).tags
+                      const roundTag = Array.isArray(tags)
+                        ? (tags as string[]).find((t) => /^round-\d+$/.test(t))
+                        : undefined
+                      const stage = (nodeData.metadata as { stage?: string }).stage
+                      if (!roundTag && stage !== 'review') return null
+                      const roundNum = roundTag ? roundTag.replace('round-', '') : '?'
+                      return (
+                        <div className="space-y-1.5 pt-1">
+                          <dt className="text-stratum-muted">REVISION · 修订轮次</dt>
+                          <dd>
+                            <span className="font-instr text-[10px] tabular-nums uppercase tracking-kicker text-white bg-stratum-warn px-1.5 py-0.5 rounded-[1px]">
+                              ROUND {roundNum}{stage === 'review' ? ' · 修订' : ''}
+                            </span>
+                          </dd>
+                        </div>
+                      )
+                    })()}
                     {/* P11.11 · sub-agent provenance. Each BMC cell records
                         which dimension-action sub-agents the parent main
                         agent invoked during its ReAct loop to produce

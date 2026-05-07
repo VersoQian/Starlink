@@ -180,6 +180,33 @@ export const EMPTY_SEEDED_STATE: SeededBusinessState = {
  */
 export type ModeratorVerdict = 'continue' | 'accept' | null
 
+/**
+ * P11.13 / T4.4 · mergeById reducer.
+ *
+ * The default LangGraph reducer is `last-write-wins`: the most recent
+ * Partial<State> update completely replaces the prior slot value. For
+ * our cell arrays that's wrong — round 2 writing `marketNodes: [...]`
+ * fully replaces round 1's array, but during a multi-round revision
+ * round 2 typically only re-generates a SUBSET of cells (the ones with
+ * critic conflicts). With last-write-wins, untouched cells from round 1
+ * silently disappear when round 2's reduced array arrives.
+ *
+ * mergeById preserves prior entries by id and overlays new entries on
+ * the same id (a true upsert). Combined with deterministic cell IDs
+ * (e.g. market-customer-segments), revisions correctly overwrite the
+ * SAME cell while leaving siblings untouched. Edges preserved similarly.
+ *
+ * Treats undefined/null updates as no-op (passes prior through).
+ */
+function mergeByIdReducer<T extends { id: string }>(prev: T[] | undefined, next: T[] | undefined): T[] {
+  if (!next) return prev ?? []
+  if (!prev || prev.length === 0) return next
+  const map = new Map<string, T>()
+  for (const item of prev) map.set(item.id, item)
+  for (const item of next) map.set(item.id, item)
+  return Array.from(map.values())
+}
+
 export const BusinessState = Annotation.Root({
   traceId: Annotation<string>(),
   workspaceId: Annotation<string>(),
@@ -192,12 +219,27 @@ export const BusinessState = Annotation.Root({
   crossContext: Annotation<CrossContext>(),
   knowledgeEvidence: Annotation<KnowledgeEvidence[]>(),
   generalNodes: Annotation<MacraNodeData[]>(),
-  marketNodes: Annotation<MacraNodeData[]>(),
-  productNodes: Annotation<MacraNodeData[]>(),
-  financeNodes: Annotation<MacraNodeData[]>(),
-  agentAvatars: Annotation<MacraNodeData[]>(),
+  marketNodes: Annotation<MacraNodeData[]>({
+    reducer: mergeByIdReducer<MacraNodeData>,
+    default: () => []
+  }),
+  productNodes: Annotation<MacraNodeData[]>({
+    reducer: mergeByIdReducer<MacraNodeData>,
+    default: () => []
+  }),
+  financeNodes: Annotation<MacraNodeData[]>({
+    reducer: mergeByIdReducer<MacraNodeData>,
+    default: () => []
+  }),
+  agentAvatars: Annotation<MacraNodeData[]>({
+    reducer: mergeByIdReducer<MacraNodeData>,
+    default: () => []
+  }),
   conflicts: Annotation<CriticConflict[]>(),
-  edges: Annotation<CanvasEdge[]>(),
+  edges: Annotation<CanvasEdge[]>({
+    reducer: mergeByIdReducer<CanvasEdge>,
+    default: () => []
+  }),
   moderatorVerdict: Annotation<ModeratorVerdict>()
 })
 

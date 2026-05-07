@@ -187,11 +187,24 @@ export class ConversationMemoryStore {
 
   async createSession(input: CreateSessionInput): Promise<ConversationSession> {
     await this.ensureTables()
+    // P11.13 / T4.3 · close the workspace-soft-lock race window.
+    //
+    // Originally createSession inserted the row WITHOUT setting
+    // heartbeat_at. The first heartbeat write happened ~10s later when
+    // streamConversation's first heartbeat tick fired. Between
+    // INSERT and first heartbeat there was a ~60s grace window in
+    // which findActiveSession() would treat the row as "no recent
+    // activity" and let a concurrent @-mention bypass the lock,
+    // letting two business graphs mutate the same workspace.
+    //
+    // Fix: stamp heartbeat_at = now() on the INSERT itself so the
+    // row is "live" the moment it exists. The periodic heartbeat
+    // tick still updates it as before.
     const result = await pool.query(
       `INSERT INTO conversation_sessions (
-        id, workspace_id, user_id, title, status, latest_question, context_snapshot
+        id, workspace_id, user_id, title, status, latest_question, context_snapshot, heartbeat_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
       ON CONFLICT (id) DO UPDATE SET
         workspace_id = EXCLUDED.workspace_id,
         user_id = EXCLUDED.user_id,
@@ -199,6 +212,7 @@ export class ConversationMemoryStore {
         status = EXCLUDED.status,
         latest_question = EXCLUDED.latest_question,
         context_snapshot = EXCLUDED.context_snapshot,
+        heartbeat_at = now(),
         updated_at = now()
       RETURNING *`,
       [
