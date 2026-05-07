@@ -23,6 +23,7 @@
     "smoke:langsmith": "pnpm run build && node --env-file=.env dist/scripts/smoke-langsmith-config.js",
     "smoke:hitl-cross-instance": "pnpm run build && node --env-file=.env dist/scripts/smoke-hitl-cross-instance.js",
     "smoke:hitl-langgraph": "pnpm run build && node dist/scripts/smoke-hitl-langgraph.js",
+    "smoke:report-stream": "pnpm run build && node --env-file=.env dist/scripts/smoke-report-writer-stream.js",
     "smoke:hitl-pg-cross-instance": "pnpm run build && node --env-file=.env dist/scripts/smoke-hitl-pg-cross-instance.js",
     "validate:agents": "pnpm run build && node --env-file=.env dist/scripts/validate-agents.js",
     "kb:reembed": "pnpm run build && node --env-file=.env dist/scripts/reembed-kb-chunks.js",

@@ -1341,19 +1341,18 @@ export const resolvers = {
           // create (just sets up tracer + LLM client lazily).
           const { BusinessLangGraphService } = await import('../services/business-langgraph.js')
           const business = new BusinessLangGraphService()
+          // EMPTY_SEEDED_STATE shape: marketNodes / productNodes /
+          // financeNodes / agentAvatars / conflicts / edges. The
+          // report-writer will produce a generic-shape doc when the
+          // BMC cells are empty — fine for smoke tests; production UX
+          // should pass real canvas content via the mention mutation.
+          const { EMPTY_SEEDED_STATE } = await import('../services/business-langgraph/state.js')
           const reportNode = await business.invokeReportWriterForMention({
             traceId,
             workspaceId: args.workspaceId,
             userId: ctx.userId,
             question: args.message ?? '基于当前画布生成商业报告',
-            seed: {
-              marketNodes: [],
-              productNodes: [],
-              financeNodes: [],
-              generalNodes: [],
-              conflicts: [],
-              insightNotes: []
-            } as never,
+            seed: EMPTY_SEEDED_STATE,
             insightNotes: [],
             knowledgeEvidence: []
           })
@@ -1362,14 +1361,19 @@ export const resolvers = {
             return
           }
           const fullMarkdown = (reportNode as { content: string }).content ?? ''
-          // Split by `### N.` boundaries, keeping the heading line with each section.
+          // Split by H2 (`## ...`) or H3 (`### ...`) boundaries,
+          // keeping the heading line with each section. The
+          // report-writer prompt encourages 6 H2/H3 sections; if the
+          // LLM produces a flat document, the whole thing yields as
+          // one event (degraded but still correct).
           const sections = fullMarkdown
-            .split(/(?=^### \d+\.)/m)
+            .split(/(?=^#{2,3}\s)/m)
             .map((s) => s.trim())
             .filter((s) => s.length > 0)
           for (const section of sections) {
-            const m = /^### (\d+)\.\s*(.+?)$/m.exec(section)
-            const title = m ? m[2] : 'Section'
+            // Extract the heading text — strip leading `## ` / `### ` / `### N. `
+            const titleMatch = /^#{2,3}\s+(?:\d+\.\s*)?(.+?)$/m.exec(section)
+            const title = titleMatch ? titleMatch[1].trim() : 'Section'
             yield yieldEvent({
               kind: 'section',
               sectionTitle: title,
