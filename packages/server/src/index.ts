@@ -35,7 +35,9 @@ import {
   getAllAgentSloSnapshots,
   hydrateAgentSloFromDb,
   startAgentSloFlushTimer,
-  flushAgentSloToDb
+  flushAgentSloToDb,
+  startAgentSloRedisSync,
+  shutdownAgentSloRedisSync
 } from './infrastructure/observability/agent-slo-tracker.js'
 import { renderPrometheusMetrics } from './infrastructure/observability/prometheus-export.js'
 import { describeEmbeddingConfig } from './services/embedding-service.js'
@@ -263,6 +265,9 @@ async function start() {
   // definition rebuilds from new invocations.
   void hydrateAgentSloFromDb()
   startAgentSloFlushTimer()
+  // P11.18 · F4 · cross-gateway SLO sync via Redis pub/sub.
+  // Disabled by default; enable with REDIS_URL + AGENT_SLO_REDIS_ENABLED=true.
+  void startAgentSloRedisSync()
 
   /**
    * P11.18 · graceful shutdown drain.
@@ -322,6 +327,12 @@ async function start() {
       await flushAgentSloToDb()
     } catch {
       // best-effort; never block shutdown on this
+    }
+    // P11.18 · F4 · disconnect Redis sync cleanly.
+    try {
+      await shutdownAgentSloRedisSync()
+    } catch {
+      // best-effort
     }
 
     await shutdownContextServices()

@@ -114,6 +114,20 @@ export function recordAgentInvocation(
   ring.buffer.push({ durationMs, status, ts: Date.now() })
   if (ring.buffer.length > WINDOW_SIZE) ring.buffer.shift()
 
+  // P11.18 · F4 cross-gateway publish (best-effort, fire-and-forget)
+  if (redisPublisher) {
+    try {
+      redisPublisher
+        .publish(
+          SLO_CHANNEL,
+          JSON.stringify({ agentId, durationMs, status, src: PROCESS_ID })
+        )
+        .catch(() => {/* tolerated */})
+    } catch {
+      // Defensive — never block on publish.
+    }
+  }
+
   // Degradation detector: only run after we have a meaningful window.
   if (ring.buffer.length >= 10) {
     const errorsInWindow = ring.buffer.filter((r) => r.status === 'error').length
@@ -203,6 +217,100 @@ export function getAllAgentSloSnapshots(): AgentSloSnapshot[] {
 /** Test helper — wipe all rings. */
 export function clearAgentSloForTest(): void {
   ringByAgentId.clear()
+}
+
+/**
+ * P11.18 · F4 · Redis-backed cross-gateway SLO publish.
+ *
+ * When deployed behind a load balancer with N gateway instances, each
+ * process has its own in-memory ring. Without sharing, /health/agents
+ * only shows traffic THIS gateway saw. Aggregating via PG is a 5-min
+ * lag (flush interval); Redis pub/sub is real-time.
+ *
+ * Strategy: each gateway publishes its delta `recordAgentInvocation`
+ * events to a shared Redis stream. Subscribers in other gateways
+ * apply the delta to their local ring. The PG flush remains the
+ * source of truth for cumulative totals.
+ *
+ * Opt-in via REDIS_URL + AGENT_SLO_REDIS_ENABLED=true. When disabled
+ * (default), behaves identically to the current single-process mode.
+ *
+ * Channel: `starlink:agent-slo:invocations`
+ * Event:   { agentId: string, durationMs: number, status: 'success'|'error'|'fallback', src: string }
+ */
+let redisPublisher: import('ioredis').Redis | null = null
+let redisSubscriber: import('ioredis').Redis | null = null
+const SLO_CHANNEL = 'starlink:agent-slo:invocations'
+const PROCESS_ID = `proc-${Math.random().toString(36).slice(2, 10)}`
+
+export async function startAgentSloRedisSync(): Promise<{ enabled: boolean }> {
+  if (process.env.AGENT_SLO_REDIS_ENABLED !== 'true') return { enabled: false }
+  const redisUrl = process.env.REDIS_URL
+  if (!redisUrl) {
+    auditLogger.warn({
+      action: 'agent-slo.redis-skip',
+      requestId: 'startup',
+      metadata: { reason: 'AGENT_SLO_REDIS_ENABLED=true but REDIS_URL not set' }
+    })
+    return { enabled: false }
+  }
+  try {
+    const { Redis } = await import('ioredis')
+    redisPublisher = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 })
+    redisSubscriber = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 })
+    await redisPublisher.connect()
+    await redisSubscriber.connect()
+    await redisSubscriber.subscribe(SLO_CHANNEL)
+    redisSubscriber.on('message', (channel, msg) => {
+      if (channel !== SLO_CHANNEL) return
+      try {
+        const ev = JSON.parse(msg) as { agentId: string; durationMs: number; status: AgentInvocationStatus; src: string }
+        // Skip our own events to avoid double-counting.
+        if (ev.src === PROCESS_ID) return
+        recordAgentInvocationLocal(ev.agentId, ev.durationMs, ev.status)
+      } catch {
+        // Bad payload — ignore.
+      }
+    })
+    auditLogger.info({
+      action: 'agent-slo.redis-ready',
+      requestId: 'startup',
+      metadata: { processId: PROCESS_ID, channel: SLO_CHANNEL }
+    })
+    return { enabled: true }
+  } catch (err) {
+    auditLogger.warn({
+      action: 'agent-slo.redis-init-failed',
+      requestId: 'startup',
+      metadata: { err: err instanceof Error ? err.message : String(err) }
+    })
+    return { enabled: false }
+  }
+}
+
+/** Internal — record without re-publishing to avoid loops. */
+function recordAgentInvocationLocal(
+  agentId: string,
+  durationMs: number,
+  status: AgentInvocationStatus
+): void {
+  const ring = getRing(agentId)
+  ring.totals.invocations += 1
+  if (status === 'error') ring.totals.errors += 1
+  if (status === 'fallback') ring.totals.fallbacks += 1
+  ring.buffer.push({ durationMs, status, ts: Date.now() })
+  if (ring.buffer.length > WINDOW_SIZE) ring.buffer.shift()
+}
+
+export async function shutdownAgentSloRedisSync(): Promise<void> {
+  try {
+    if (redisSubscriber) await redisSubscriber.quit()
+    if (redisPublisher) await redisPublisher.quit()
+  } catch {
+    // best-effort shutdown
+  }
+  redisPublisher = null
+  redisSubscriber = null
 }
 
 /**
