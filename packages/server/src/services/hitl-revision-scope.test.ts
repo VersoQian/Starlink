@@ -140,13 +140,13 @@ test('directive is consumed (one-shot) and not re-applied to a second supervisor
   assert.ok(second.supervisorDirective.activeAgents.length >= 1)
 })
 
-test('consumeHitlResumeDirective returns null when nothing pending', () => {
+test('consumeHitlResumeDirective returns null when nothing pending', async () => {
   const svc = new BusinessLangGraphService(null)
-  assert.equal(svc.consumeHitlResumeDirective('nope'), null)
+  assert.equal(await svc.consumeHitlResumeDirective('nope'), null)
 })
 
-test('setHitlResumeDirective is a no-op for empty traceId', () => {
+test('setHitlResumeDirective is a no-op for empty traceId', async () => {
   const svc = new BusinessLangGraphService(null)
-  svc.setHitlResumeDirective('', { kind: 'accepted', raw: '[ACCEPTED]' })
-  assert.equal(svc.consumeHitlResumeDirective(''), null)
+  await svc.setHitlResumeDirective('', { kind: 'accepted', raw: '[ACCEPTED]' })
+  assert.equal(await svc.consumeHitlResumeDirective(''), null)
 })

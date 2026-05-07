@@ -149,6 +149,34 @@ export function chunkText(
 }
 
 // =============================================================================
+// Lexical tokenizer (P11.18 hybrid retrieval)
+// =============================================================================
+
+/**
+ * Tokenise a query into terms suitable for lexical (substring) match.
+ *
+ * - Latin / digits: extract `[a-z0-9]+` runs ≥ 3 chars, lowercased.
+ * - CJK: 2-char bigrams (preserves common Chinese phrase structure;
+ *   unigrams are too noisy because most single Chinese chars are too
+ *   common — e.g. "的" appears in every chunk).
+ *
+ * Deduplicated. Used inline in PG via `unnest($tokens::text[])` +
+ * ILIKE — no PG extension required.
+ */
+export function tokenizeForLexical(query: string): string[] {
+  const lower = query.toLowerCase()
+  const latin = lower.match(/[a-z0-9]{3,}/g) ?? []
+  const cjk = Array.from(query.match(/[㐀-鿿]/g) ?? [])
+  const cjkBigrams: string[] = []
+  for (let i = 0; i + 1 < cjk.length; i++) {
+    cjkBigrams.push(`${cjk[i]}${cjk[i + 1]}`)
+  }
+  const all = [...latin, ...cjkBigrams]
+  // Deduplicate while preserving order.
+  return Array.from(new Set(all)).filter((t) => t.length >= 2)
+}
+
+// =============================================================================
 // Store
 // =============================================================================
 
@@ -389,11 +417,40 @@ export class KbStore {
       callerUserId?: string
       callerWorkspaceId?: string
       minScore?: number
+      /** Force-enable hybrid retrieval for this call regardless of env flag. */
+      hybrid?: boolean
     } = {}
   ): Promise<KnowledgeSearchResult[]> {
     await this.ensureTables()
     const trimmed = query.trim()
     if (!trimmed) return []
+
+    // P11.18 · transparent hybrid retrieval. When enabled (env or per-call
+    // override), route through searchChunksHybrid which fuses vector +
+    // lexical via RRF. We still apply the post-filter `minScore` in
+    // hybrid mode against the SEMANTIC sub-score (hybridSemScore in
+    // metadata) — pure RRF scores aren't comparable to cosine.
+    const hybridEnabled = options.hybrid ??
+      (process.env.RAG_HYBRID_ENABLED === 'true' || process.env.RAG_HYBRID_ENABLED === '1')
+    if (hybridEnabled) {
+      const all = await this.searchChunksHybrid(kbId, trimmed, topK, {
+        callerUserId: options.callerUserId,
+        callerWorkspaceId: options.callerWorkspaceId
+      })
+      const minScore = typeof options.minScore === 'number'
+        ? options.minScore
+        : Number(process.env.KB_SEARCH_MIN_SCORE ?? '0.55')
+      // Filter by semantic component — RRF rank-fusion guarantees the
+      // chunk made it because of EITHER signal. We only drop a chunk
+      // when its semantic similarity is below floor AND lexical hits=0
+      // (i.e. it sneaked in via a single weak lexical match without
+      // any semantic backing).
+      return all.filter((r) => {
+        const sem = Number(r.metadata?.hybridSemScore ?? 0)
+        const lex = Number(r.metadata?.hybridLexHits ?? 0)
+        return sem >= minScore || lex >= 2
+      })
+    }
 
     const embedding = await embedText(trimmed)
     const limit = Math.max(1, Math.min(50, Math.floor(topK)))
@@ -453,6 +510,182 @@ export class KbStore {
       ? options.minScore
       : Number(process.env.KB_SEARCH_MIN_SCORE ?? '0.55')
     return all.filter((r) => r.score >= minScore)
+  }
+
+  /**
+   * P11.18 · Hybrid retrieval (BM25-ish lexical + vector cosine, fused
+   * via Reciprocal Rank Fusion).
+   *
+   * Why hybrid: pure vector cosine misses cases where the query term
+   * appears verbatim in the chunk but the surrounding semantics differ
+   * (e.g. exact product names, acronyms, numeric thresholds). Pure
+   * lexical misses paraphrases. RRF requires no score normalisation:
+   * each chunk gets `Σ 1 / (k + rank_in_each_ranker)` (k=60 is the
+   * paper-default), so a chunk ranked top-3 in BOTH rankers beats a
+   * chunk ranked top-1 in just one.
+   *
+   * Tokenisation runs in Node (no new PG extension): Latin words ≥3
+   * chars + CJK 2-char bigrams. For each token we ask PG
+   * `content ILIKE '%token%'` and count hits — cheap on small KBs,
+   * trivially indexable later via pg_trgm if a KB grows past ~10k chunks.
+   */
+  async searchChunksHybrid(
+    kbId: string,
+    query: string,
+    topK = 5,
+    options: {
+      callerUserId?: string
+      callerWorkspaceId?: string
+      /** RRF constant; smaller k = more aggressive top-rank weighting. Default 60. */
+      rrfK?: number
+      /** Override per-ranker candidate pool. Default = topK * 4. */
+      poolSize?: number
+    } = {}
+  ): Promise<KnowledgeSearchResult[]> {
+    await this.ensureTables()
+    const trimmed = query.trim()
+    if (!trimmed) return []
+
+    const limit = Math.max(1, Math.min(50, Math.floor(topK)))
+    const pool_ = Math.max(limit, options.poolSize ?? limit * 4)
+    const k = Math.max(1, options.rrfK ?? 60)
+    const tokens = tokenizeForLexical(trimmed)
+
+    // Visibility filter shared across both rankers.
+    const visParams: unknown[] = []
+    let visibilityFilter = ''
+    if (options.callerUserId || options.callerWorkspaceId) {
+      const clauses: string[] = ["visibility = 'global'"]
+      if (options.callerWorkspaceId) {
+        visParams.push(options.callerWorkspaceId)
+        clauses.push(`(visibility = 'workspace' AND workspace_id = $V_W)`)
+      }
+      if (options.callerUserId) {
+        visParams.push(options.callerUserId)
+        clauses.push(`(visibility = 'private' AND owner_user_id = $V_U)`)
+      }
+      visibilityFilter = ` AND (${clauses.join(' OR ')})`
+    }
+
+    // Ranker 1: vector cosine (top pool_).
+    const embedding = await embedText(trimmed)
+    const semParams: unknown[] = [kbId, toPgVector(embedding.vector)]
+    let semVisFilter = visibilityFilter
+    if (options.callerWorkspaceId) {
+      semParams.push(options.callerWorkspaceId)
+      semVisFilter = semVisFilter.replace('$V_W', `$${semParams.length}`)
+    }
+    if (options.callerUserId) {
+      semParams.push(options.callerUserId)
+      semVisFilter = semVisFilter.replace('$V_U', `$${semParams.length}`)
+    }
+    semParams.push(pool_)
+    const semResult = await pool.query(
+      `SELECT id, doc_id, content, chunk_index, metadata,
+              embedding <=> $2::vector AS distance
+         FROM kb_chunks
+        WHERE kb_id = $1 AND embedding IS NOT NULL${semVisFilter}
+        ORDER BY embedding <=> $2::vector ASC
+        LIMIT $${semParams.length}`,
+      semParams
+    )
+
+    // Ranker 2: lexical token-overlap. Score = number of distinct query
+    // tokens present (case-insensitive substring). Ties broken by chunk
+    // length (shorter chunks with hits are more focused).
+    let lexResult: { rows: Array<Record<string, unknown>> } = { rows: [] }
+    if (tokens.length > 0) {
+      const lexParams: unknown[] = [kbId, tokens]
+      let lexVisFilter = visibilityFilter
+      if (options.callerWorkspaceId) {
+        lexParams.push(options.callerWorkspaceId)
+        lexVisFilter = lexVisFilter.replace('$V_W', `$${lexParams.length}`)
+      }
+      if (options.callerUserId) {
+        lexParams.push(options.callerUserId)
+        lexVisFilter = lexVisFilter.replace('$V_U', `$${lexParams.length}`)
+      }
+      lexParams.push(pool_)
+      lexResult = await pool.query(
+        `SELECT id, doc_id, content, chunk_index, metadata,
+                (SELECT COUNT(*)::int FROM unnest($2::text[]) AS t
+                  WHERE content ILIKE '%' || t || '%') AS lex_hits
+           FROM kb_chunks
+          WHERE kb_id = $1${lexVisFilter}
+            AND EXISTS (
+              SELECT 1 FROM unnest($2::text[]) AS t WHERE content ILIKE '%' || t || '%'
+            )
+          ORDER BY lex_hits DESC, length(content) ASC
+          LIMIT $${lexParams.length}`,
+        lexParams
+      )
+    }
+
+    // RRF merge. Each chunk gets contributions from both rankers.
+    type Row = {
+      id: string
+      docId: string
+      content: string
+      chunkIndex: number
+      metadata: Record<string, unknown>
+      semScore: number  // 1 - distance, for debug
+      lexHits: number   // for debug
+      rrf: number
+    }
+    const byId = new Map<string, Row>()
+    ;(semResult.rows as Array<Record<string, unknown>>).forEach((row, idx) => {
+      const id = row.id as string
+      const distance = Number(row.distance ?? 1)
+      byId.set(id, {
+        id,
+        docId: row.doc_id as string,
+        content: row.content as string,
+        chunkIndex: row.chunk_index as number,
+        metadata: ((row.metadata as Record<string, unknown>) ?? {}),
+        semScore: 1 - distance,
+        lexHits: 0,
+        rrf: 1 / (k + idx + 1)
+      })
+    })
+    ;(lexResult.rows as Array<Record<string, unknown>>).forEach((row, idx) => {
+      const id = row.id as string
+      const existing = byId.get(id)
+      const lexHits = Number(row.lex_hits ?? 0)
+      if (existing) {
+        existing.lexHits = lexHits
+        existing.rrf += 1 / (k + idx + 1)
+      } else {
+        byId.set(id, {
+          id,
+          docId: row.doc_id as string,
+          content: row.content as string,
+          chunkIndex: row.chunk_index as number,
+          metadata: ((row.metadata as Record<string, unknown>) ?? {}),
+          semScore: 0,
+          lexHits,
+          rrf: 1 / (k + idx + 1)
+        })
+      }
+    })
+    void visParams // referenced to satisfy linter; visParams is captured by name-substituted SQL above
+
+    return Array.from(byId.values())
+      .sort((a, b) => b.rrf - a.rrf)
+      .slice(0, limit)
+      .map((row) => ({
+        docId: row.docId,
+        snippet: row.content,
+        // Surface the FUSED score as the canonical `score`; expose
+        // sub-scores via metadata so callers can debug.
+        score: row.rrf,
+        metadata: {
+          ...row.metadata,
+          chunkIndex: row.chunkIndex,
+          hybridSemScore: row.semScore,
+          hybridLexHits: row.lexHits,
+          hybridRrf: row.rrf
+        }
+      }))
   }
 
   async listDocuments(

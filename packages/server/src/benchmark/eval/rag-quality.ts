@@ -55,10 +55,22 @@ interface KbEvalResult {
  * CLI flag below or by editing this constant.
  */
 const RAG_TEST_QUERIES: Record<string, RagTestCase[]> = {
-  // 'kb-saas-pricing': [
-  //   { query: '订阅模式如何分层定价', expectedDocIds: ['doc-stripe-pricing-2024'] },
-  //   { query: '免费版 vs 付费版的常见转化率', expectedDocIds: ['doc-saas-conversion-2024'] },
-  // ],
+  // 咖啡 B2B 调研 KB · 8 个 golden queries
+  // 文档：B2B 团队咖啡订阅服务调研笔记（市场背景 / 痛点 / 价值主张 / 收入模型 / 验证渠道 / 风险）
+  CYXwVKqmzKvurYQo3BIrP: [
+    // 直接关键词匹配
+    { query: '中型科技公司办公室咖啡每月预算', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+    { query: '订阅服务的定价层级和毛利', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+    // 语义改写
+    { query: '我们的产品和星巴克 to-B 有什么不同', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+    { query: '小规模 office 怎么获得高品质咖啡豆', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+    // 痛点 / 验证
+    { query: '行政管理者在采购咖啡上花多少时间', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+    { query: 'MVP 试点城市和续订率目标', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+    // 风险
+    { query: '烘焙商绕开平台直连客户怎么办', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+    { query: '经济下行对办公福利支出的影响', expectedDocIds: ['DdaWRnuaYxDSa9T5qm7N9'] },
+  ],
 }
 
 async function evalKb(kbId: string, cases: RagTestCase[], topK = 5): Promise<KbEvalResult> {

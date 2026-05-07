@@ -135,38 +135,76 @@ async function embedRemote(
   const requestedDimensions = Number(process.env.EMBEDDING_DIMENSIONS)
   const shouldSendDimensions = Number.isFinite(requestedDimensions) && requestedDimensions > 0
 
-  const response = await fetch(`${baseUrl}/embeddings`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      input: text,
-      ...(shouldSendDimensions ? { dimensions: Math.floor(requestedDimensions) } : {})
-    })
-  })
+  // P11.18 · retry envelope. SiliconFlow / DashScope routinely 503 on
+  // hot models when capacity is tight. Without retry, every transient
+  // overload immediately falls back to local-hash and the chunk's
+  // semantic embedding is wasted (recall ≈ 0). Retry up to 3 times
+  // with exponential backoff for 408 / 429 / 5xx.
+  const maxRetries = Number(process.env.EMBEDDING_MAX_RETRIES ?? '3')
+  const timeoutMs = Number(process.env.EMBEDDING_TIMEOUT_MS ?? '30000')
+  let lastErr: unknown = null
 
-  if (!response.ok) {
-    throw new Error(`Embedding API failed: ${response.status} ${response.statusText}`)
-  }
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), timeoutMs)
+    try {
+      const response = await fetch(`${baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          input: text,
+          ...(shouldSendDimensions ? { dimensions: Math.floor(requestedDimensions) } : {})
+        }),
+        signal: ac.signal
+      })
+      clearTimeout(timer)
 
-  const payload = await response.json() as { data?: Array<{ embedding?: unknown }> }
-  const embedding = payload.data?.[0]?.embedding
-  if (!Array.isArray(embedding)) {
-    throw new Error('Embedding API returned invalid payload')
-  }
+      if (!response.ok) {
+        const retryable = response.status === 408 || response.status === 429 || response.status >= 500
+        if (retryable && attempt < maxRetries) {
+          const backoff = Math.min(8000, 1000 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400)
+          console.warn(`[embedding-service] HTTP ${response.status} on ${model}, retry ${attempt + 1}/${maxRetries} in ${backoff}ms`)
+          await new Promise((r) => setTimeout(r, backoff))
+          continue
+        }
+        throw new Error(`Embedding API failed: ${response.status} ${response.statusText}`)
+      }
 
-  return {
-    vector: fitDimensions(
-      normalizeVector(embedding.map((value) => Number(value)).filter(Number.isFinite)),
-      dimensions
-    ),
-    provider: 'openai-compatible',
-    model,
-    dimensions
+      const payload = await response.json() as { data?: Array<{ embedding?: unknown }> }
+      const embedding = payload.data?.[0]?.embedding
+      if (!Array.isArray(embedding)) {
+        throw new Error('Embedding API returned invalid payload')
+      }
+
+      return {
+        vector: fitDimensions(
+          normalizeVector(embedding.map((value) => Number(value)).filter(Number.isFinite)),
+          dimensions
+        ),
+        provider: 'openai-compatible',
+        model,
+        dimensions
+      }
+    } catch (err) {
+      clearTimeout(timer)
+      lastErr = err
+      const errStr = err instanceof Error ? err.message : String(err)
+      const isAbort = err instanceof Error && (err.name === 'AbortError' || /aborted/i.test(errStr))
+      const isNetwork = /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(errStr)
+      if ((isAbort || isNetwork) && attempt < maxRetries) {
+        const backoff = Math.min(8000, 1000 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400)
+        console.warn(`[embedding-service] ${isAbort ? 'timeout' : 'network'} on ${model}, retry ${attempt + 1}/${maxRetries} in ${backoff}ms`)
+        await new Promise((r) => setTimeout(r, backoff))
+        continue
+      }
+      throw err
+    }
   }
+  throw lastErr ?? new Error('embedding retries exhausted')
 }
 
 function createLocalEmbedding(text: string, dimensions: number) {

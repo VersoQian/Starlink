@@ -1614,6 +1614,12 @@ ${snippets}
       },
       this.parentCtx(state.traceId)
     )
+    // P11.18 · per-agent SLO tracking. Every invocation lands a
+    // (durationMs, status) tuple in the agent's ring buffer; the
+    // tracker emits `agent-slo.degraded` audit when error rate
+    // crosses threshold.
+    const sloStart = Date.now()
+    let sloStatus: 'success' | 'error' | 'fallback' = 'success'
     try {
       const result = await subgraph.invoke(projectInput(state, decision), {
         configurable: {
@@ -1626,11 +1632,18 @@ ${snippets}
       })
       return projectOutput(result)
     } catch (err) {
+      sloStatus = 'error'
       span.recordException(err as Error)
       span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
       throw err
     } finally {
       span.end()
+      try {
+        const { recordAgentInvocation } = await import('../infrastructure/observability/agent-slo-tracker.js')
+        recordAgentInvocation(agentId, Date.now() - sloStart, sloStatus)
+      } catch {
+        // Defensive: SLO tracking must never break the agent path.
+      }
     }
   }
 

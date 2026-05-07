@@ -64,8 +64,15 @@ interface Circuit {
 }
 const circuitsByBaseURL = new Map<string, Circuit>()
 
-const CIRCUIT_THRESHOLD = Number(process.env.LLM_CIRCUIT_THRESHOLD ?? '5')
-const CIRCUIT_COOLDOWN_MS = Number(process.env.LLM_CIRCUIT_COOLDOWN_MS ?? String(5 * 60 * 1000))
+// Read env on each access so tests (and runtime config flips) take effect
+// without a process restart. The Number() coerces a missing/blank env
+// var to NaN; the fallback `||` treats that as "use the default".
+function getCircuitThreshold(): number {
+  return Number(process.env.LLM_CIRCUIT_THRESHOLD) || 5
+}
+function getCircuitCooldownMs(): number {
+  return Number(process.env.LLM_CIRCUIT_COOLDOWN_MS) || 5 * 60 * 1000
+}
 
 function getCircuit(baseURL: string): Circuit {
   let c = circuitsByBaseURL.get(baseURL)
@@ -80,8 +87,9 @@ function checkCircuitOpen(baseURL: string): void {
   const c = getCircuit(baseURL)
   if (c.state === 'open') {
     const elapsed = Date.now() - c.openedAt
-    if (elapsed < CIRCUIT_COOLDOWN_MS) {
-      const remainingS = Math.ceil((CIRCUIT_COOLDOWN_MS - elapsed) / 1000)
+    const cooldown = getCircuitCooldownMs()
+    if (elapsed < cooldown) {
+      const remainingS = Math.ceil((cooldown - elapsed) / 1000)
       throw new Error(
         `LLM circuit OPEN for ${baseURL} (${c.consecutiveFailures} consecutive failures, retry in ${remainingS}s)`
       )
@@ -107,11 +115,11 @@ function recordFailure(baseURL: string): void {
     console.warn(`[llm-client] circuit re-OPENED for ${baseURL} after half-open trial failure`)
     return
   }
-  if (c.state === 'closed' && c.consecutiveFailures >= CIRCUIT_THRESHOLD) {
+  if (c.state === 'closed' && c.consecutiveFailures >= getCircuitThreshold()) {
     c.state = 'open'
     c.openedAt = Date.now()
     console.warn(
-      `[llm-client] circuit OPENED for ${baseURL} (${c.consecutiveFailures} consecutive failures, cooldown ${CIRCUIT_COOLDOWN_MS / 1000}s)`
+      `[llm-client] circuit OPENED for ${baseURL} (${c.consecutiveFailures} consecutive failures, cooldown ${getCircuitCooldownMs() / 1000}s)`
     )
   }
 }

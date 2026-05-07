@@ -138,6 +138,14 @@ export class MentionRouter {
       metadata: { agentId: entry.id, callability: entry.callability }
     })
 
+    // P11.18 · per-agent SLO. invokeRegisteredAgent already records
+    // BMC generators; mention-router covers the others (utility,
+    // advisor, debate-side, debate-judge, report). We bracket the
+    // whole switch with a try/finally so EVERY callability lands a
+    // recording — duplicate recordings for BMC paths are intentional
+    // (they reflect user-facing wall-clock vs internal subgraph time).
+    const sloStart = Date.now()
+    let sloStatus: 'success' | 'error' | 'fallback' = 'success'
     try {
       // F4 · agent-bound KB auto-search.
       // Each agent can have N KBs bound via kb_agent_bindings (auto_search=true).
@@ -169,6 +177,7 @@ export class MentionRouter {
           return refuse(entry.id, `不支持的 callability：${entry.callability}`)
       }
     } catch (err) {
+      sloStatus = 'error'
       auditLogger.error({
         action: 'mention-router.failed',
         requestId: input.conversationId,
@@ -178,6 +187,13 @@ export class MentionRouter {
         error: err as Error
       })
       return refuse(entry.id, `调用 agent 失败：${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      try {
+        const { recordAgentInvocation } = await import('../infrastructure/observability/agent-slo-tracker.js')
+        recordAgentInvocation(`mention:${entry.id}`, Date.now() - sloStart, sloStatus)
+      } catch {
+        // Defensive: SLO must never break user-facing path.
+      }
     }
   }
 
