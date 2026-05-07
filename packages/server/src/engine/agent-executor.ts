@@ -99,10 +99,35 @@ export class AgentExecutor {
             streamWriter: () => {},
           }
 
+          // P11.18 · per-tool SLO. Treat each tool invocation like
+          // an agent invocation in the SLO tracker — operators get
+          // per-tool latency + error rate at /health/agents +
+          // /metrics. Tool name is namespaced `tool:<name>` so it
+          // doesn't collide with agent-id rings.
+          const toolSloStart = Date.now()
+          let toolSloStatus: 'success' | 'error' = 'success'
           let output: unknown = null
-          for await (const msg of tool.execute(call.args, toolCtx)) {
-            if (msg.type === 'json') output = msg.data
-            else if (msg.type === 'text') output = msg.content
+          try {
+            for await (const msg of tool.execute(call.args, toolCtx)) {
+              if (msg.type === 'json') output = msg.data
+              else if (msg.type === 'text') output = msg.content
+            }
+          } catch (toolErr) {
+            toolSloStatus = 'error'
+            throw toolErr
+          } finally {
+            try {
+              const { recordAgentInvocation } = await import(
+                '../infrastructure/observability/agent-slo-tracker.js'
+              )
+              recordAgentInvocation(
+                `tool:${call.name}`,
+                Date.now() - toolSloStart,
+                toolSloStatus
+              )
+            } catch {
+              // SLO must never break tool exec.
+            }
           }
 
           yield {

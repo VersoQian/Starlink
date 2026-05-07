@@ -266,4 +266,124 @@ export class LLMClient {
       function: { name, description, parameters },
     }
   }
+
+  /**
+   * P11.18 · True token-level streaming via SSE.
+   *
+   * Yields each delta as the upstream LLM produces it. Compatible with
+   * any OpenAI-style `chat/completions` endpoint that supports
+   * `stream: true` (DeepSeek, OpenAI, SiliconFlow, DashScope all do).
+   *
+   * Usage:
+   *   for await (const chunk of llm.streamChat({ messages: [...] })) {
+   *     if (chunk.kind === 'token') process.stdout.write(chunk.delta)
+   *     if (chunk.kind === 'done') console.log('total:', chunk.fullText)
+   *   }
+   *
+   * Caveats:
+   *   - No retry loop here — streaming retries are non-trivial (need
+   *     to replay partial state); fail-fast on first error.
+   *   - Tool calls are not yielded as deltas (they only land in the
+   *     final `done` event). For tool-calling, use chat() (synchronous).
+   *   - Circuit breaker still applies; failure trips it as expected.
+   */
+  async *streamChat(options: LLMChatOptions): AsyncGenerator<
+    | { kind: 'token'; delta: string }
+    | { kind: 'done'; fullText: string; finishReason: string; usage?: LLMResponse['usage'] }
+    | { kind: 'error'; error: string }
+  > {
+    const body: Record<string, unknown> = {
+      model: options.model ?? this.defaultModel,
+      messages: options.messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 4096,
+      stream: true
+    }
+
+    checkCircuitOpen(this.baseURL)
+    const timeoutMs = Number(process.env.LLM_STREAM_TIMEOUT_MS ?? '180000')
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), timeoutMs)
+    let fullText = ''
+    let finishReason = 'stop'
+    let usage: LLMResponse['usage'] | undefined
+
+    try {
+      const res = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+          Accept: 'text/event-stream'
+        },
+        body: JSON.stringify(body),
+        signal: ac.signal
+      })
+
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => '')
+        recordFailure(this.baseURL)
+        yield { kind: 'error', error: `LLM stream error ${res.status}: ${text.slice(0, 200)}` }
+        return
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        // SSE frames are separated by double newlines; each frame is
+        // one or more `data: ...` lines.
+        let nlIdx: number
+        while ((nlIdx = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, nlIdx)
+          buffer = buffer.slice(nlIdx + 2)
+          for (const line of frame.split('\n')) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith('data:')) continue
+            const payload = trimmed.slice(5).trim()
+            if (payload === '[DONE]') continue
+            try {
+              const json = JSON.parse(payload) as {
+                choices?: Array<{
+                  delta?: { content?: string | null }
+                  finish_reason?: string | null
+                }>
+                usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+              }
+              const choice = json.choices?.[0]
+              const delta = choice?.delta?.content
+              if (typeof delta === 'string' && delta.length > 0) {
+                fullText += delta
+                yield { kind: 'token', delta }
+              }
+              if (choice?.finish_reason) finishReason = choice.finish_reason
+              if (json.usage) {
+                usage = {
+                  promptTokens: json.usage.prompt_tokens ?? 0,
+                  completionTokens: json.usage.completion_tokens ?? 0,
+                  totalTokens: json.usage.total_tokens ?? 0
+                }
+              }
+            } catch {
+              // Tolerate malformed frames — don't break the stream.
+            }
+          }
+        }
+      }
+      recordSuccess(this.baseURL)
+      yield { kind: 'done', fullText, finishReason, usage }
+    } catch (err) {
+      recordFailure(this.baseURL)
+      yield {
+        kind: 'error',
+        error: err instanceof Error ? err.message : String(err)
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 }

@@ -145,6 +145,24 @@ export function toLangchainTool(
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
       }
+      // P11.18 · per-tool SLO. This adapter is the chokepoint for
+      // EVERY dimension-action sub-agent invoked from inside a BMC
+      // ReAct subgraph. Recording here gives operators per-tool
+      // latency / error rate via /health/agents + /metrics under
+      // the namespace `tool:<name>` (consistent with engine/agent-executor
+      // and engine/graph-executor instrumentation).
+      try {
+        const { recordAgentInvocation } = await import(
+          '../../infrastructure/observability/agent-slo-tracker.js'
+        )
+        recordAgentInvocation(
+          `tool:${toolName}`,
+          Date.now() - startedAt,
+          lastError ? 'error' : 'success'
+        )
+      } catch {
+        // SLO must never break tool execution.
+      }
 
       // Emit result AFTER. Failure path also emits — the boolean `ok`
       // discriminates so downstream metrics can distinguish completed

@@ -56,12 +56,33 @@ export class GraphExecutor {
             streamWriter: () => {},
           }
 
-          // Execute and collect final output
+          // P11.18 · per-tool SLO. Same buckets as agent-executor;
+          // unified `tool:<name>` namespace at /health/agents +
+          // /metrics. Reports both success and error paths.
+          let toolSloStatus: 'success' | 'error' = 'success'
           let lastOutput: unknown = null
-          for await (const msg of tool.execute(input, toolCtx)) {
-            if (msg.type === 'json') lastOutput = msg.data
-            else if (msg.type === 'text') lastOutput = msg.content
-            else if (msg.type === 'file') lastOutput = { path: msg.path, mime: msg.mime }
+          try {
+            for await (const msg of tool.execute(input, toolCtx)) {
+              if (msg.type === 'json') lastOutput = msg.data
+              else if (msg.type === 'text') lastOutput = msg.content
+              else if (msg.type === 'file') lastOutput = { path: msg.path, mime: msg.mime }
+            }
+          } catch (toolErr) {
+            toolSloStatus = 'error'
+            throw toolErr
+          } finally {
+            try {
+              const { recordAgentInvocation } = await import(
+                '../infrastructure/observability/agent-slo-tracker.js'
+              )
+              recordAgentInvocation(
+                `tool:${step.toolName}`,
+                Date.now() - startTime,
+                toolSloStatus
+              )
+            } catch {
+              // SLO must never break tool exec.
+            }
           }
 
           const duration = Date.now() - startTime
