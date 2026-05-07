@@ -71,7 +71,15 @@ export const BmcGeneratorRenderer: AgentOutputRenderer = {
   render: (ctx) => {
     const agent = ctx.agentId ? getAgent(ctx.agentId) : undefined
     const accent = agent ? bylineAccent[agent.byline] : '#9B8E70'
-    const rows = parseCardRows(ctx.content)
+
+    // P11.4 · drawer surface always renders single-cell agent content as
+    // markdown raw via EditorialProse. The card-list path below is for
+    // the chat surface where one mention reply contains multiple cells
+    // wrapped in "- **Label**: body" bullets — that wrapper does not
+    // apply to a single-cell drawer view, so parsing it yields a
+    // structured list with literal "##" leaking into the kicker. Force
+    // the editorial prose path for drawers regardless of bullet shape.
+    const rows = ctx.surface === 'drawer' ? [] : parseCardRows(ctx.content)
 
     // Pull the leading summary sentence (e.g. "生成 3 张 market 维度卡片：")
     const firstNewline = ctx.content.indexOf('\n')
