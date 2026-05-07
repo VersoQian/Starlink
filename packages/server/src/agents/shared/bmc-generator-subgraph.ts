@@ -39,6 +39,15 @@ export interface BmcGeneratorConfig {
   loggerName: string
 }
 
+/**
+ * P11.13 / T3.1 · upper bound on accumulated messages in the ReAct
+ * subgraph state. Keeps the tail (most recent N entries) so the agent
+ * has enough context to continue tool-call reasoning, while shedding
+ * stale earlier-round messages that would otherwise grow O(N²) over
+ * multi-round revisions. Configurable via env BMC_MESSAGE_HISTORY_CAP.
+ */
+const MESSAGE_HISTORY_CAP = Number(process.env.BMC_MESSAGE_HISTORY_CAP) || 40
+
 // ============== State factory ==============
 
 /**
@@ -75,8 +84,29 @@ export function makeBmcGeneratorState() {
      * so per-user calibration influences round-2+ revisions explicitly.
      */
     userSkillPrompt: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+    /**
+     * P11.13 / T3.1 · capped messages history.
+     *
+     * The original reducer was `(a, b) => a.concat(b)` — append-only with
+     * no upper bound. Each ReAct iteration adds AI/Tool/Human messages
+     * to the array; in a multi-round revision (round N includes round
+     * N-1's tool-call sequence), the message tail grows quadratically
+     * and bloats the LangGraph state checkpoint + every subsequent LLM
+     * call's context window.
+     *
+     * New reducer: append, then keep only the last MESSAGE_HISTORY_CAP
+     * entries (default 40). This is enough to retain the most recent
+     * tool-call/result pairs the LLM needs to continue reasoning, while
+     * dropping stale earlier-round artefacts. The first message
+     * (system prompt) is preserved separately because invokeAgent
+     * always re-prepends a fresh SystemMessage on every invocation.
+     */
     messages: Annotation<BaseMessage[]>({
-      reducer: (a, b) => a.concat(b),
+      reducer: (a, b) => {
+        const merged = a.concat(b)
+        if (merged.length <= MESSAGE_HISTORY_CAP) return merged
+        return merged.slice(-MESSAGE_HISTORY_CAP)
+      },
       default: () => []
     }),
     marketNodes: Annotation<MacraNodeData[]>({ reducer: (_a, b) => b, default: () => [] }),

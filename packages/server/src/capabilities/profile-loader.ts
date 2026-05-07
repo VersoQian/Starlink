@@ -112,7 +112,33 @@ export function profileToAdvisorDescriptor<State = unknown>(
 
 // ============== Lazy-init helper ==============
 
+/**
+ * P11.13 / T3.2 · TTL-aware profile cache.
+ *
+ * Original implementation was a one-shot lazy cache: profile was loaded
+ * once on first read and never refreshed. That made hot-reloading
+ * agent.yaml impossible without restarting the server, and stale
+ * profiles bled across debate sessions if the operator edited a
+ * prompt mid-run.
+ *
+ * New behaviour: cache for AGENT_PROFILE_TTL_MS (default 5 min); after
+ * TTL the next call re-reads the YAML. Trade-off: tiny per-5-min disk
+ * read overhead vs. eliminating the staleness bug.
+ *
+ * Override via env AGENT_PROFILE_TTL_MS (e.g. set to 0 for no-cache
+ * during development; 86400000 for daily refresh in prod).
+ */
+const PROFILE_TTL_MS = Number(process.env.AGENT_PROFILE_TTL_MS) || 5 * 60 * 1000
+
 export function makeProfileGetter(yamlPath: string): () => Promise<AgentProfile> {
   let cached: Promise<AgentProfile> | undefined
-  return () => (cached ??= loadAgentProfile(yamlPath))
+  let cachedAt = 0
+  return () => {
+    const now = Date.now()
+    if (!cached || now - cachedAt >= PROFILE_TTL_MS) {
+      cached = loadAgentProfile(yamlPath)
+      cachedAt = now
+    }
+    return cached
+  }
 }

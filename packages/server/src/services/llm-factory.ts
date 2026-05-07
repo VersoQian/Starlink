@@ -89,6 +89,37 @@ function buildModelKwargs(model: string): Record<string, unknown> | undefined {
   }
 }
 
+/**
+ * P11.13 / T3.4 · process-level ChatOpenAI cache.
+ *
+ * Original implementation called `new ChatOpenAI()` every invocation,
+ * which means each LLM request opened a fresh HTTPS connection (no
+ * keep-alive reuse). For a 12-agent conversation with multi-round
+ * revisions + debate (~30 LLM calls/session), that's 30 cold sockets.
+ * Under sustained load the per-process file-descriptor and ephemeral-
+ * port budgets get hit fast.
+ *
+ * Cache by (model + temperature + maxTokens + baseURL + family) tuple.
+ * Different agents calling deepseek-chat with the same params share
+ * one instance; agent profiles that differ in any param get their own.
+ *
+ * Cache key intentionally excludes apiKey (don't want to log/leak it
+ * via Map iteration) — the cfg.apiKey is captured per cache entry but
+ * keys use the family alias (deepseek/openai).
+ */
+type CacheKey = string
+const llmCache = new Map<CacheKey, BusinessModel>()
+
+function cacheKeyFor(profile: AgentProfile, family: string, baseURL: string | undefined): CacheKey {
+  return [
+    family,
+    profile.model,
+    profile.temperature ?? 'default',
+    profile.max_tokens ?? 'default',
+    baseURL ?? 'no-base'
+  ].join('|')
+}
+
 export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
   const family = detectFamily(profile.model)
   const cfg = readFamilyConfig(family)
@@ -99,6 +130,16 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
     })
     return null
   }
+  const key = cacheKeyFor(profile, family, cfg.baseURL)
+  const cached = llmCache.get(key)
+  if (cached) {
+    auditLogger.info({
+      action: 'llm-factory.cache-hit',
+      metadata: { agentId: profile.id, model: profile.model, family, source: cfg.source }
+    })
+    return cached
+  }
+
   const configuration = cfg.baseURL ? { baseURL: cfg.baseURL } : undefined
   const modelKwargs = buildModelKwargs(profile.model)
   auditLogger.info({
@@ -113,7 +154,7 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
     }
   })
 
-  return new ChatOpenAI({
+  const instance = new ChatOpenAI({
     apiKey: cfg.apiKey,
     model: profile.model,
     temperature: profile.temperature,
@@ -121,4 +162,6 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
     configuration,
     ...(modelKwargs ? { modelKwargs } : {})
   })
+  llmCache.set(key, instance)
+  return instance
 }
