@@ -1,4 +1,4 @@
-import type { CanvasEdge, CanvasGraph, WorkspaceMetadataUpdateInput, CanvasNode, CommunityPostInput, ConversationEvent, ConversationMessage, MemoryItem, PracticeSessionInput, WorkspaceDirectoryItem, WorkspaceMetadataHistoryEntry, WorkspaceAsset, WorkspaceContextSnapshot } from '@starlink/shared';
+import type { CanvasEdge, CanvasGraph, CardCitation, WorkspaceMetadataUpdateInput, CanvasNode, CommunityPostInput, ConversationEvent, ConversationMessage, MemoryItem, PracticeSessionInput, WorkspaceDirectoryItem, WorkspaceMetadataHistoryEntry, WorkspaceAsset, WorkspaceContextSnapshot } from '@starlink/shared';
 import { BusinessLangGraphService } from '../services/business-langgraph.js';
 import { type MentionResult } from '../services/mention-router.js';
 import type { ConversationEventBus, ConversationEventFilter } from './conversation-event-bus.js';
@@ -160,3 +160,11 @@ export declare class ConversationStore {
     private assertConversationBelongsToWorkspace;
     private assertConversationBelongsToWorkspaceOrSession;
 }
+/**
+ * Pull `citations` (CitationSpan[]) from a node's metadata and wrap it into
+ * a `CardCitation` entry keyed by cardId + fieldName='content'.
+ *
+ * Returns null if the node has no citation metadata (e.g., non-BMC node,
+ * or agent output that didn't contain [[ref:...]] tokens).
+ */
+export declare function extractCitationsFromNode(node: CanvasNode): CardCitation | null;

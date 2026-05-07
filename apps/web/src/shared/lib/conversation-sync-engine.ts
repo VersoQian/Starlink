@@ -169,47 +169,106 @@ export function subscribeConversationProgress(
   return conversationSyncEngine.subscribe(scope, listener, options)
 }
 
+/**
+ * P11.16 · Backfill missed events via conversationRuntimeEvents query.
+ * Returns the new cumulative cursor after replaying.
+ */
+const RUNTIME_EVENTS_QUERY = /* GraphQL */ `
+  query ConversationRuntimeEvents($workspaceId: ID!, $conversationId: ID, $sinceCursor: Int) {
+    conversationRuntimeEvents(workspaceId: $workspaceId, conversationId: $conversationId, sinceCursor: $sinceCursor) {
+      type
+      conversationId
+      status
+      message
+      payload
+    }
+  }
+`
+
+async function fetchAndReplayMissedEvents(
+  workspaceId: string,
+  conversationId: string,
+  sinceCursor: number,
+  onEvent: (event: ConversationProgressEvent) => void
+): Promise<number> {
+  try {
+    const { getGraphQLClient } = await import('./graphql-client')
+    const client = getGraphQLClient()
+    const data = await client.request<{ conversationRuntimeEvents: ConversationProgressEvent[] }>(
+      RUNTIME_EVENTS_QUERY,
+      { workspaceId, conversationId, sinceCursor }
+    )
+    const events = data.conversationRuntimeEvents ?? []
+    for (const e of events) onEvent(e)
+    return sinceCursor + events.length
+  } catch (err) {
+    console.warn('[conversation-sync] fetchAndReplayMissedEvents failed', err)
+    return sinceCursor
+  }
+}
+
 export function watchConversation(options: WatchConversationOptions) {
   let cancel = () => {}
+  // P11.16 · cumulative count of events seen on this watch — passed as
+  // sinceCursor on reconnect so missed events are replayed exactly once
+  // (server does `events.slice(cursor)`). Increments on every event we
+  // forward to the listener regardless of subscription path.
+  let eventsSeen = 0
 
   const done = new Promise<void>((resolve, reject) => {
+    const handleEvent = (event: ConversationProgressEvent) => {
+      eventsSeen += 1
+      options.onEvent?.(event)
+
+      if (event.type === 'graph/appended' && event.payload) {
+        options.onGraphAppended?.(event.payload)
+      }
+
+      if (event.type === 'graph/diff' && event.payload) {
+        options.onGraphDiff?.(event.payload)
+      }
+
+      if (event.type === 'evidence/updated' && event.payload) {
+        options.onEvidence?.(event.payload)
+      }
+
+      if (event.type === 'card/cited' && event.payload) {
+        options.onCardCited?.(event.payload)
+      }
+
+      if (event.type === 'status') {
+        if (event.status === 'completed') {
+          cancel()
+          resolve()
+        }
+        if (event.status === 'failed') {
+          cancel()
+          reject(new Error(event.message ?? 'conversation failed'))
+        }
+      }
+    }
+
     cancel = subscribeConversationProgress(
       {
         workspaceId: options.workspaceId,
         conversationId: options.conversationId
       },
-      (event) => {
-        options.onEvent?.(event)
-
-        if (event.type === 'graph/appended' && event.payload) {
-          options.onGraphAppended?.(event.payload)
-        }
-
-        if (event.type === 'graph/diff' && event.payload) {
-          options.onGraphDiff?.(event.payload)
-        }
-
-        if (event.type === 'evidence/updated' && event.payload) {
-          options.onEvidence?.(event.payload)
-        }
-
-        if (event.type === 'card/cited' && event.payload) {
-          options.onCardCited?.(event.payload)
-        }
-
-        if (event.type === 'status') {
-          if (event.status === 'completed') {
-            cancel()
-            resolve()
-          }
-          if (event.status === 'failed') {
-            cancel()
-            reject(new Error(event.message ?? 'conversation failed'))
-          }
-        }
-      },
+      handleEvent,
       {
         onReconnect: async () => {
+          // P11.16 · two-step recovery on reconnect:
+          //   1. Replay events that fired DURING the disconnect via the
+          //      server's 400-event ring buffer (sinceCursor lookup).
+          //   2. Refresh the canonical canvas snapshot so anything that
+          //      rolled out of the buffer is still consistent.
+          // Order matters: replay first (so animations / breadcrumbs
+          // play back in order), then snapshot to reconcile final state.
+          eventsSeen = await fetchAndReplayMissedEvents(
+            options.workspaceId,
+            options.conversationId,
+            eventsSeen,
+            handleEvent
+          )
           const latestGraph = await options.loadLatestGraph?.()
           if (latestGraph) {
             options.onGraphAppended?.(latestGraph)

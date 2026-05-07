@@ -23,6 +23,20 @@ export const WORKSPACE_GRAPH_QUERY = /* GraphQL */ `
         source
         target
         label
+        kind
+      }
+      citations {
+        cardId
+        fieldName
+        spans {
+          textStart
+          textEnd
+          refs {
+            evidenceId
+            docId
+            snippetId
+          }
+        }
       }
     }
   }

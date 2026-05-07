@@ -33,6 +33,13 @@ export const typeDefs = gql `
     workspaceId: ID!
     nodes: [CanvasNode!]!
     edges: [CanvasEdge!]!
+    """
+    P11.16 · cell-level citations aggregated from each node's meta.citations.
+    Derived on read so workspace reload (close tab → reopen) restores the
+    EvidenceDrawer state, not just the cell content. Empty array when no
+    cell has citations.
+    """
+    citations: [CardCitation!]!
   }
 
   type ConversationMetadata {

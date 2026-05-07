@@ -113,6 +113,12 @@ const initTables = runtimeDdlEnabled ? pool.query(`
   ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS owner_pid TEXT;
   ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
 
+  -- P11.16: HITL resume directive — set by approveDecision /
+  -- resumeConversation mutation, consumed by next runSupervisor.
+  -- Persisted here (not just in-memory) so process restart between
+  -- the user's decision and the LangGraph resume doesn't drop it.
+  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS hitl_directive JSONB;
+
   CREATE INDEX IF NOT EXISTS idx_conversation_sessions_workspace_updated
     ON conversation_sessions (workspace_id, updated_at DESC);
 
@@ -339,6 +345,45 @@ export class ConversationMemoryStore {
        WHERE id = $1 AND status = 'running'`,
       [conversationId, ownerPid]
     )
+  }
+
+  /**
+   * P11.16 · persist a HITL resume directive on the session row so a
+   * subsequent runSupervisor pass (possibly in a fresh process after
+   * a gateway crash) can read + consume it. The previous in-memory
+   * Map was lost on restart, defeating the whole HITL recovery story.
+   */
+  async setHitlDirective(conversationId: string, directive: Record<string, unknown>): Promise<void> {
+    await this.ensureTables()
+    await pool.query(
+      `UPDATE conversation_sessions
+         SET hitl_directive = $2::jsonb, updated_at = now()
+       WHERE id = $1`,
+      [conversationId, JSON.stringify(directive)]
+    )
+  }
+
+  /**
+   * P11.16 · read + clear the directive atomically. Returns the
+   * directive object or null. The clear-on-read prevents the next
+   * revision round from re-applying the same human decision.
+   */
+  async consumeHitlDirective(conversationId: string): Promise<Record<string, unknown> | null> {
+    await this.ensureTables()
+    const result = await pool.query(
+      `UPDATE conversation_sessions
+         SET hitl_directive = NULL, updated_at = now()
+       WHERE id = $1 AND hitl_directive IS NOT NULL
+       RETURNING hitl_directive`,
+      [conversationId]
+    )
+    const raw = result.rows[0]?.hitl_directive
+    if (!raw) return null
+    if (typeof raw === 'object') return raw as Record<string, unknown>
+    if (typeof raw === 'string') {
+      try { return JSON.parse(raw) as Record<string, unknown> } catch { return null }
+    }
+    return null
   }
 
   /**

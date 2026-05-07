@@ -1049,7 +1049,7 @@ export class ConversationStore {
               '[EDIT_PLAN]:auto-revise (headless graduation: re-run agents to address critic conflicts)'
             )
             if (directive.kind !== 'invalid') {
-              this.businessLangGraphService.setHitlResumeDirective(
+              await this.businessLangGraphService.setHitlResumeDirective(
                 conversationId,
                 directive
               )
@@ -1084,7 +1084,7 @@ export class ConversationStore {
                 { conversationId, reason: directive.reason }
               )
             } else {
-              this.businessLangGraphService.setHitlResumeDirective(
+              await this.businessLangGraphService.setHitlResumeDirective(
                 conversationId,
                 directive
               )
@@ -1586,7 +1586,7 @@ function findLatestDecision(graph: CanvasGraph): string {
  * Returns null if the node has no citation metadata (e.g., non-BMC node,
  * or agent output that didn't contain [[ref:...]] tokens).
  */
-function extractCitationsFromNode(node: CanvasNode): CardCitation | null {
+export function extractCitationsFromNode(node: CanvasNode): CardCitation | null {
   const data = node.data as { meta?: { citations?: unknown } } | undefined
   const meta = data?.meta
   if (!meta || typeof meta !== 'object') return null

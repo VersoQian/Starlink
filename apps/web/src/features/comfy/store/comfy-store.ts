@@ -1643,10 +1643,24 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           }
         })
 
+        // P11.16 · hydrate citations from the server into the store's
+        // citations slot so EvidenceDrawer state survives workspace
+        // reload (close tab → reopen). graph.citations is computed on
+        // the server by walking each cell's data.meta.citations.
+        const citationsMap: Record<string, CardCitation[]> = {}
+        if (Array.isArray(graph.citations)) {
+          for (const c of graph.citations) {
+            if (!c?.cardId) continue
+            const existing = citationsMap[c.cardId] ?? []
+            citationsMap[c.cardId] = [...existing, c as unknown as CardCitation]
+          }
+        }
+
         set({
           nodes: reactFlowNodes,
           edges: graph.edges.map(mapCanvasEdgeToReactFlow),
-          macraNodes: macraNodesMap
+          macraNodes: macraNodesMap,
+          ...(Object.keys(citationsMap).length > 0 ? { citations: citationsMap } : {})
         })
       }
 

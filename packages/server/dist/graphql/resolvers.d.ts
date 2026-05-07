@@ -1,6 +1,7 @@
 import GraphQLJSON from 'graphql-type-json';
 import type { FlowDefinition } from '@starlink/shared';
 import type { GraphQLContext } from '../context/index.js';
+import type { CanvasNode } from '@starlink/shared';
 export declare const resolvers: {
     JSON: typeof GraphQLJSON;
     Query: {
@@ -739,6 +740,30 @@ export declare const resolvers: {
             state: Record<string, unknown> | null;
             error: string | null;
         }[]>;
+    };
+    /**
+     * P11.16 · CanvasGraph.citations field resolver. Aggregates citations
+     * from each node's data.meta.citations on every query so workspace
+     * reload (close tab → reopen) restores EvidenceDrawer state without
+     * needing a separate citations table. Pure derivation — no DB write,
+     * no schema migration; just walks the already-persisted nodes.
+     */
+    CanvasGraph: {
+        citations: (parent: {
+            nodes?: CanvasNode[];
+        }) => {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        }[];
     };
     Mutation: {
         startConversation: (_: unknown, args: {

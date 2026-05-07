@@ -40,7 +40,9 @@ import {
 } from '../services/ideation-coach-service.js'
 import { buildUserSkillPrompt } from '../services/user-skill-prompt.js'
 import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
+import { extractCitationsFromNode } from '../application/conversation-store.js'
 import { parseHitlDecision } from '../application/hitl-resume.js'
+import type { CanvasNode, CardCitation } from '@starlink/shared'
 import { clearPersistedGraph } from '../application/canvas-persistence.js'
 
 // Lazy module-level singleton: constructed on first use, shares the same
@@ -423,6 +425,24 @@ export const resolvers = {
       if (!ctx.executionStore) return []
       const execs = await ctx.executionStore.listExecutions(args.flowId)
       return execs.map((e) => ({ ...e, startedAt: e.startedAt.toISOString(), completedAt: e.completedAt?.toISOString() ?? null, nodeStates: [] }))
+    }
+  },
+  /**
+   * P11.16 · CanvasGraph.citations field resolver. Aggregates citations
+   * from each node's data.meta.citations on every query so workspace
+   * reload (close tab → reopen) restores EvidenceDrawer state without
+   * needing a separate citations table. Pure derivation — no DB write,
+   * no schema migration; just walks the already-persisted nodes.
+   */
+  CanvasGraph: {
+    citations: (parent: { nodes?: CanvasNode[] }) => {
+      const nodes = parent.nodes ?? []
+      const result: CardCitation[] = []
+      for (const node of nodes) {
+        const cite = extractCitationsFromNode(node)
+        if (cite) result.push(cite)
+      }
+      return result
     }
   },
   Mutation: {

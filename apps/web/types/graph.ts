@@ -58,10 +58,28 @@ export type CanvasEdge = {
   source: string
   target: string
   label?: string
+  /**
+   * P11.13 · edge classification for per-kind visual styling.
+   * 'bmc-structure' default | 'llm-insight' | 'user-drawn' | 'revision'.
+   */
+  kind?: string
+}
+
+/** P11.16 · citation refs preserved on workspace reload. */
+export type WorkspaceCardCitation = {
+  cardId: string
+  fieldName: string
+  spans: Array<{
+    textStart: number
+    textEnd: number
+    refs: Array<{ evidenceId: string; docId: string; snippetId: string }>
+  }>
 }
 
 export type WorkspaceGraphResponse = {
   workspaceId: string
   nodes: CanvasNode[]
   edges: CanvasEdge[]
+  /** P11.16 · citations aggregated from cells on the server. */
+  citations?: WorkspaceCardCitation[]
 }

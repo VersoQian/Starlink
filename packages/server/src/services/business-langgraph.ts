@@ -210,6 +210,18 @@ export class BusinessLangGraphService {
    * (`edit_plan` with `dimension`). Map entry is cleared on consume so a
    * later revision round falls back to auto-revision.
    */
+  /**
+   * P11.16 · two-tier HITL directive store.
+   *
+   * Tier 1 (this Map): in-memory cache for hot reads — same-process
+   * setHitl → consumeHitl in the next runSupervisor tick avoids a DB
+   * round-trip.
+   *
+   * Tier 2 (PG conversation_sessions.hitl_directive column): durable
+   * fallback. setHitl writes BOTH; consumeHitl checks Map first, then
+   * DB. This survives gateway crashes between the user's
+   * approveDecision mutation and the LangGraph stream resume.
+   */
   private readonly hitlResumeDirectives = new Map<string, HitlResumeDirective>()
 
   /**
@@ -264,23 +276,59 @@ export class BusinessLangGraphService {
       new UserSkillExtractor({ memoryStore: this.conversationMemoryStore })
   }
 
-  /** Phase 2.6 · publish a HITL resume directive for the given trace. */
-  setHitlResumeDirective(traceId: string, directive: HitlResumeDirective): void {
+  /**
+   * Phase 2.6 / P11.16 · publish a HITL resume directive. Writes to BOTH
+   * in-memory Map (fast path) AND conversation_sessions.hitl_directive
+   * (durable fallback for cross-process recovery). Returns the in-memory
+   * write's promise so callers can await durable persistence if needed.
+   */
+  async setHitlResumeDirective(traceId: string, directive: HitlResumeDirective): Promise<void> {
     if (!traceId) return
     this.hitlResumeDirectives.set(traceId, directive)
+    try {
+      await this.conversationMemoryStore.setHitlDirective(
+        traceId,
+        directive as unknown as Record<string, unknown>
+      )
+    } catch (err) {
+      auditLogger.warn({
+        action: 'business-langgraph.setHitlResumeDirective.persist-failed',
+        requestId: traceId,
+        metadata: { err: err instanceof Error ? err.message : String(err) }
+      })
+    }
   }
 
   /**
-   * Phase 2.6 · consume the HITL resume directive for this trace, removing
-   * it so the next revision round (if any) won't re-apply the same human
-   * input. Returns null when no directive is pending.
+   * Phase 2.6 / P11.16 · consume the HITL resume directive. Tries Map
+   * first (same-process hot path); on miss falls back to PG read+clear
+   * so a directive set in process A is consumable by process B after
+   * a gateway restart.
    */
-  consumeHitlResumeDirective(traceId: string): HitlResumeDirective | null {
+  async consumeHitlResumeDirective(traceId: string): Promise<HitlResumeDirective | null> {
     if (!traceId) return null
-    const d = this.hitlResumeDirectives.get(traceId)
-    if (!d) return null
-    this.hitlResumeDirectives.delete(traceId)
-    return d
+    const cached = this.hitlResumeDirectives.get(traceId)
+    if (cached) {
+      this.hitlResumeDirectives.delete(traceId)
+      // Best-effort clear of DB row too so a future restart doesn't
+      // re-apply the same directive.
+      this.conversationMemoryStore
+        .consumeHitlDirective(traceId)
+        .catch(() => {/* tolerated — DB may be down; in-memory was authoritative for this read */})
+      return cached
+    }
+    try {
+      const persisted = await this.conversationMemoryStore.consumeHitlDirective(traceId)
+      if (!persisted) return null
+      return persisted as unknown as HitlResumeDirective
+    } catch (err) {
+      auditLogger.warn({
+        action: 'business-langgraph.consumeHitlResumeDirective.read-failed',
+        requestId: traceId,
+        metadata: { err: err instanceof Error ? err.message : String(err) }
+      })
+      return null
+    }
   }
 
   private logTrace(params: {
@@ -907,7 +955,7 @@ export class BusinessLangGraphService {
     //   - edit_plan with dimension → run only that dimension's owning agent
     //   - edit_plan without dimension → continue auto-revision but use the
     //     user's plan body as the guidance preamble
-    const directive = this.consumeHitlResumeDirective(state.traceId)
+    const directive = await this.consumeHitlResumeDirective(state.traceId)
     if (directive && shouldHaltCriticLoop(directive)) {
       this.logTrace({
         step: 'supervisor',

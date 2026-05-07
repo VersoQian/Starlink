@@ -819,7 +819,7 @@ export class ConversationStore {
                     if (headless) {
                         const directive = parseHitlDecision('[EDIT_PLAN]:auto-revise (headless graduation: re-run agents to address critic conflicts)');
                         if (directive.kind !== 'invalid') {
-                            this.businessLangGraphService.setHitlResumeDirective(conversationId, directive);
+                            await this.businessLangGraphService.setHitlResumeDirective(conversationId, directive);
                         }
                         record.metadata = {
                             ...record.metadata,
@@ -848,7 +848,7 @@ export class ConversationStore {
                             console.warn('[conversation-store] HITL decision parse failed; falling back to auto-revision', { conversationId, reason: directive.reason });
                         }
                         else {
-                            this.businessLangGraphService.setHitlResumeDirective(conversationId, directive);
+                            await this.businessLangGraphService.setHitlResumeDirective(conversationId, directive);
                         }
                         record.metadata = {
                             ...record.metadata,
@@ -1252,7 +1252,7 @@ function findLatestDecision(graph) {
  * Returns null if the node has no citation metadata (e.g., non-BMC node,
  * or agent output that didn't contain [[ref:...]] tokens).
  */
-function extractCitationsFromNode(node) {
+export function extractCitationsFromNode(node) {
     const data = node.data;
     const meta = data?.meta;
     if (!meta || typeof meta !== 'object')
