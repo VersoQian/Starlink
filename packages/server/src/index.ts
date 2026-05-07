@@ -28,6 +28,7 @@ import { depthLimitPlugin } from './middleware/depth-limit-plugin.js'
 import { rateLimitPlugin } from './middleware/rate-limit-plugin.js'
 import { telemetryPlugin } from './middleware/telemetry-plugin.js'
 import { pool, ensureExtensions, probeDatabaseHealth } from './infrastructure/db/pool.js'
+import { startCheckpointCleanupTimer } from './infrastructure/langgraph/checkpointer.js'
 import { describeEmbeddingConfig } from './services/embedding-service.js'
 import { assertProductionConfig, isProduction } from './infrastructure/config-validate.js'
 
@@ -180,13 +181,66 @@ async function start() {
     })
   })
 
+  // P11.18 · arm periodic LangGraph checkpoint cleanup. Default every
+  // 6h, drops thread state older than 7d. .unref()'d so node exits
+  // cleanly on shutdown. Override via LANGGRAPH_CHECKPOINT_TTL_MS /
+  // LANGGRAPH_CHECKPOINT_CLEANUP_INTERVAL_MS env.
+  startCheckpointCleanupTimer()
+
+  /**
+   * P11.18 · graceful shutdown drain.
+   *
+   * On SIGTERM / SIGINT we wait up to SHUTDOWN_DRAIN_TIMEOUT_MS
+   * (default 30s) for in-flight LangGraph streams to finish before
+   * closing the server. The drain signal is the in-memory handoff
+   * logger count: each active business-graph trace owns a logger
+   * that's released when streamConversation hits the finally block.
+   *
+   * Sequence:
+   *   1. log "draining"
+   *   2. stop accepting new HTTP/WS connections (server.close starts)
+   *   3. poll activeLoggerCount() until 0 or timeout
+   *   4. shutdownContextServices() — close DB pool / pubsub / etc
+   *   5. process.exit(0)
+   *
+   * On timeout we still exit cleanly (with a warn log) so an orphaned
+   * stream never blocks deploy. SIGTERM-twice forces immediate exit.
+   */
+  let shuttingDown = false
   const shutdown = async (signal: string) => {
-    console.log(`[server] received ${signal}, shutting down`)
-    await shutdownContextServices()
-    wsServer.close()
+    if (shuttingDown) {
+      console.warn(`[server] received ${signal} again — forcing immediate exit`)
+      process.exit(1)
+    }
+    shuttingDown = true
+    const drainTimeoutMs = Number(process.env.SHUTDOWN_DRAIN_TIMEOUT_MS ?? '30000')
+    console.log(`[server] received ${signal}, draining in-flight (timeout ${drainTimeoutMs}ms)`)
+
+    // Stop accepting new connections immediately. server.close() is
+    // non-blocking in node — it stops the listener but waits for
+    // existing connections to close on their own.
     server.close(() => {
-      process.exit(0)
+      // This callback fires once all connections naturally close.
     })
+    wsServer.close()
+
+    // Poll the handoff-logger count as the in-flight signal.
+    const { activeLoggerCount } = await import('./infrastructure/handoff-log/handoff-logger.js')
+    const start = Date.now()
+    while (Date.now() - start < drainTimeoutMs) {
+      const n = activeLoggerCount()
+      if (n === 0) break
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    const remaining = activeLoggerCount()
+    if (remaining > 0) {
+      console.warn(`[server] drain timeout · ${remaining} stream(s) still active, forcing shutdown anyway`)
+    } else {
+      console.log('[server] drain complete · all in-flight streams finished')
+    }
+
+    await shutdownContextServices()
+    process.exit(0)
   }
 
   process.once('SIGINT', () => {
@@ -195,6 +249,9 @@ async function start() {
   process.once('SIGTERM', () => {
     void shutdown('SIGTERM')
   })
+  // Second signal forces exit (for impatient operators / OOM kill).
+  process.on('SIGINT', () => shuttingDown && process.exit(1))
+  process.on('SIGTERM', () => shuttingDown && process.exit(1))
 }
 
 start().catch((error) => {

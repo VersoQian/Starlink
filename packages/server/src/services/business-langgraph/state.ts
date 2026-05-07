@@ -240,7 +240,18 @@ export const BusinessState = Annotation.Root({
     reducer: mergeByIdReducer<CanvasEdge>,
     default: () => []
   }),
-  moderatorVerdict: Annotation<ModeratorVerdict>()
+  /**
+   * P11.18 / LangGraph audit fix · explicit null default.
+   * Without this, early-exit intents (general / deep_research) leave
+   * moderatorVerdict=undefined; the conditional edge at the END
+   * comparison (`state.moderatorVerdict === 'continue'`) is safe
+   * because undefined !== 'continue', but the Annotation contract
+   * is cleaner with an explicit default.
+   */
+  moderatorVerdict: Annotation<ModeratorVerdict>({
+    reducer: (_a, b) => b,
+    default: () => null
+  })
 })
 
 export type BusinessStateType = typeof BusinessState.State

@@ -40,6 +40,87 @@ export interface LLMChatOptions {
   maxTokens?: number
 }
 
+/**
+ * P11.18 · process-wide circuit breaker per (baseURL).
+ *
+ * State machine:
+ *   CLOSED   ─(N consecutive failures)─→ OPEN
+ *   OPEN     ─(cooldown elapsed)──────→ HALF-OPEN
+ *   HALF-OPEN ─(1 success)───────────→ CLOSED
+ *   HALF-OPEN ─(any failure)─────────→ OPEN (re-arm cooldown)
+ *
+ * When OPEN, chat() throws immediately without hitting the network —
+ * protects upstream from a stampede when an LLM provider is down +
+ * gives downstream code (mention-router chatFallback, agent-degraded
+ * handoff) a chance to surface "LLM unavailable" instead of repeated
+ * timeouts. Threshold = 5 consecutive failures, cooldown = 5 min.
+ * Tunable via LLM_CIRCUIT_THRESHOLD / LLM_CIRCUIT_COOLDOWN_MS env.
+ */
+type CircuitState = 'closed' | 'open' | 'half-open'
+interface Circuit {
+  state: CircuitState
+  consecutiveFailures: number
+  openedAt: number
+}
+const circuitsByBaseURL = new Map<string, Circuit>()
+
+const CIRCUIT_THRESHOLD = Number(process.env.LLM_CIRCUIT_THRESHOLD ?? '5')
+const CIRCUIT_COOLDOWN_MS = Number(process.env.LLM_CIRCUIT_COOLDOWN_MS ?? String(5 * 60 * 1000))
+
+function getCircuit(baseURL: string): Circuit {
+  let c = circuitsByBaseURL.get(baseURL)
+  if (!c) {
+    c = { state: 'closed', consecutiveFailures: 0, openedAt: 0 }
+    circuitsByBaseURL.set(baseURL, c)
+  }
+  return c
+}
+
+function checkCircuitOpen(baseURL: string): void {
+  const c = getCircuit(baseURL)
+  if (c.state === 'open') {
+    const elapsed = Date.now() - c.openedAt
+    if (elapsed < CIRCUIT_COOLDOWN_MS) {
+      const remainingS = Math.ceil((CIRCUIT_COOLDOWN_MS - elapsed) / 1000)
+      throw new Error(
+        `LLM circuit OPEN for ${baseURL} (${c.consecutiveFailures} consecutive failures, retry in ${remainingS}s)`
+      )
+    }
+    // Cooldown elapsed → half-open: allow one trial call.
+    c.state = 'half-open'
+  }
+}
+
+function recordSuccess(baseURL: string): void {
+  const c = getCircuit(baseURL)
+  c.consecutiveFailures = 0
+  c.state = 'closed'
+}
+
+function recordFailure(baseURL: string): void {
+  const c = getCircuit(baseURL)
+  c.consecutiveFailures += 1
+  if (c.state === 'half-open') {
+    // Trial call failed → re-open immediately.
+    c.state = 'open'
+    c.openedAt = Date.now()
+    console.warn(`[llm-client] circuit re-OPENED for ${baseURL} after half-open trial failure`)
+    return
+  }
+  if (c.state === 'closed' && c.consecutiveFailures >= CIRCUIT_THRESHOLD) {
+    c.state = 'open'
+    c.openedAt = Date.now()
+    console.warn(
+      `[llm-client] circuit OPENED for ${baseURL} (${c.consecutiveFailures} consecutive failures, cooldown ${CIRCUIT_COOLDOWN_MS / 1000}s)`
+    )
+  }
+}
+
+/** Test/admin escape hatch — force-close all circuits. */
+export function __resetLLMCircuitsForTest(): void {
+  circuitsByBaseURL.clear()
+}
+
 export class LLMClient {
   private baseURL: string
   private apiKey: string
@@ -78,6 +159,12 @@ export class LLMClient {
       body.tool_choice = 'auto'
     }
 
+    // P11.18 · circuit-breaker check before any network attempt. If the
+    // breaker is OPEN this throws immediately — caller falls through to
+    // chatFallback / emitAgentDegraded paths instead of waiting on
+    // 60s × 3 retries × 9 cells of timeouts.
+    checkCircuitOpen(this.baseURL)
+
     const maxRetries = Number(process.env.LLM_MAX_RETRIES ?? '2')
     const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? '60000')
     let lastError: unknown = null
@@ -107,6 +194,8 @@ export class LLMClient {
             await new Promise((r) => setTimeout(r, backoff))
             continue
           }
+          // Non-retryable HTTP error or retries exhausted → trip circuit.
+          recordFailure(this.baseURL)
           throw new Error(`LLM API error ${res.status}: ${text.slice(0, 300)}`)
         }
 
@@ -119,6 +208,8 @@ export class LLMClient {
         }
 
         const choice = data.choices[0]
+        // P11.18 · success closes (or keeps closed) the circuit.
+        recordSuccess(this.baseURL)
         return {
           content: choice.message.content,
           toolCalls: choice.message.tool_calls ?? [],
@@ -145,9 +236,13 @@ export class LLMClient {
           lastError = err
           continue
         }
+        // Non-retryable error or retries exhausted → trip circuit.
+        recordFailure(this.baseURL)
         throw err
       }
     }
+    // P11.18 · all retries exhausted → record failure (may trip circuit).
+    recordFailure(this.baseURL)
     // Unreachable in practice (loop always either returns or throws), but
     // satisfies TS exhaustiveness.
     throw lastError ?? new Error('LLM client retries exhausted')

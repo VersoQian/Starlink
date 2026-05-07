@@ -264,16 +264,29 @@ export function buildBmcGeneratorSubgraph(
     tools: lcTools
   })
 
+  /**
+   * P11.18 / LangGraph audit fix · configurable recursion limit.
+   * createReactAgent defaults to 25 internal LLM↔tool iterations;
+   * complex BMC generation with 5-6 sub-agent tools genuinely needs
+   * more on hard cases (we observed GraphRecursionError 25 in
+   * market-agent earlier). Expose BMC_RECURSION_LIMIT env (default
+   * 50) so operators can tune without rebuilding.
+   */
+  const RECURSION_LIMIT = Number(process.env.BMC_RECURSION_LIMIT) || 50
+
   const invokeAgent = async (
     state: BmcGeneratorStateType
   ): Promise<Partial<BmcGeneratorStateType>> => {
     const systemPromptText = buildSystemPrompt(profile, state)
-    const result = (await reactAgent.invoke({
-      messages: [
-        new SystemMessage(systemPromptText),
-        new HumanMessage(state.question)
-      ]
-    })) as { messages: BaseMessage[] }
+    const result = (await reactAgent.invoke(
+      {
+        messages: [
+          new SystemMessage(systemPromptText),
+          new HumanMessage(state.question)
+        ]
+      },
+      { recursionLimit: RECURSION_LIMIT }
+    )) as { messages: BaseMessage[] }
     return { messages: result.messages }
   }
 

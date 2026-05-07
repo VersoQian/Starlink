@@ -55,6 +55,9 @@ function resolveSslConfig(): PoolSslOption {
 const poolMax = Number.parseInt(process.env.PG_POOL_MAX ?? '20', 10)
 const idleTimeoutMs = Number.parseInt(process.env.PG_IDLE_TIMEOUT_MS ?? '30000', 10)
 const connectTimeoutMs = Number.parseInt(process.env.PG_CONNECT_TIMEOUT_MS ?? '5000', 10)
+// P11.18 · per-statement timeout. Default 30s — long enough for vector
+// search on large KBs but short enough to surface stuck queries.
+const statementTimeoutMs = Number.parseInt(process.env.PG_STATEMENT_TIMEOUT_MS ?? '30000', 10)
 
 export const pool = new Pool({
   connectionString,
@@ -62,7 +65,44 @@ export const pool = new Pool({
   max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 20,
   idleTimeoutMillis: Number.isFinite(idleTimeoutMs) ? idleTimeoutMs : 30_000,
   connectionTimeoutMillis: Number.isFinite(connectTimeoutMs) ? connectTimeoutMs : 5_000,
+  // P11.18 · runtime statement_timeout via post-connect SET; the node-pg
+  // Pool config doesn't accept it directly, so we install it on every
+  // new connection via the on('connect') handler below.
 })
+
+/**
+ * P11.18 · pool-wide error handler. Without this, a transient error on
+ * an idle pooled connection (e.g. PG kicked us out) is logged by node-pg
+ * to stderr but never reaches our audit pipeline. Critically, an
+ * uncaught 'error' event on EventEmitter would crash the process — so
+ * even just attaching a no-op listener is necessary; we go further and
+ * log + count failures so operators see pool-level instability.
+ */
+let poolErrorCount = 0
+pool.on('error', (err: Error) => {
+  poolErrorCount += 1
+  console.error(`[pg-pool] connection error #${poolErrorCount}: ${err.message}`)
+})
+
+/**
+ * P11.18 · per-connection setup: enforce statement_timeout so a single
+ * runaway query (bad index, lock wait) can't hold a connection forever.
+ * Runs on every new connection acquired by the pool, including the
+ * first; idempotent because SET is local to the session.
+ */
+if (Number.isFinite(statementTimeoutMs) && statementTimeoutMs > 0) {
+  pool.on('connect', (client: { query: (sql: string) => Promise<unknown> }) => {
+    client
+      .query(`SET statement_timeout = ${statementTimeoutMs}`)
+      .catch((err: Error) => {
+        console.warn(`[pg-pool] failed to set statement_timeout on connection: ${err.message}`)
+      })
+  })
+}
+
+export function getPoolErrorCount(): number {
+  return poolErrorCount
+}
 
 /**
  * Run a callback with a fresh client that has `app.current_user_id` set
