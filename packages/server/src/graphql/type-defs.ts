@@ -229,6 +229,12 @@ export const typeDefs = gql`
       - 'global'    every authenticated user across all workspaces
     """
     visibility: String!
+    """ P11.18 · Optional human description shown in upload modal. """
+    description: String
+    """ P11.18 · Total document count in this KB (computed). """
+    sourceCount: Int!
+    """ P11.18 · ISO timestamp of latest document ingest (or null if empty). """
+    lastIngestAt: String
   }
 
   type KbDocument {

@@ -140,10 +140,19 @@ export function CanvasPage({
   const [memoryOpen, setMemoryOpen] = useState(false)
   // Inline AI wizard — auto-opens when URL has ?wizard=1 (link from /chat
   // home CTA). Manual toggle available via "AI 引导" button on left rail.
-  const [wizardOpen, setWizardOpen] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return new URLSearchParams(window.location.search).get('wizard') === '1'
-  })
+  //
+  // Bug history: previously this useState initializer read window.location
+  // directly, which returned different values on server (undefined window
+  // → false) vs client (URL has ?wizard=1 → true). That caused a Next.js
+  // hydration mismatch on <aside> when wizard was open. Fix: always start
+  // false, then sync from URL inside useEffect (client-only).
+  const [wizardOpen, setWizardOpen] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (new URLSearchParams(window.location.search).get('wizard') === '1') {
+      setWizardOpen(true)
+    }
+  }, [])
   // Conflict highlight is now driven by the store's focusedConflictId so
   // both the canvas (edge click) and the renderer chips
   // ([[critic:conflictId]] in report-writer output) can request the same

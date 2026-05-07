@@ -38,6 +38,12 @@ export type GatewayKnowledgeBase = {
   ownerUserId?: string | null
   /** F1 · 'private' | 'workspace' | 'global'. Defaults to 'workspace'. */
   visibility: 'private' | 'workspace' | 'global'
+  /** P11.18 · optional human description. */
+  description?: string | null
+  /** P11.18 · count of documents currently in this KB. */
+  sourceCount: number
+  /** P11.18 · ISO timestamp of latest document ingest, or null if empty. */
+  lastIngestAt?: string | null
 }
 
 export type KbVisibility = 'private' | 'workspace' | 'global'
@@ -115,7 +121,12 @@ function rowToKb(row: Record<string, unknown>): GatewayKnowledgeBase {
       ? new Date(row.published_at as string).toISOString()
       : null,
     ownerUserId: (row.owner_user_id as string | undefined) ?? null,
-    visibility
+    visibility,
+    description: (row.description as string | null | undefined) ?? null,
+    sourceCount: row.source_count == null ? 0 : Number(row.source_count),
+    lastIngestAt: row.last_ingest_at
+      ? new Date(row.last_ingest_at as string).toISOString()
+      : null
   }
 }
 
@@ -129,7 +140,17 @@ export async function listKnowledgeBases(
   try {
     await ensureKbDefinitionsTable()
     const result = await pool.query(
-      `SELECT * FROM kb_definitions WHERE workspace_id = $1 ORDER BY updated_at DESC`,
+      `SELECT k.*,
+              COALESCE(d.cnt, 0)::int       AS source_count,
+              d.latest_at                   AS last_ingest_at
+         FROM kb_definitions k
+         LEFT JOIN (
+           SELECT kb_id, COUNT(*) AS cnt, MAX(updated_at) AS latest_at
+             FROM kb_documents
+            GROUP BY kb_id
+         ) d ON d.kb_id = k.id
+        WHERE k.workspace_id = $1
+        ORDER BY k.updated_at DESC`,
       [workspaceId]
     )
     return result.rows.map(rowToKb)
