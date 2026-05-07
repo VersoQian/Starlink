@@ -324,13 +324,54 @@ export function normalizeDomainNodes(
   }
 ): MacraNodeData[] {
   const byDomain = new Map<CCBMCDomain, MacraNodeData>()
+  // P11.12 · #4 audit duplicates explicitly. BMC semantically has 1 cell
+  // per dimension and downstream layout uses deterministic IDs, so we
+  // can't keep multiple cells per domain — but the silent drop hid
+  // legit agent output. Log the count so degraded output is visible.
+  const duplicates: Array<{ domain: CCBMCDomain; droppedLabel: string | undefined }> = []
+  // P11.12 · #4 invalid-domain audit. nodes whose domain is not in
+  // allowedDomains were also silently skipped — log them to catch
+  // agent confusion (e.g. product-agent emitting a finance-domain cell).
+  const invalidDomain: Array<{ idHint: string | undefined; reportedDomain: string | undefined }> = []
 
   for (const node of nodes) {
     const domain = node.domain as CCBMCDomain | undefined
-    if (!domain || !options.allowedDomains.some((allowedDomain) => allowedDomain === domain)) continue
+    if (!domain || !options.allowedDomains.some((allowedDomain) => allowedDomain === domain)) {
+      invalidDomain.push({ idHint: node.id, reportedDomain: node.domain as string | undefined })
+      continue
+    }
     if (!byDomain.has(domain)) {
       byDomain.set(domain, node)
+    } else {
+      duplicates.push({ domain, droppedLabel: node.label })
     }
+  }
+
+  if (duplicates.length > 0) {
+    auditLogger.warn({
+      action: 'business-langgraph.normalizeDomainNodes.duplicateDomainsDropped',
+      metadata: {
+        agentType: options.agentType,
+        round: options.round,
+        droppedCount: duplicates.length,
+        dropped: duplicates,
+        note: 'BMC layout uses deterministic IDs (one cell per domain); first-wins. Consider merging duplicate angles into the kept cell content.'
+      }
+    })
+  }
+
+  if (invalidDomain.length > 0) {
+    auditLogger.warn({
+      action: 'business-langgraph.normalizeDomainNodes.invalidDomain',
+      metadata: {
+        agentType: options.agentType,
+        round: options.round,
+        droppedCount: invalidDomain.length,
+        dropped: invalidDomain,
+        allowed: options.allowedDomains,
+        note: 'Agent emitted cells with domain outside its allow-list — likely prompt confusion or wrong agent invocation.'
+      }
+    })
   }
 
   const missing = options.allowedDomains.filter((d) => !byDomain.has(d))

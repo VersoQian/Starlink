@@ -263,16 +263,24 @@ export class MentionRouter {
     if (!entry.bmcSelf) return refuse(entry.id, 'BMC generator 缺少 bmcSelf 配置')
     const seed = collectSeedFromCanvas(input.canvasNodes, input.canvasEdges)
     const traceId = nanoid()
-    const nodes = await this.business.invokeBmcGeneratorForMention(entry.bmcSelf, {
+    const { nodes, chatFallback } = await this.business.invokeBmcGeneratorForMention(entry.bmcSelf, {
       traceId,
       workspaceId: input.workspaceId,
       userId: input.userId,
       question: input.message,
       seed
     })
+
+    // P11.12 · Fix B chatFallback. When agent produces 0 cells but has a
+    // prose reply (e.g. asking for clarification), surface that reply
+    // verbatim so the user can read the agent's actual question and
+    // re-mention with more context. Falls back to generic refusal only
+    // when neither cells nor chat text are available.
     const reply =
       nodes.length === 0
-        ? `${entry.id} 暂未给出新的维度更新。`
+        ? (chatFallback.length > 0
+            ? chatFallback
+            : `${entry.id} 暂未给出新的维度更新。`)
         : `生成 ${nodes.length} 张 ${entry.bmcSelf} 维度卡片：\n\n` +
           nodes
             .map((n: MacraNodeData) => `- **${n.label ?? n.id}**：${n.content || ''}`)

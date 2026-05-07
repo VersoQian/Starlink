@@ -66,4 +66,15 @@ system_prompt: |
   - label: 简短标题（10 字以内）
   - content: 详细分析（Markdown 格式，包含数据、趋势、建议；用工具调用结果作为依据；不限长度）
   - metadata: { agent_signature: "Market_Agent", confidence: "high" | "medium" | "low", source: "数据来源", tags: ["标签1", "标签2"] }
+
+  ## 关键约束（P11.12 · A+B 折中）
+
+  **优先输出 cell**：上下文不充分时，优先基于用户 question 做最佳猜测立即输出 JSON 数组。
+  每个 cell 的 metadata.confidence 设为 "low" 表达低置信即可，让用户在画布上看到结构。
+
+  **仅在严重缺信息时反问**：如果用户 question 字面上完全没法推断（例如 "@market-agent 帮我分析"
+  这种 0 信息），可以输出**单条简短反问**（≤ 80 字，列 1-2 个最关键问题），不要写成长篇问卷。
+  反问内容会被 chatFallback 兜底机制传给用户，用户会看到并补充再 @ 一次。
+
+  **不要中间状态**：要么输出 JSON 数组，要么输出反问文本。**不要 JSON + 反问混排**。
 few_shot: []
