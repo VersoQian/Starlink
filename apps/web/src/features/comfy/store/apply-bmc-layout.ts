@@ -260,6 +260,41 @@ export function applyBmcLayout<T extends Node>(nodes: T[]): T[] {
   })
 }
 
+/**
+ * Freeform layout strategy (P11.7).
+ *
+ * The "自由" mode used to be a pure identity (return nodes unchanged), which
+ * left BMC cells stacked in a single column at the server's default
+ * (ROOT_POSITION.x, nextY) positions — visually unhelpful because the
+ * region labels (财务结构 / SUPPLY CHAIN / VALUE CORE / CUSTOMER · MARKET)
+ * still imply a 9-cell layout but cells weren't aligned to them.
+ *
+ * The new freeform strategy applies the canonical POSITION_MAP only to
+ * the 9 BMC cells + 3 agent avatars (the structurally fixed nodes), and
+ * passes through everything else (root note, insights, reports,
+ * conflicts, mention outputs, data sources). User drags persist for
+ * non-BMC nodes; BMC cells always snap back to their canonical anchor
+ * so the canvas stays readable as a 9-cell strategy board even in
+ * freeform mode.
+ *
+ * If you want the cells to also be drag-persistent, switch the strategy
+ * id from 'free-form' to 'free-form-strict' in the registry — but the
+ * default UX is "freeform = grid stays, additions are loose".
+ */
+export function applyFreeformLayout<T extends Node>(nodes: T[]): T[] {
+  return nodes.map((node) => {
+    const pos = POSITION_MAP[node.id]
+    if (pos) {
+      return { ...node, position: pos }
+    }
+    // Everything else (root / insights / reports / conflicts / mentions /
+    // data sources) keeps server-issued or user-dragged position. Server
+    // emits (ROOT_POSITION.x, nextY) which stacks them vertically — that's
+    // the "loose freeform" feel we want for ad-hoc additions.
+    return node
+  })
+}
+
 /** Place an overflow node (excess insight or report) in a 5-wide grid
  *  below conflicts. Grid pitch is 400px × 240px so neither cell type
  *  (max 360 / 200) overlaps neighbours. */

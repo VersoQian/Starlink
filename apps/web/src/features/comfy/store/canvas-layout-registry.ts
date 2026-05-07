@@ -12,7 +12,7 @@
  */
 
 import type { Node } from 'reactflow'
-import { applyBmcLayout } from './apply-bmc-layout'
+import { applyBmcLayout, applyFreeformLayout } from './apply-bmc-layout'
 
 export type CanvasLayoutId = 'bmc-9-grid' | 'free-form' | (string & {})
 
@@ -28,8 +28,8 @@ REGISTRY.set('bmc-9-grid', {
 
 REGISTRY.set('free-form', {
   label: '自由布局',
-  description: '保留 server / 用户拖动的位置，不做覆盖',
-  apply: <T extends Node>(nodes: T[]): T[] => nodes,
+  description: '9 BMC cell 锚定到经典网格，其余节点（insight / report / mention）保留 server 位置可自由拖动',
+  apply: applyFreeformLayout,
 })
 
 export function registerCanvasLayout(

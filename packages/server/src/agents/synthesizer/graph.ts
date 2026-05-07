@@ -100,9 +100,15 @@ function makeSynthesizeNode(model: BusinessModel | null, systemPrompt: string) {
     }
 
     try {
+      // P11.8 · deepseek-chat does NOT support OpenAI's `response_format:
+      // json_schema` (returns "400 This response_format type is unavailable
+      // now"). Switch to `method: 'jsonMode'` which uses the simpler
+      // `response_format: { type: 'json_object' }` that deepseek supports.
+      // The schema is enforced via prompt + Zod parse on our side instead
+      // of provider-side strict validation.
       const structured = model.withStructuredOutput(SynthesizerOutputSchema, {
         name: 'SynthesizerOutput',
-        strict: true
+        method: 'jsonMode'
       })
 
       const nodesSummary = [
@@ -117,7 +123,10 @@ function makeSynthesizeNode(model: BusinessModel | null, systemPrompt: string) {
         `## 任务\n` +
         `1. 在 \`insights\` 中给出 1-3 条跨维度一致性观察（每条 1-2 句话）\n` +
         `2. 在 \`suggestedEdges\` 中给出 BMC 节点间的关系边，from/to 必须使用上面列出的节点 id，label 为关系标签（≤8 字）\n` +
-        `3. 没有发现观察或边时返回空数组，不要编造`
+        `3. 没有发现观察或边时返回空数组，不要编造\n\n` +
+        // P11.8 · deepseek's json mode requires the literal "json" keyword
+        // in the prompt. Without this it returns 400.
+        `请以 JSON 格式输出，schema: { "insights": string[], "suggestedEdges": [{"from": string, "to": string, "label": string}] }`
 
       const response = await structured.invoke([
         new SystemMessage(prompt),
@@ -128,7 +137,10 @@ function makeSynthesizeNode(model: BusinessModel | null, systemPrompt: string) {
         insights: response.insights ?? [],
         suggestedEdges: response.suggestedEdges ?? []
       }
-    } catch {
+    } catch (err) {
+      // P11.8 · audit-log the failure so future regressions surface
+      // instead of silently degrading to empty insights.
+      console.warn('[synthesizer] withStructuredOutput failed:', err instanceof Error ? err.message : err)
       return { insights: [], suggestedEdges: [] }
     }
   }
