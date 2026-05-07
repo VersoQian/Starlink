@@ -375,11 +375,21 @@ export class KbStore {
      * relying on RLS context being set (which requires withUserContext
      * — not all callers wrap their query). Belt-and-suspenders.
      *
+     * P11.17 · `minScore` — drop results below the similarity floor
+     * (cosine similarity = 1 - distance). Default 0.55 prevents
+     * returning random low-confidence chunks when the query is
+     * semantically off-topic for the KB. Override per call when
+     * needed (e.g. memory search may want minScore=0.4).
+     *
      * When omitted, the chunk list is unfiltered beyond kb_id (legacy
      * behaviour); RLS still applies if the connection has
      * app.current_user_id set.
      */
-    options: { callerUserId?: string; callerWorkspaceId?: string } = {}
+    options: {
+      callerUserId?: string
+      callerWorkspaceId?: string
+      minScore?: number
+    } = {}
   ): Promise<KnowledgeSearchResult[]> {
     await this.ensureTables()
     const trimmed = query.trim()
@@ -425,7 +435,7 @@ export class KbStore {
       params
     )
 
-    return (result.rows as Array<Record<string, unknown>>).map((row) => ({
+    const all = (result.rows as Array<Record<string, unknown>>).map((row) => ({
       docId: row.doc_id as string,
       snippet: row.content as string,
       score: 1 - Number(row.distance ?? 1),
@@ -434,6 +444,15 @@ export class KbStore {
         chunkIndex: row.chunk_index as number
       }
     }))
+    // P11.17 · score-threshold filter. With local-hash embeddings or
+    // genuinely off-topic queries the cosine similarity is near-random;
+    // dropping results below the floor avoids polluting the agent's
+    // context with noise. The default 0.55 is conservative — a real
+    // domain match typically scores 0.7+.
+    const minScore = typeof options.minScore === 'number'
+      ? options.minScore
+      : Number(process.env.KB_SEARCH_MIN_SCORE ?? '0.55')
+    return all.filter((r) => r.score >= minScore)
   }
 
   async listDocuments(

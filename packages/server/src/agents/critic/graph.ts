@@ -35,6 +35,9 @@ import {
   type BusinessModel
 } from '../../services/business-langgraph.js'
 import { AGENT_TYPES } from '../shared/parsing.js'
+import { createAuditLogger } from '@starlink/shared'
+
+const auditLogger = createAuditLogger('packages/server:agents:critic')
 
 // ============== Exports for outer graph ==============
 
@@ -219,8 +222,35 @@ function makeDetectConflictsNode(model: BusinessModel | null, systemPrompt: stri
       return {
         conflicts: toCriticConflicts(response.conflicts, state.roundNumber)
       }
-    } catch {
-      return { conflicts: ruleBasedCriticCheck(state.nodesSummary) }
+    } catch (err) {
+      // P11.17 · log + tag the LLM failure so the user / wire panel sees
+      // the degradation. Previously this silent fallback returned
+      // rule-based heuristic conflicts that look identical to LLM ones,
+      // hiding the fact that semantic conflict detection is offline.
+      // The conflicts are still returned (best-effort), but each entry
+      // gets a 'degraded:rule-based' tag in metadata.tags so downstream
+      // moderator + frontend can flag them.
+      auditLogger.warn({
+        action: 'critic.llm-failed-rule-based-fallback',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: {
+          round: state.roundNumber,
+          err: err instanceof Error ? err.message : String(err),
+          fallback: 'rule-based-critic-check'
+        }
+      })
+      const fallbackConflicts = ruleBasedCriticCheck(state.nodesSummary).map((c) => ({
+        ...c,
+        metadata: {
+          ...(c.metadata ?? {}),
+          tags: [...((c.metadata?.tags as string[] | undefined) ?? []), 'degraded:rule-based'],
+          degraded: true,
+          source: '规则启发式（LLM 不可用）'
+        }
+      }))
+      return { conflicts: fallbackConflicts }
     }
   }
 }
