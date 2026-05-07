@@ -324,16 +324,19 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             source: z.ZodString;
             target: z.ZodString;
             label: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            kind: z.ZodOptional<z.ZodEnum<["bmc-structure", "llm-insight", "user-drawn", "revision"]>>;
         }, "strip", z.ZodTypeAny, {
             source: string;
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }, {
             source: string;
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }>, "many">;
     }, "strip", z.ZodTypeAny, {
         workspaceId: string;
@@ -389,6 +392,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[];
     }, {
         workspaceId: string;
@@ -444,6 +448,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[];
     }>;
 }, "strip", z.ZodTypeAny, {
@@ -503,6 +508,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[];
     };
 }, {
@@ -562,6 +568,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[];
     };
 }>, z.ZodObject<{
@@ -794,16 +801,19 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             source: z.ZodString;
             target: z.ZodString;
             label: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            kind: z.ZodOptional<z.ZodEnum<["bmc-structure", "llm-insight", "user-drawn", "revision"]>>;
         }, "strip", z.ZodTypeAny, {
             source: string;
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }, {
             source: string;
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }>, "many">>;
         removedNodeIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         removedEdgeIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
@@ -860,6 +870,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[] | undefined;
         removedNodeIds?: string[] | undefined;
         removedEdgeIds?: string[] | undefined;
@@ -916,6 +927,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[] | undefined;
         removedNodeIds?: string[] | undefined;
         removedEdgeIds?: string[] | undefined;
@@ -976,6 +988,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[] | undefined;
         removedNodeIds?: string[] | undefined;
         removedEdgeIds?: string[] | undefined;
@@ -1036,6 +1049,7 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }[] | undefined;
         removedNodeIds?: string[] | undefined;
         removedEdgeIds?: string[] | undefined;

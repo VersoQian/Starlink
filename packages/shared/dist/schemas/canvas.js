@@ -53,11 +53,29 @@ export const canvasNodeSchema = z.object({
     position: z.object({ x: z.number(), y: z.number() }),
     data: canvasNodeDataSchema
 });
+/**
+ * P11.13 · edge classification. Frontend uses this to apply per-class
+ * styling (color / dash pattern / weight) so users can distinguish
+ * rule-based BMC structure from LLM-suggested cross-dimension insights
+ * from user-drawn manual connections.
+ *
+ *   'bmc-structure'  default  rule-based 9-edge BMC topology (服务于/触达/...)
+ *   'llm-insight'             synthesizer LLM cross-dim suggestion
+ *   'user-drawn'              user dragged from one handle to another
+ *   'revision'                round N → N+1 cell replacement (future)
+ */
+export const canvasEdgeKindSchema = z.enum([
+    'bmc-structure',
+    'llm-insight',
+    'user-drawn',
+    'revision'
+]);
 export const canvasEdgeSchema = z.object({
     id: z.string(),
     source: z.string(),
     target: z.string(),
-    label: z.string().nullable().optional()
+    label: z.string().nullable().optional(),
+    kind: canvasEdgeKindSchema.optional()
 });
 export const canvasGraphSchema = z.object({
     workspaceId: z.string(),

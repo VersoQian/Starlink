@@ -335,21 +335,37 @@ export declare const canvasNodeSchema: z.ZodObject<{
         description?: string | undefined;
     };
 }>;
+/**
+ * P11.13 · edge classification. Frontend uses this to apply per-class
+ * styling (color / dash pattern / weight) so users can distinguish
+ * rule-based BMC structure from LLM-suggested cross-dimension insights
+ * from user-drawn manual connections.
+ *
+ *   'bmc-structure'  default  rule-based 9-edge BMC topology (服务于/触达/...)
+ *   'llm-insight'             synthesizer LLM cross-dim suggestion
+ *   'user-drawn'              user dragged from one handle to another
+ *   'revision'                round N → N+1 cell replacement (future)
+ */
+export declare const canvasEdgeKindSchema: z.ZodEnum<["bmc-structure", "llm-insight", "user-drawn", "revision"]>;
+export type CanvasEdgeKind = z.infer<typeof canvasEdgeKindSchema>;
 export declare const canvasEdgeSchema: z.ZodObject<{
     id: z.ZodString;
     source: z.ZodString;
     target: z.ZodString;
     label: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    kind: z.ZodOptional<z.ZodEnum<["bmc-structure", "llm-insight", "user-drawn", "revision"]>>;
 }, "strip", z.ZodTypeAny, {
     source: string;
     id: string;
     target: string;
     label?: string | null | undefined;
+    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
 }, {
     source: string;
     id: string;
     target: string;
     label?: string | null | undefined;
+    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
 }>;
 export declare const canvasGraphSchema: z.ZodObject<{
     workspaceId: z.ZodString;
@@ -579,16 +595,19 @@ export declare const canvasGraphSchema: z.ZodObject<{
         source: z.ZodString;
         target: z.ZodString;
         label: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        kind: z.ZodOptional<z.ZodEnum<["bmc-structure", "llm-insight", "user-drawn", "revision"]>>;
     }, "strip", z.ZodTypeAny, {
         source: string;
         id: string;
         target: string;
         label?: string | null | undefined;
+        kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
     }, {
         source: string;
         id: string;
         target: string;
         label?: string | null | undefined;
+        kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
     }>, "many">;
 }, "strip", z.ZodTypeAny, {
     workspaceId: string;
@@ -644,6 +663,7 @@ export declare const canvasGraphSchema: z.ZodObject<{
         id: string;
         target: string;
         label?: string | null | undefined;
+        kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
     }[];
 }, {
     workspaceId: string;
@@ -699,6 +719,7 @@ export declare const canvasGraphSchema: z.ZodObject<{
         id: string;
         target: string;
         label?: string | null | undefined;
+        kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
     }[];
 }>;
 export type CanvasNodeData = z.infer<typeof canvasNodeDataSchema>;

@@ -152,6 +152,50 @@ const businessSpanContexts = new Map<string, OtelContext>()
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
+/**
+ * P11.13 · Pure rule-based BMC structural-edge derivation. Given a flat
+ * list of BMC cells (any subset of the 9 dimensions), produces the
+ * canonical 9 edges for whichever endpoints exist. Tagged with
+ * kind: 'bmc-structure' so the frontend renders them in the default
+ * gray-dashed style. Used by both the streamConversation main path
+ * (BusinessLangGraphService.buildBMCEdges) and mention-router post-
+ * generation edge recomputation (computeBmcEdgesForCells public method).
+ */
+export function computeBMCEdgesForCells(nodes: MacraNodeData[]): CanvasEdge[] {
+  const edges: CanvasEdge[] = []
+  const findNode = (domain: string) => nodes.find((n) => n.domain === domain)
+  const valueProp = findNode('价值主张')
+  const customerSeg = findNode('客户细分')
+  const channels = findNode('渠道通路')
+  const customerRel = findNode('客户关系')
+  const revenue = findNode('收入来源')
+  const keyRes = findNode('核心资源')
+  const keyAct = findNode('关键业务')
+  const keyPart = findNode('重要合作')
+  const cost = findNode('成本结构')
+  const addEdge = (source: MacraNodeData | undefined, target: MacraNodeData | undefined, label: string) => {
+    if (source && target) {
+      edges.push({
+        id: `${source.id}->${target.id}`,
+        source: source.id,
+        target: target.id,
+        label,
+        kind: 'bmc-structure'
+      })
+    }
+  }
+  addEdge(valueProp, customerSeg, '服务于')
+  addEdge(channels, customerSeg, '触达')
+  addEdge(customerRel, customerSeg, '维系')
+  addEdge(keyRes, valueProp, '支撑')
+  addEdge(keyAct, valueProp, '创造')
+  addEdge(customerSeg, revenue, '带来')
+  addEdge(keyRes, cost, '产生')
+  addEdge(keyAct, cost, '产生')
+  addEdge(keyPart, keyRes, '提供')
+  return edges
+}
+
 // ============== Main Service ==============
 export class BusinessLangGraphService {
   private readonly model: BusinessModel | null
@@ -1479,6 +1523,11 @@ ${snippets}
         userId: state.userId,
         metadata: { error: String(error) }
       })
+      // P11.13 / T2.4 · surface the registry → legacy supervisor fallback
+      // via handoff so the wire panel / debug UI can show "supervisor
+      // degraded" instead of silently downgrading. emitAgentDegraded
+      // accepts unknown error type internally.
+      this.emitAgentDegraded(state, 'supervisor-registry', error, 'legacy-supervisor')
       return this.runSupervisor(state)
     }
     } finally {
@@ -1841,7 +1890,7 @@ ${snippets}
     state: BusinessStateType,
     agentId: string,
     error: unknown,
-    fallback: 'legacy-inline-llm' | 'rule-based' | 'noop'
+    fallback: 'legacy-inline-llm' | 'rule-based' | 'noop' | 'legacy-supervisor'
   ): void {
     const message = error instanceof Error ? error.message : String(error)
     getHandoffLogger(state.traceId).record({
@@ -2035,6 +2084,9 @@ ${snippets}
           userId: state.userId,
           metadata: { error: error instanceof Error ? error.message : String(error) }
         })
+        // P11.13 / T2.4 · surface registry → legacy fallback to the user
+        // via a handoff (was previously audit-log-only).
+        this.emitAgentDegraded(state, 'deep-research', error, 'legacy-inline-llm')
         // fall through to legacy inline path
       }
     }
@@ -2756,7 +2808,10 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
       if (edges.some((existing) => existing.source === e.from && existing.target === e.to)) {
         continue
       }
-      llmEdges.push({ id, source: e.from, target: e.to, label: e.label })
+      // P11.13 · tag LLM-suggested edges with kind:'llm-insight' so the
+      // frontend can render them in synthesizer-purple to differentiate
+      // from the rule-based BMC structure edges (which stay default gray).
+      llmEdges.push({ id, source: e.from, target: e.to, label: e.label, kind: 'llm-insight' })
     }
 
     return {
@@ -2871,37 +2926,21 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
   }
 
   private buildBMCEdges(state: BusinessStateType): CanvasEdge[] {
-    const edges: CanvasEdge[] = []
-    const allNodes = [...state.marketNodes, ...state.productNodes, ...state.financeNodes]
-    const findNode = (domain: string) => allNodes.find((n) => n.domain === domain)
+    return computeBMCEdgesForCells([
+      ...state.marketNodes,
+      ...state.productNodes,
+      ...state.financeNodes
+    ])
+  }
 
-    const valueProp = findNode('价值主张')
-    const customerSeg = findNode('客户细分')
-    const channels = findNode('渠道通路')
-    const customerRel = findNode('客户关系')
-    const revenue = findNode('收入来源')
-    const keyRes = findNode('核心资源')
-    const keyAct = findNode('关键业务')
-    const keyPart = findNode('重要合作')
-    const cost = findNode('成本结构')
-
-    const addEdge = (source: MacraNodeData | undefined, target: MacraNodeData | undefined, label: string) => {
-      if (source && target) {
-        edges.push({ id: `${source.id}->${target.id}`, source: source.id, target: target.id, label })
-      }
-    }
-
-    addEdge(valueProp, customerSeg, '服务于')
-    addEdge(channels, customerSeg, '触达')
-    addEdge(customerRel, customerSeg, '维系')
-    addEdge(keyRes, valueProp, '支撑')
-    addEdge(keyAct, valueProp, '创造')
-    addEdge(customerSeg, revenue, '带来')
-    addEdge(keyRes, cost, '产生')
-    addEdge(keyAct, cost, '产生')
-    addEdge(keyPart, keyRes, '提供')
-
-    return edges
+  /**
+   * P11.13 / T2.2 · Public helper for mention-router to recompute BMC
+   * structural edges given a flat list of cells (existing seed + newly
+   * generated). Lets @-mention paths produce edges instead of dangling
+   * orphans on the canvas.
+   */
+  computeBmcEdgesForCells(nodes: MacraNodeData[]): CanvasEdge[] {
+    return computeBMCEdgesForCells(nodes)
   }
 
   // ============== Moderator (P11.10) ==============

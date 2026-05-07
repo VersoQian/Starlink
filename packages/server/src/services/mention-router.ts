@@ -28,6 +28,7 @@ import type {
 } from '@starlink/shared'
 import {
   BusinessLangGraphService,
+  computeBMCEdgesForCells,
   type MacraNodeData,
   renderCompactBmcCardsForPrompt
 } from './business-langgraph.js'
@@ -286,13 +287,33 @@ export class MentionRouter {
             .map((n: MacraNodeData) => `- **${n.label ?? n.id}**：${n.content || ''}`)
             .join('\n')
 
+    // P11.13 / T2.2 · After mention generates new cells, recompute BMC
+    // structural edges so the new cells aren't dangling. Combine seed
+    // cells (already on canvas) with newly generated cells, run the
+    // standard 9-edge derivation, and return only edges that touch at
+    // least one new node id (existing edges are already on the canvas).
+    let appendedEdges: CanvasEdge[] = []
+    if (nodes.length > 0) {
+      const allCells: MacraNodeData[] = [
+        ...seed.marketNodes,
+        ...seed.productNodes,
+        ...seed.financeNodes,
+        ...nodes
+      ]
+      const newIds = new Set(nodes.map((n) => n.id))
+      const allBmcEdges = computeBMCEdgesForCells(allCells)
+      appendedEdges = allBmcEdges.filter(
+        (e) => newIds.has(e.source) || newIds.has(e.target)
+      )
+    }
+
     return {
       agentId: entry.id,
       reply,
       refused: false,
       refusalReason: null,
       appendedNodes: nodes.map(macraToMentionNode),
-      appendedEdges: []
+      appendedEdges
     }
   }
 

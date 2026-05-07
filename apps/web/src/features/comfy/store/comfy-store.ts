@@ -310,13 +310,42 @@ const mapCanvasNodeToReactFlow = (node: CanvasNode): Node => {
   }
 }
 
-const mapCanvasEdgeToReactFlow = (edge: CanvasEdge): Edge => ({
-  id: edge.id,
-  source: edge.source,
-  target: edge.target,
-  label: edge.label,
-  type: 'smoothstep'
-})
+/**
+ * P11.13 · per-edge-kind visual styling. Each edge type tells a
+ * different story; the canvas reads the kind tag and applies a
+ * distinguishable style:
+ *
+ *   bmc-structure  default 9-edge BMC topology — light gray dashed,
+ *                  what's been there from day 1
+ *   llm-insight    synthesizer LLM cross-dim suggestion — synthesizer
+ *                  byline tint (#6B6B7C) solid 1.5px so users can see
+ *                  "this isn't structural; the synthesizer noticed
+ *                  this connection"
+ *   user-drawn     manual user connection — neutral mid-gray solid
+ *                  1.25px to mark "I drew this myself"
+ *   revision       round N→N+1 cell replacement — orange double-arrow
+ *                  with round badge (P11.13 P3, future)
+ */
+const EDGE_KIND_STYLE: Record<string, { stroke: string; strokeWidth: number; strokeDasharray?: string }> = {
+  'bmc-structure': { stroke: '#C6C6CD', strokeWidth: 1.25, strokeDasharray: '4 4' },
+  'llm-insight':   { stroke: '#6B6B7C', strokeWidth: 1.5  /* solid */ },
+  'user-drawn':    { stroke: '#4A4744', strokeWidth: 1.25 /* solid */ },
+  'revision':      { stroke: '#C26A1F', strokeWidth: 1.5  /* solid */ }
+}
+
+const mapCanvasEdgeToReactFlow = (edge: CanvasEdge): Edge => {
+  const kind = edge.kind ?? 'bmc-structure'
+  const style = EDGE_KIND_STYLE[kind] ?? EDGE_KIND_STYLE['bmc-structure']
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    label: edge.label,
+    type: 'smoothstep',
+    data: { kind },
+    style
+  }
+}
 
 const mergeById = <T extends { id: string }>(current: T[], updates?: T[]) => {
   if (!updates || updates.length === 0) return current

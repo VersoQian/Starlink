@@ -60,6 +60,7 @@ export declare const resolvers: {
                 id: string;
                 target: string;
                 label?: string | null | undefined;
+                kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
             }[];
         }>;
         conversation: (_: unknown, args: {
@@ -126,6 +127,7 @@ export declare const resolvers: {
                     id: string;
                     target: string;
                     label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
                 }[];
             };
             knowledgeEvidence: {
@@ -194,6 +196,7 @@ export declare const resolvers: {
             title: string;
             content: string;
             id: string;
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             workspaceId: string;
             confidence: number;
             metadata: Record<string, unknown>;
@@ -201,7 +204,6 @@ export declare const resolvers: {
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
@@ -228,6 +230,7 @@ export declare const resolvers: {
             title: string;
             content: string;
             id: string;
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             workspaceId: string;
             confidence: number;
             metadata: Record<string, unknown>;
@@ -235,7 +238,6 @@ export declare const resolvers: {
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
@@ -306,6 +308,7 @@ export declare const resolvers: {
                 title: string;
                 content: string;
                 id: string;
+                kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
                 workspaceId: string;
                 confidence: number;
                 metadata: Record<string, unknown>;
@@ -313,7 +316,6 @@ export declare const resolvers: {
                 updatedAt: string;
                 userId: string | null;
                 scope: "user" | "workspace" | "agent";
-                kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
                 sourceType: string;
                 sourceId: string | null;
                 importance: number;
@@ -410,6 +412,7 @@ export declare const resolvers: {
                     id: string;
                     target: string;
                     label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
                 }[];
             };
         } | {
@@ -468,6 +471,7 @@ export declare const resolvers: {
                     id: string;
                     target: string;
                     label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
                 }[] | undefined;
                 removedNodeIds?: string[] | undefined;
                 removedEdgeIds?: string[] | undefined;
@@ -804,6 +808,7 @@ export declare const resolvers: {
                     id: string;
                     target: string;
                     label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
                 }[];
             };
             knowledgeEvidence: {
@@ -922,6 +927,7 @@ export declare const resolvers: {
             title: string;
             content: string;
             id: string;
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             workspaceId: string;
             confidence: number;
             metadata: Record<string, unknown>;
@@ -929,7 +935,6 @@ export declare const resolvers: {
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
@@ -955,6 +960,7 @@ export declare const resolvers: {
             title: string;
             content: string;
             id: string;
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             workspaceId: string;
             confidence: number;
             metadata: Record<string, unknown>;
@@ -962,7 +968,6 @@ export declare const resolvers: {
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
@@ -976,6 +981,7 @@ export declare const resolvers: {
             title: string;
             content: string;
             id: string;
+            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             workspaceId: string;
             confidence: number;
             metadata: Record<string, unknown>;
@@ -983,7 +989,6 @@ export declare const resolvers: {
             updatedAt: string;
             userId: string | null;
             scope: "user" | "workspace" | "agent";
-            kind: "insight" | "summary" | "decision" | "preference" | "constraint" | "canvas" | "user-skill";
             sourceType: string;
             sourceId: string | null;
             importance: number;
@@ -1062,6 +1067,7 @@ export declare const resolvers: {
             id: string;
             target: string;
             label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
         }>;
         createKnowledgeBase: (_: unknown, args: {
             workspaceId: string;

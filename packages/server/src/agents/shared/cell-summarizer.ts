@@ -191,6 +191,15 @@ export async function distillSummariesForCells<
   }
   if (!nodes || nodes.length === 0) return nodes
 
+  // P11.13 · T2.3 batch-level failure-rate aggregation. Per-cell failures
+  // already log distill-failed but a single warn-per-cell hides the
+  // aggregate degradation (5/9 silently failing looks the same as 1/9
+  // in audit). Aggregate after Promise.all and emit a single summary
+  // log so operators / handoff streams can see batch health.
+  let successes = 0
+  let failures = 0
+  const failedDomains: string[] = []
+
   const tasks = nodes.map(async (node) => {
     if (node.type !== 'cc-bmc-card') return node
     if (!node.content || node.content.trim().length < 40) return node
@@ -206,8 +215,11 @@ export async function distillSummariesForCells<
         },
         deps
       )
+      successes += 1
       return { ...node, summary: distilled }
     } catch (err) {
+      failures += 1
+      if (node.domain) failedDomains.push(node.domain)
       auditLogger.warn({
         action: 'cell-summarizer.distill-failed',
         requestId: opts.traceId,
@@ -225,5 +237,32 @@ export async function distillSummariesForCells<
     }
   })
 
-  return Promise.all(tasks)
+  const result = await Promise.all(tasks)
+
+  const eligible = successes + failures
+  if (eligible > 0) {
+    const failureRate = failures / eligible
+    const isDegraded = failureRate >= 0.3 // ≥ 30% threshold
+    auditLogger[isDegraded ? 'warn' : 'info']({
+      action: isDegraded
+        ? 'cell-summarizer.batch-degraded'
+        : 'cell-summarizer.batch-completed',
+      requestId: opts.traceId,
+      workflowId: opts.workspaceId,
+      userId: opts.userId,
+      metadata: {
+        eligible,
+        successes,
+        failures,
+        failureRate: Number(failureRate.toFixed(3)),
+        failedDomains,
+        threshold: 0.3,
+        note: isDegraded
+          ? `Cell summarizer fell back to agent original on ≥30% of cells — check flash availability + parser logs.`
+          : undefined
+      }
+    })
+  }
+
+  return result
 }

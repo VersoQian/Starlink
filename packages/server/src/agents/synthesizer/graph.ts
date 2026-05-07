@@ -23,6 +23,7 @@ import { z } from 'zod'
 import { Annotation, StateGraph, START, END } from '@langchain/langgraph'
 import { SystemMessage, HumanMessage } from '@langchain/core/messages'
 
+import { createAuditLogger } from '@starlink/shared'
 import {
   makeProfileGetter,
   profileToDescriptor,
@@ -33,6 +34,8 @@ import {
   type MacraNodeData,
   type BusinessModel
 } from '../../services/business-langgraph.js'
+
+const auditLogger = createAuditLogger('packages/server:agents:synthesizer')
 
 // ============== Output schema ==============
 
@@ -138,9 +141,19 @@ function makeSynthesizeNode(model: BusinessModel | null, systemPrompt: string) {
         suggestedEdges: response.suggestedEdges ?? []
       }
     } catch (err) {
-      // P11.8 · audit-log the failure so future regressions surface
-      // instead of silently degrading to empty insights.
-      console.warn('[synthesizer] withStructuredOutput failed:', err instanceof Error ? err.message : err)
+      // P11.13 / T2.4 · upgraded from console.warn to auditLogger so
+      // failures appear in the same audit stream as all other
+      // observability events. Includes traceId for cross-trace lookup.
+      auditLogger.warn({
+        action: 'synthesizer.withStructuredOutput-failed',
+        requestId: state.traceId,
+        workflowId: state.workspaceId,
+        userId: state.userId,
+        metadata: {
+          err: err instanceof Error ? err.message : String(err),
+          fallback: 'empty-insights-empty-edges'
+        }
+      })
       return { insights: [], suggestedEdges: [] }
     }
   }

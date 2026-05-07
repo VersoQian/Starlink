@@ -20,6 +20,14 @@ export const typeDefs = gql`
     source: ID!
     target: ID!
     label: String
+    """
+    P11.13 · Edge classification for per-kind visual styling.
+    Values: bmc-structure (rule-based 9-edge BMC) | llm-insight
+    (synthesizer LLM cross-dim) | user-drawn (manual) | revision
+    (round N→N+1 cell replacement). Optional — frontend defaults to
+    bmc-structure when absent.
+    """
+    kind: String
   }
 
   type CanvasGraph {
