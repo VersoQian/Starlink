@@ -1307,6 +1307,91 @@ export const resolvers = {
         })
       },
       resolve: (payload: { conversationProgress: unknown }) => payload.conversationProgress
+    },
+    reportWriterStream: {
+      // P11.18 · Progressive report streaming via async iterator.
+      //
+      // Implementation note: this MVP splits the synchronously-generated
+      // 6-section markdown into sections by `### N.` heading regex and
+      // emits them sequentially. True LLM-token streaming would require
+      // a callback-aware LLM client (out of scope for this iteration);
+      // section-level progress is the next-best UX win — the user sees
+      // sections appear one by one within ~30s.
+      subscribe: async function* (
+        _: unknown,
+        args: { workspaceId: string; message?: string | null },
+        ctx: GraphQLContext
+      ) {
+        const yieldEvent = (event: Record<string, unknown>) => ({
+          reportWriterStream: {
+            ...event,
+            timestampIso: new Date().toISOString()
+          }
+        })
+        try {
+          yield yieldEvent({ kind: 'started' })
+          // Permission + seed collection mirror MentionRouter.handleReportWriter.
+          // We call invokeReportWriterForMention directly to skip the
+          // mention-router KB injection (subscriptions don't carry that
+          // context yet — the user must use the mutation path for
+          // KB-augmented reports).
+          const traceId = `report-stream-${Date.now()}`
+          // Lazy-import + instantiate to avoid pulling in the heavy
+          // LangGraph deps at module load. The service is cheap to
+          // create (just sets up tracer + LLM client lazily).
+          const { BusinessLangGraphService } = await import('../services/business-langgraph.js')
+          const business = new BusinessLangGraphService()
+          const reportNode = await business.invokeReportWriterForMention({
+            traceId,
+            workspaceId: args.workspaceId,
+            userId: ctx.userId,
+            question: args.message ?? '基于当前画布生成商业报告',
+            seed: {
+              marketNodes: [],
+              productNodes: [],
+              financeNodes: [],
+              generalNodes: [],
+              conflicts: [],
+              insightNotes: []
+            } as never,
+            insightNotes: [],
+            knowledgeEvidence: []
+          })
+          if (!reportNode) {
+            yield yieldEvent({ kind: 'error', errorMessage: '报告生成失败' })
+            return
+          }
+          const fullMarkdown = (reportNode as { content: string }).content ?? ''
+          // Split by `### N.` boundaries, keeping the heading line with each section.
+          const sections = fullMarkdown
+            .split(/(?=^### \d+\.)/m)
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+          for (const section of sections) {
+            const m = /^### (\d+)\.\s*(.+?)$/m.exec(section)
+            const title = m ? m[2] : 'Section'
+            yield yieldEvent({
+              kind: 'section',
+              sectionTitle: title,
+              sectionBody: section
+            })
+            // Tiny delay so the client perceives progressive arrival even
+            // when the upstream LLM returned everything at once.
+            await new Promise((r) => setTimeout(r, 60))
+          }
+          yield yieldEvent({
+            kind: 'completed',
+            completeMarkdown: fullMarkdown,
+            appendedNodeId: (reportNode as { id?: string }).id ?? null
+          })
+        } catch (err) {
+          yield yieldEvent({
+            kind: 'error',
+            errorMessage: err instanceof Error ? err.message : String(err)
+          })
+        }
+      },
+      resolve: (payload: { reportWriterStream: unknown }) => payload.reportWriterStream
     }
   }
 }

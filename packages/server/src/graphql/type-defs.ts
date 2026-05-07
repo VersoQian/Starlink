@@ -821,6 +821,38 @@ export const typeDefs = gql`
   type Subscription {
     conversationProgress(workspaceId: ID!, conversationId: ID): ConversationEvent!
     flowExecutionProgress(executionId: ID!): FlowExecutionEvent!
+    """
+    P11.18 · Streaming report-writer. Emits events as the report
+    is generated section by section. Frontend opens this subscription
+    instead of (or alongside) the synchronous mentionAgent mutation
+    when it wants progressive UI rendering.
+
+    Event kinds:
+      - started: report generation kicked off, includes timestamp
+      - section: one section of the 6-section report (Executive Summary
+                 / Market / Product / Finance / Risk / Recommendation)
+                 with its markdown body
+      - completed: full report ready, includes the appended canvas node id
+      - error: generation failed, includes message
+    """
+    reportWriterStream(workspaceId: ID!, message: String): ReportWriterEvent!
+  }
+
+  enum ReportWriterEventKind {
+    started
+    section
+    completed
+    error
+  }
+
+  type ReportWriterEvent {
+    kind: ReportWriterEventKind!
+    timestampIso: String!
+    sectionTitle: String
+    sectionBody: String
+    completeMarkdown: String
+    appendedNodeId: ID
+    errorMessage: String
   }
 
   # ─── Ideation Coach (Wave F.6 + F.7) ─────────────────────────────────

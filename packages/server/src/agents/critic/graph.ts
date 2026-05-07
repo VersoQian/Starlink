@@ -241,6 +241,21 @@ function makeDetectConflictsNode(model: BusinessModel | null, systemPrompt: stri
           fallback: 'rule-based-critic-check'
         }
       })
+      // P11.18 · separate SLO bucket for rule-based fallback so the
+      // operator can distinguish "critic used LLM successfully (most
+      // common)" from "critic fell through to heuristic". The wrapper
+      // invokeRegisteredAgent will still tally `critic-agent` as
+      // success (the call returned conflicts); this extra bucket
+      // surfaces the degradation rate explicitly. Compute fallback%
+      // as `critic-agent:rule-fallback.invocations / critic-agent.invocations`.
+      try {
+        const { recordAgentInvocation } = await import(
+          '../../infrastructure/observability/agent-slo-tracker.js'
+        )
+        recordAgentInvocation('critic-agent:rule-fallback', 0, 'fallback')
+      } catch {
+        // SLO tracking must never break the critic path.
+      }
       const fallbackConflicts = ruleBasedCriticCheck(state.nodesSummary).map((c) => ({
         ...c,
         metadata: {

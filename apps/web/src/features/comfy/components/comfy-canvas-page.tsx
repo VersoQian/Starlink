@@ -12,6 +12,7 @@ import { CanvasTutorialDialog } from './canvas-tutorial-dialog'
 import { CanvasPerspectiveToggle } from './canvas-perspective-toggle'
 import { CanvasChatDock } from './canvas-chat-dock'
 import { CanvasCitationPanel } from './canvas-citation-panel'
+import { AgentHealthChip } from './agent-health-chip'
 import { MemoryDrawer } from './memory-drawer'
 import { CanvasWizardPanel } from './canvas-wizard-panel'
 import { CanvasLiveCoach } from './canvas-live-coach'
@@ -768,6 +769,11 @@ export function CanvasPage({
               {/* P10 final · KB / Memory / Wizard 按钮已移到 CanvasLiveCoach
                   组件的 footer，紧贴 Coach 面板下方（不再用绝对定位，
                   完美追随 Coach 高度变化）。原本这里的 3 个浮动按钮已删。 */}
+              {/* P11.18 · Agent SLO health chip (bottom-right). Polls
+                  /health/agents every 30s; auto-hides when no agent data
+                  yet, turns red when any agent is degraded. Click to
+                  expand per-agent SLO detail. */}
+              <AgentHealthChip />
             </>
           ) : null}
         </div>
