@@ -2076,14 +2076,54 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       // into this tab. We deliberately do NOT await watcher.done — the
       // page mount returns immediately; the subscription self-tears
       // when the server emits status='completed'.
+      // P11.18 fix · build a shared extractMacraNodeData here so reattach
+      // watcher updates BOTH state.nodes (ReactFlow) AND state.macraNodes.
+      // Previously this watcher only updated nodes/edges → macraNodes
+      // drifted out of sync → BMC count chip was stale, drawer couldn't
+      // open cards (lookup miss). Same shape as callLangGraph extractor.
+      const reattachExtract = (canvasNode: CanvasNode): MacraNodeData | null => {
+        const data = (canvasNode.data ?? {}) as Record<string, unknown>
+        const meta = data.meta as Record<string, unknown> | undefined
+        if (!meta) return null
+        return {
+          id: canvasNode.id,
+          type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as MacraNodeData['type'],
+          label: typeof data.title === 'string' ? data.title : '未命名',
+          content: typeof data.content === 'string' ? data.content : '',
+          summary: typeof meta.summary === 'string' ? meta.summary : '',
+          fullContent: typeof meta.fullContent === 'string'
+            ? meta.fullContent
+            : (typeof data.content === 'string' ? data.content : ''),
+          domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
+          metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
+            ? (meta.metadata as Record<string, unknown>)
+            : {},
+          agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
+          severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
+          conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
+          isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
+          position: canvasNode.position
+        }
+      }
+
       const watcher = watchConversation({
         workspaceId,
         conversationId: running.id,
         onGraphAppended: (payload) => {
           const graph = payload as WorkspaceGraphResponse
+          // P11.18 fix · also rebuild macraNodes from the snapshot.
+          // Without this, BMC cells appear in nodes[] but BMC chip,
+          // drawer, and citation panel can't find them.
+          const macraMap = new Map<string, MacraNodeData>()
+          for (const n of graph.nodes) {
+            const m = reattachExtract(n)
+            if (m) macraMap.set(n.id, m)
+          }
           set({
             nodes: graph.nodes.map(mapCanvasNodeToReactFlow),
             edges: graph.edges.map(mapCanvasEdgeToReactFlow),
+            macraNodes: macraMap,
+            lastDeltaAt: Date.now()
           })
         },
         onGraphDiff: (payload) => {
@@ -2093,21 +2133,38 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             removedNodeIds?: string[]
             removedEdgeIds?: string[]
           }
-          set((s) => ({
-            nodes: mergeById(
-              delta.removedNodeIds
-                ? s.nodes.filter((n) => !delta.removedNodeIds?.includes(n.id))
-                : s.nodes,
-              delta.nodes?.map(mapCanvasNodeToReactFlow)
-            ),
-            edges: mergeById(
-              delta.removedEdgeIds
-                ? s.edges.filter((e) => !delta.removedEdgeIds?.includes(e.id))
-                : s.edges,
-              delta.edges?.map(mapCanvasEdgeToReactFlow)
-            ),
-            lastDeltaAt: Date.now(),
-          }))
+          set((s) => {
+            // P11.18 fix · merge macraNodes alongside ReactFlow nodes.
+            // Previously delta updates of BMC cells silently bypassed
+            // macraNodes — frontend BMC count went stale, drawer
+            // open-on-cell-click missed.
+            const newMacra = new Map(s.macraNodes)
+            if (Array.isArray(delta.removedNodeIds)) {
+              for (const id of delta.removedNodeIds) newMacra.delete(id)
+            }
+            if (Array.isArray(delta.nodes)) {
+              for (const n of delta.nodes) {
+                const m = reattachExtract(n)
+                if (m) newMacra.set(n.id, m)
+              }
+            }
+            return {
+              nodes: mergeById(
+                delta.removedNodeIds
+                  ? s.nodes.filter((n) => !delta.removedNodeIds?.includes(n.id))
+                  : s.nodes,
+                delta.nodes?.map(mapCanvasNodeToReactFlow)
+              ),
+              edges: mergeById(
+                delta.removedEdgeIds
+                  ? s.edges.filter((e) => !delta.removedEdgeIds?.includes(e.id))
+                  : s.edges,
+                delta.edges?.map(mapCanvasEdgeToReactFlow)
+              ),
+              macraNodes: newMacra,
+              lastDeltaAt: Date.now()
+            }
+          })
         },
         onEvidence: (payload) => {
           const ev = payload as KnowledgeEvidence[]
