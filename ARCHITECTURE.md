@@ -4,7 +4,7 @@
 > **论文题目**：基于多智能体协同的生成式商业画布系统的设计与实现
 > **创新方向**：Evidence-Grounded BMC Generation with Cell-Level Citation
 
-本文档是代码导航入口。深度架构设计见 [`docs/architecture-evidence-grounded-bmc.md`](docs/architecture-evidence-grounded-bmc.md)（12 章 + 2 附录），实施计划见 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)。
+本文档是代码导航入口。深度架构设计见 [`docs/architecture/architecture-evidence-grounded-bmc.md`](docs/architecture/architecture-evidence-grounded-bmc.md)（12 章 + 2 附录），实施计划见 [`docs/ops/implementation-plan.md`](docs/ops/implementation-plan.md)。
 
 ---
 
@@ -132,8 +132,11 @@ pnpm --filter @starlink/server run lint
 
 ## 相关文档
 
-- **深度架构**：[`docs/architecture-evidence-grounded-bmc.md`](docs/architecture-evidence-grounded-bmc.md)
-- **实施计划**：[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
-- **产品定位**：[`docs/final-product-shape-prd.md`](docs/final-product-shape-prd.md)
-- **开题报告**：[`docs/开题报告-模板组织版.md`](docs/开题报告-模板组织版.md)
-- **文献综述**：[`docs/literature_review_full_draft.md`](docs/literature_review_full_draft.md)
+- **深度架构**：[`docs/architecture/architecture-evidence-grounded-bmc.md`](docs/architecture/architecture-evidence-grounded-bmc.md)
+- **实施计划**：[`docs/ops/implementation-plan.md`](docs/ops/implementation-plan.md)
+- **产品定位**：[`docs/architecture/final-product-shape-prd.md`](docs/architecture/final-product-shape-prd.md)
+- **开题报告**：[`docs/paper/开题报告-模板组织版.md`](docs/paper/开题报告-模板组织版.md)
+- **文献综述**：[`docs/paper/literature-review-full-draft.md`](docs/paper/literature-review-full-draft.md)
+- **多智能体架构**：[`docs/architecture/multi-agent-architecture.md`](docs/architecture/multi-agent-architecture.md)
+- **论文章节**：[`docs/paper/`](docs/paper/) (含 outline / chapter-1 / chapter-7 等)
+- **变更日志**：[`docs/changelog/`](docs/changelog/)

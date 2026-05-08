@@ -7,7 +7,7 @@ The codebase is now composed of:
 - **packages/shared/** – 共享的 Zod Schema & TypeScript 类型，约束画布节点、会话事件等契约。
 - **packages/server/** – Express + Apollo Server GraphQL 网关，整合 Dify 工作流、发布 Subscription 事件，为前端提供统一入口。
 - **config/** – 环境变量读取工具（Supabase、Dify、第三方服务）。
-- **docs/** – 额外的架构说明 (`docs/frontend-architecture.md`)。
+- **docs/** – 文档分 6 类：`paper/`（论文 + 文献综述）/ `architecture/`（系统架构）/ `design/`（前端 / 视觉设计）/ `ops/`（运维 / migration / env）/ `research/`（调研 / 对比）/ `changelog/`（变更记录）。
 
 Key features:
 
@@ -124,5 +124,5 @@ npm run test:e2e:headed
 └── README.md                      # Project overview
 ```
 
-Refer to `docs/frontend-architecture.md` for a deeper dive into the frontend design.
+Refer to `docs/design/frontend-architecture.md` for a deeper dive into the frontend design.
 # Starlink
