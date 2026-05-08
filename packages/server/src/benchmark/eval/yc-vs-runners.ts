@@ -350,6 +350,24 @@ async function main() {
   // Stage 6: filter to cases that have non-empty workspace_knowledge so the
   // citation pipeline isn't diluted by empty-KB runs in the same report.
   const withKbOnly = args.includes('--with-kb-only')
+  // P11.18 · ablation flags. Each toggles a process-level gate honored
+  // by BusinessLangGraph at invocation time. Combine to study marginal
+  // contribution of each subsystem (e.g. --no-critic --no-debate
+  // measures impact of removing both adversarial paths).
+  // The variant tag goes into the runner column so a single report can
+  // contain rows from multiple ablation variants run separately.
+  const noCritic = args.includes('--no-critic')
+  const noDebate = args.includes('--no-debate')
+  const noRag = args.includes('--no-rag')
+  const explicitVariant = args.find((a) => a.startsWith('--variant='))?.split('=')[1]
+  const ablationParts = [
+    noCritic ? 'no-critic' : null,
+    noDebate ? 'no-debate' : null,
+    noRag ? 'no-rag' : null
+  ].filter((s): s is string => s !== null)
+  const variantTag =
+    explicitVariant ??
+    (ablationParts.length > 0 ? ablationParts.join('+') : 'full')
 
   const allCases = loadAllYcCases()
   const filteredByCaseId = caseIdArg
@@ -380,7 +398,10 @@ async function main() {
         ) as RunnerName[])
     : ['starlink', 'gpt-solo']
   const runnerFns: Record<RunnerName, (c: BenchmarkCase) => Promise<BenchmarkRun>> = {
-    starlink: runStarlink,
+    // Forward ablation flags to the Starlink runner. The runner stamps
+    // the variant tag onto the BenchmarkRun.runner field so the rendered
+    // report's table can compare rows by variant.
+    starlink: (c) => runStarlink(c, { noCritic, noDebate, noRag, variantTag }),
     'gpt-solo': (c) => runGptSolo(c),
     'gpt-solo-forced': (c) => runGptSolo(c, { forceNineCells: true })
   }
@@ -394,6 +415,18 @@ async function main() {
   if (minimalContext) {
     console.error(
       `[yc-vs-runners] --minimal-context: stripping detailed description, keeping only one_liner + sector. NOTE: this is a prompt-richness ablation; orthogonal to --with-kb-only which controls the RAG path.`
+    )
+  }
+  if (noCritic || noDebate || noRag) {
+    const off = [
+      noCritic && 'critic',
+      noDebate && 'debate',
+      noRag && 'RAG'
+    ]
+      .filter(Boolean)
+      .join(' + ')
+    console.error(
+      `[yc-vs-runners] ABLATION variant=${variantTag} · disabled: ${off}. Starlink runner runs with ${off} stripped; gpt-solo unaffected.`
     )
   }
   if (withKbOnly) {

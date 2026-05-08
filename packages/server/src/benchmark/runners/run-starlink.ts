@@ -35,13 +35,43 @@ function ensureBenchmarkBootstrapped(): Promise<void> {
   return benchBootstrapPromise
 }
 
-export async function runStarlink(c: BenchmarkCase): Promise<BenchmarkRun> {
+/**
+ * P11.18 · Ablation toggles for `eval:yc -- --no-critic / --no-debate /
+ * --no-rag` etc. Each flag flips a process-level gate that the
+ * BusinessLangGraph subgraph honors at invocation time, so the same
+ * runner instance produces ablated outputs without re-bootstrapping.
+ *
+ * `noRag` is enforced runner-side (empty knowledgeEvidence) since
+ * KB injection is by-argument, not env-gated.
+ */
+export interface StarlinkRunnerOptions {
+  /** Skip critic subgraph entirely (returns empty conflicts). */
+  noCritic?: boolean
+  /** Force-disable debate even if DEBATE_ENABLED=true. */
+  noDebate?: boolean
+  /** Strip workspace_knowledge before passing to streamConversation. */
+  noRag?: boolean
+  /** Variant tag stamped on the run (used for ablation reports). */
+  variantTag?: string
+}
+
+export async function runStarlink(
+  c: BenchmarkCase,
+  options: StarlinkRunnerOptions = {}
+): Promise<BenchmarkRun> {
   const startedAt = new Date()
   const t0 = Date.now()
-  const traceId = `bench-${c.case_id}-${t0}`
+  const variant = options.variantTag ?? 'full'
+  const traceId = `bench-${c.case_id}-${variant}-${t0}`
 
   process.env.ORCHESTRATION_MODE = 'registry'
   process.env.HITL_ENABLED = 'false'
+  // Per-call ablation gates. Reset at function entry so a previous
+  // ablation run doesn't leak into the next variant.
+  if (options.noCritic) process.env.ABLATION_DISABLE_CRITIC = 'true'
+  else delete process.env.ABLATION_DISABLE_CRITIC
+  if (options.noDebate) process.env.ABLATION_DISABLE_DEBATE = 'true'
+  else delete process.env.ABLATION_DISABLE_DEBATE
 
   await ensureBenchmarkBootstrapped()
 
@@ -50,16 +80,19 @@ export async function runStarlink(c: BenchmarkCase): Promise<BenchmarkRun> {
   let err: string | undefined
 
   try {
+    const knowledgeEvidence = options.noRag
+      ? []
+      : (c.input.workspace_knowledge ?? []).map((k) => ({
+          docId: k.doc_id,
+          snippet: k.content,
+          score: 1
+        }))
     const stream = service.streamConversation({
-      workspaceId: `bench-${c.case_id}`,
+      workspaceId: `bench-${c.case_id}-${variant}`,
       userId: 'benchmark-runner',
       question: c.input.question,
       traceId,
-      knowledgeEvidence: (c.input.workspace_knowledge ?? []).map((k) => ({
-        docId: k.doc_id,
-        snippet: k.content,
-        score: 1
-      })) as Parameters<typeof service.streamConversation>[0]['knowledgeEvidence']
+      knowledgeEvidence: knowledgeEvidence as Parameters<typeof service.streamConversation>[0]['knowledgeEvidence']
     })
 
     for await (const update of stream) {
@@ -95,7 +128,9 @@ export async function runStarlink(c: BenchmarkCase): Promise<BenchmarkRun> {
 
   return {
     case_id: c.case_id,
-    runner: 'starlink',
+    // For ablation runs, embed the variant in the runner field so the
+    // judge report can group/compare variants by string match.
+    runner: variant === 'full' ? 'starlink' : `starlink-${variant}` as 'starlink',
     started_at: startedAt.toISOString(),
     ended_at: endedAt.toISOString(),
     duration_ms: Date.now() - t0,

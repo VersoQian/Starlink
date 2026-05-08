@@ -3141,6 +3141,22 @@ ${conflictDigest || '（无冲突）'}
   private async runCritic(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
 
+    // P11.18 · Ablation gate. When ABLATION_DISABLE_CRITIC=true, the
+    // critic subgraph is skipped entirely so we can measure BMC quality
+    // without conflict detection. Used by yc-vs-runners.ts --no-critic.
+    // Returns empty conflicts, downstream synthesizer / debate get no work.
+    if (process.env.ABLATION_DISABLE_CRITIC === 'true') {
+      auditLogger.info({
+        action: 'business-langgraph.runCritic.ablation-skipped',
+        userId: state.userId,
+        workflowId: state.workspaceId,
+        requestId: state.traceId,
+        durationMs: 0,
+        metadata: { reason: 'ABLATION_DISABLE_CRITIC=true' }
+      })
+      return { conflicts: [] }
+    }
+
     // Phase 2.5 F5: registry mode delegates to YAML critic-agent subgraph.
     if (
       getOrchestrationMode() === 'registry' &&
