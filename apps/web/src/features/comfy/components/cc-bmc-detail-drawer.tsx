@@ -619,16 +619,36 @@ function ResourcesPanel({
   metadata: Record<string, unknown> | undefined
 }) {
   const openEvidenceDrawer = useComfyStore((s) => s.openEvidenceDrawer)
+  const closeDetailPanel = useComfyStore((s) => s.closeDetailPanel)
+  const [expandedDocId, setExpandedDocId] = useState<string | null>(null)
 
-  // 1. Parse [[ref:docId#snippetId]] citations
+  // 1. Parse [[ref:docId#snippetId]] citations + capture surrounding
+  // context (the sentence/paragraph the citation supports).
   const citations = (() => {
-    const matches = Array.from(fullContent.matchAll(/\[\[ref:([^\]#]+)#([^\]]+)\]\]/g))
-    const groups = new Map<string, { docId: string; snippetIds: Set<string>; count: number }>()
-    for (const m of matches) {
-      const [, docId, snippetId] = m
-      const g = groups.get(docId) ?? { docId, snippetIds: new Set<string>(), count: 0 }
+    const re = /\[\[ref:([^\]#]+)#([^\]]+)\]\]/g
+    const groups = new Map<string, {
+      docId: string
+      snippetIds: Set<string>
+      count: number
+      contexts: string[]
+    }>()
+    let match
+    while ((match = re.exec(fullContent)) !== null) {
+      const [, docId, snippetId] = match
+      // Capture ~140 chars BEFORE the citation as the supporting context.
+      const start = Math.max(0, match.index - 140)
+      const end = match.index
+      const contextRaw = fullContent
+        .slice(start, end)
+        .replace(/\n+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      // Take only the last sentence in that context window.
+      const lastSentence = contextRaw.match(/[^。！？.!?]+[。！？.!?]?$/)?.[0]?.trim() ?? contextRaw
+      const g = groups.get(docId) ?? { docId, snippetIds: new Set<string>(), count: 0, contexts: [] }
       g.snippetIds.add(snippetId)
       g.count++
+      if (lastSentence && g.contexts.length < 3) g.contexts.push(lastSentence)
       groups.set(docId, g)
     }
     return Array.from(groups.values()).sort((a, b) => b.count - a.count)
@@ -670,28 +690,61 @@ function ResourcesPanel({
             KB 引用 · {citations.length} 篇文档 / {citations.reduce((s, c) => s + c.count, 0)} 处引用
           </h4>
           <ul className="space-y-1.5">
-            {citations.map((c) => (
-              <li key={c.docId} className="border-[0.5px] border-stratum-line bg-white px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[11px] tabular-nums text-stratum-ink truncate">
-                    {c.docId}
-                  </span>
-                  <span className="font-instr text-[9px] uppercase tracking-kicker text-stratum-muted">
-                    {c.count} 处 · {c.snippetIds.size} chunk
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const firstSnippetId = Array.from(c.snippetIds)[0]
-                    openEvidenceDrawer(`${c.docId}#${firstSnippetId}`)
-                  }}
-                  className="mt-1 font-instr text-[10px] uppercase tracking-kicker text-stratum-blue hover:text-stratum-navy"
-                >
-                  查看证据 →
-                </button>
-              </li>
-            ))}
+            {citations.map((c) => {
+              const isExpanded = expandedDocId === c.docId
+              return (
+                <li key={c.docId} className="border-[0.5px] border-stratum-line bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedDocId(isExpanded ? null : c.docId)}
+                    className="w-full px-3 py-2 flex items-center justify-between gap-2 hover:bg-stratum-surface-low transition-colors text-left"
+                  >
+                    <span className="font-mono text-[11px] tabular-nums text-stratum-ink truncate">
+                      {c.docId}
+                    </span>
+                    <span className="font-instr text-[9px] uppercase tracking-kicker text-stratum-muted whitespace-nowrap">
+                      {c.count} 处 · {c.snippetIds.size} chunk · {isExpanded ? '收起 ▴' : '展开 ▾'}
+                    </span>
+                  </button>
+                  {isExpanded ? (
+                    <div className="border-t-[0.5px] border-stratum-line bg-stratum-surface-low px-3 py-2.5 space-y-2">
+                      {c.contexts.length > 0 ? (
+                        <div>
+                          <p className="font-instr text-[9px] uppercase tracking-kicker text-stratum-muted mb-1">
+                            支撑上下文（前 {c.contexts.length} 条）
+                          </p>
+                          <ul className="space-y-1.5">
+                            {c.contexts.map((ctx, i) => (
+                              <li key={i} className="text-[12px] leading-[1.55] text-stratum-ink border-l-[2px] border-stratum-blue/40 pl-2">
+                                {ctx}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      <div className="flex items-center gap-2 pt-1.5 border-t-[0.5px] border-stratum-line">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstSnippetId = Array.from(c.snippetIds)[0]
+                            // Close the BMC drawer first so evidence drawer
+                            // isn't overlapped.
+                            closeDetailPanel()
+                            openEvidenceDrawer(`${c.docId}#${firstSnippetId}`)
+                          }}
+                          className="font-instr text-[10px] uppercase tracking-kicker text-stratum-blue hover:text-stratum-navy"
+                        >
+                          在证据抽屉中详读 →
+                        </button>
+                        <span className="font-instr text-[9px] tracking-kicker text-stratum-muted">
+                          ({c.snippetIds.size} 个 chunk)
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+                </li>
+              )
+            })}
           </ul>
         </div>
       ) : null}
