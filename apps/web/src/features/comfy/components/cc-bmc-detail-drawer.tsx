@@ -442,18 +442,17 @@ export function CCBMCDetailDrawer() {
           )}
 
           {activeTab === 'edit' && (
-            <Placeholder
-              icon={<Edit3 className="w-6 h-6 text-stratum-muted" strokeWidth={1.25} />}
-              title="编辑功能即将推出"
-              detail="您将能够直接修改节点内容和属性"
+            <EditPanel
+              nodeId={detailPanel.nodeId}
+              label={nodeData.label}
+              fullContent={fullContent}
             />
           )}
 
           {activeTab === 'resources' && (
-            <Placeholder
-              icon={<Link2 className="w-6 h-6 text-stratum-muted" strokeWidth={1.25} />}
-              title="资源链接功能即将推出"
-              detail="相关研究资料和参考链接将显示在此处"
+            <ResourcesPanel
+              fullContent={fullContent}
+              metadata={nodeData.metadata}
             />
           )}
         </div>
@@ -504,6 +503,220 @@ function Placeholder({
       <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mt-2">
         {detail}
       </p>
+    </div>
+  )
+}
+
+/**
+ * P12 · 编辑 tab. Inline edit of label + fullContent. Saves to local
+ * comfy-store via updateMacraNode (which propagates to the server-
+ * persisted graph on the next applyGraph cycle / explicit re-persist).
+ *
+ * Edit is local-first: the change shows on the canvas immediately and
+ * survives a workspace switch via comfy-store, but does NOT issue an
+ * explicit GraphQL mutation to overwrite canvas_graphs. The next BMC
+ * pipeline run will overwrite this cell anyway, so persisting an edit
+ * across that boundary requires the user to re-trigger generation
+ * with the new content as part of seed — out of scope for inline edit.
+ */
+function EditPanel({
+  nodeId,
+  label,
+  fullContent,
+}: {
+  nodeId: string
+  label: string
+  fullContent: string
+}) {
+  const updateMacraNode = useComfyStore((s) => s.updateMacraNode)
+  const [draftLabel, setDraftLabel] = useState(label)
+  const [draftContent, setDraftContent] = useState(fullContent)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
+  const dirty = draftLabel !== label || draftContent !== fullContent
+
+  const handleSave = () => {
+    updateMacraNode(nodeId, {
+      label: draftLabel,
+      content: draftContent,
+      fullContent: draftContent
+    } as Partial<Parameters<typeof updateMacraNode>[1]>)
+    setSavedAt(Date.now())
+  }
+  const handleReset = () => {
+    setDraftLabel(label)
+    setDraftContent(fullContent)
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mb-1.5">
+          标题
+        </label>
+        <input
+          type="text"
+          value={draftLabel}
+          onChange={(e) => setDraftLabel(e.target.value)}
+          className="w-full px-3 py-2 border-[1px] border-stratum-line bg-white text-stratum-ink font-display font-[600] text-[14px] focus:outline-none focus:border-stratum-navy"
+          maxLength={120}
+        />
+      </div>
+      <div>
+        <label className="block font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mb-1.5">
+          完整内容（支持 Markdown）
+        </label>
+        <textarea
+          value={draftContent}
+          onChange={(e) => setDraftContent(e.target.value)}
+          className="w-full min-h-[260px] px-3 py-2 border-[1px] border-stratum-line bg-white text-stratum-ink font-body text-[12.5px] leading-[1.6] focus:outline-none focus:border-stratum-navy resize-vertical"
+          placeholder="支持 Markdown · 引用使用 [[ref:docId#chunkId]] 格式"
+        />
+        <p className="font-instr text-[9px] uppercase tracking-kicker text-stratum-muted mt-1">
+          {draftContent.length} 字 · 修改后只在本地生效，下次 BMC 流程会覆盖
+        </p>
+      </div>
+      <div className="flex items-center gap-2 pt-2 border-t-[0.5px] border-stratum-line">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!dirty}
+          className="px-3 py-1.5 bg-stratum-navy text-white font-instr text-[10px] uppercase tracking-kicker disabled:opacity-30 disabled:cursor-not-allowed hover:bg-stratum-navy-soft transition-colors"
+        >
+          保存到画布
+        </button>
+        <button
+          type="button"
+          onClick={handleReset}
+          disabled={!dirty}
+          className="px-3 py-1.5 bg-transparent text-stratum-muted font-instr text-[10px] uppercase tracking-kicker disabled:opacity-30 hover:text-stratum-navy"
+        >
+          撤销
+        </button>
+        {savedAt && !dirty ? (
+          <span className="ml-auto font-instr text-[9px] uppercase tracking-kicker text-stratum-ok">
+            已保存
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * P12 · 资源 tab. Two sources surfaced:
+ *   1. KB chunk citations parsed from `[[ref:docId#snippetId]]` patterns
+ *      in fullContent. Group by docId, show count of times referenced.
+ *   2. Free-text URLs from the cell content (RFC-3986 http(s) only).
+ *
+ * Click a citation → opens the Evidence drawer (existing surface) so
+ * the user can read the underlying KB chunk. URLs open in new tab.
+ */
+function ResourcesPanel({
+  fullContent,
+  metadata,
+}: {
+  fullContent: string
+  metadata: Record<string, unknown> | undefined
+}) {
+  const openEvidenceDrawer = useComfyStore((s) => s.openEvidenceDrawer)
+
+  // 1. Parse [[ref:docId#snippetId]] citations
+  const citations = (() => {
+    const matches = Array.from(fullContent.matchAll(/\[\[ref:([^\]#]+)#([^\]]+)\]\]/g))
+    const groups = new Map<string, { docId: string; snippetIds: Set<string>; count: number }>()
+    for (const m of matches) {
+      const [, docId, snippetId] = m
+      const g = groups.get(docId) ?? { docId, snippetIds: new Set<string>(), count: 0 }
+      g.snippetIds.add(snippetId)
+      g.count++
+      groups.set(docId, g)
+    }
+    return Array.from(groups.values()).sort((a, b) => b.count - a.count)
+  })()
+
+  // 2. Extract URLs (markdown link or bare http)
+  const urls = (() => {
+    const set = new Set<string>()
+    // Markdown [text](url)
+    for (const m of fullContent.matchAll(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/g)) set.add(m[1])
+    // Bare https://...
+    for (const m of fullContent.matchAll(/(?<![\(\["])https?:\/\/[^\s)\]\"]+/g)) set.add(m[0])
+    return Array.from(set).slice(0, 20)
+  })()
+
+  // 3. Optional: any URL stored in metadata.sourceUrl etc.
+  const metadataUrls: string[] = []
+  if (metadata && typeof metadata === 'object') {
+    for (const v of Object.values(metadata)) {
+      if (typeof v === 'string' && /^https?:\/\//.test(v)) metadataUrls.push(v)
+    }
+  }
+
+  if (citations.length === 0 && urls.length === 0 && metadataUrls.length === 0) {
+    return (
+      <Placeholder
+        icon={<Link2 className="w-6 h-6 text-stratum-muted" strokeWidth={1.25} />}
+        title="本节点暂无引用资源"
+        detail="生成的 BMC 节点会引用 KB 文档；外部链接也会在此列出"
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      {citations.length > 0 ? (
+        <div>
+          <h4 className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mb-2">
+            KB 引用 · {citations.length} 篇文档 / {citations.reduce((s, c) => s + c.count, 0)} 处引用
+          </h4>
+          <ul className="space-y-1.5">
+            {citations.map((c) => (
+              <li key={c.docId} className="border-[0.5px] border-stratum-line bg-white px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[11px] tabular-nums text-stratum-ink truncate">
+                    {c.docId}
+                  </span>
+                  <span className="font-instr text-[9px] uppercase tracking-kicker text-stratum-muted">
+                    {c.count} 处 · {c.snippetIds.size} chunk
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstSnippetId = Array.from(c.snippetIds)[0]
+                    openEvidenceDrawer(`${c.docId}#${firstSnippetId}`)
+                  }}
+                  className="mt-1 font-instr text-[10px] uppercase tracking-kicker text-stratum-blue hover:text-stratum-navy"
+                >
+                  查看证据 →
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {(urls.length > 0 || metadataUrls.length > 0) ? (
+        <div>
+          <h4 className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mb-2">
+            外部链接 · {urls.length + metadataUrls.length}
+          </h4>
+          <ul className="space-y-1">
+            {[...urls, ...metadataUrls].map((url, i) => (
+              <li key={`${url}-${i}`} className="border-[0.5px] border-stratum-line bg-white px-3 py-1.5">
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block font-mono text-[11px] text-stratum-blue hover:text-stratum-navy break-all"
+                >
+                  {url}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   )
 }
