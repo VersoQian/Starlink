@@ -50,6 +50,23 @@ questions about specific BMC cells (use scaffold='why' or
 'evidence-needed' on a chosen cell), or suggest @critic / @synthesizer
 mentions for cross-cell analysis. NEVER suggest /wizard if BMC cells exist.
 
+USING THE USER'S LONG-TERM PROFILE (when present):
+The "用户长期画像" section, if shown, is grouped by axis:
+- **领域背景** (domain / experience) — what the user knows. Use this to
+  CALIBRATE technical depth: a "B2B SaaS 5y" user can handle "ARR /
+  CAC / churn" terminology directly; a "first-time founder" needs
+  plainer language. NEVER quote the trait back to the user.
+- **思维风格** (style / preference) — how the user reasons. Use this
+  to MATCH framing: "data-driven" users respond better to scaffold='evidence-needed'
+  with a metric in mind; "narrative-first" users respond better to scaffold='why'.
+- **盲点 / 约束** (blind-spot / constraint) — recurring gaps and self-imposed
+  limits. STRONG signal: prefer scaffold='evidence-needed' or scaffold='meta'
+  to surface the gap, but framed gently — "你之前几次都没提到 X，是因为不重要还是
+  暂时没数据？" rather than "你又漏了 X". A blind-spot with confidence ≥ 0.7
+  is worth one direct probe per session.
+- Confidence: ≥0.7 traits weight heavily, 0.5–0.69 are soft hints.
+  Below 0.5 won't be shown.
+
 OUTPUT: a JSON object exactly like:
   { "scaffold": "<one of the 5 kinds>", "content": "<your question, 1-3 short paragraphs>" }
 
@@ -129,9 +146,19 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
   const graduationLine = (() => {
     const turns = userTurnCount ?? 0
     const bmcCardCount = canvas.nodes.filter((n) => n.kind === 'cc-bmc-card').length
+    const conflictCount = canvas.nodes.filter((n) => n.kind === 'conflict-alert').length
+    const insightCount = canvas.nodes.filter((n) => n.kind === 'insight-note').length
     if (bmcCardCount > 0) {
       // Past graduation — switch to "examine cells critically" guidance.
-      return `\n\n## 当前阶段（重要）\n画布已有 ${bmcCardCount} 个 BMC cell，用户已完成探索阶段。**禁止建议 /wizard** 或说"画布空白"。本次反思应聚焦于 BMC cell 内容本身：scaffold='evidence-needed'（指出某个具体 cell 缺事实）、scaffold='why'（追问某个 cell 的逻辑）、或 scaffold='meta'（建议 @critic 检查跨 cell 一致性）。`
+      // P12 · also surface the ATTACK SURFACE: how many critic-found
+      // conflicts and synthesizer-found insights are sitting on the
+      // canvas right now. The coach should anchor probing questions on
+      // these rather than picking a random cell.
+      const attackSurface = conflictCount + insightCount
+      const surfaceLine = attackSurface > 0
+        ? ` 画布上还有 ${conflictCount} 条 critic 冲突 + ${insightCount} 条 synthesizer 洞察未被用户讨论 — 优先 anchor 你的问题到其中一条具体的 conflict-alert 或 insight-note 上（按 label 引用），而不是泛问某个 cell。`
+        : ' 没有未消化的 conflict / insight，本次可建议用户 @critic 或 @synthesizer 主动产出新的反思素材。'
+      return `\n\n## 当前阶段（重要）\n画布已有 ${bmcCardCount} 个 BMC cell，用户已完成探索阶段。**禁止建议 /wizard** 或说"画布空白"。本次反思应聚焦于 BMC cell 内容本身：scaffold='evidence-needed'（指出某个具体 cell 缺事实）、scaffold='why'（追问某个 cell 的逻辑）、或 scaffold='meta'（建议 @critic 检查跨 cell 一致性）。${surfaceLine}`
     }
     const canvasIsSparse = canvas.nodes.length < 3
     if (turns >= 4 && canvasIsSparse) {

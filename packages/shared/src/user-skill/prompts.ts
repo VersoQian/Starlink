@@ -255,6 +255,30 @@ function sanitizeForPromptInjection(input: string, maxLen = 240): string {
 }
 
 /**
+ * Group skills by their primary tag axis. If a skill has tags from
+ * multiple axes (e.g. ["domain", "experience"]), it lands in the FIRST
+ * matching group in AXIS_ORDER — keeps the renderer deterministic and
+ * avoids double-counting in the rendered block.
+ *
+ * Skills with no tags or only unrecognized tags fall into '其他特征'
+ * so they don't disappear silently.
+ */
+const AXIS_ORDER: Array<{ key: string; label: string; matches: string[] }> = [
+  { key: 'domain', label: '领域背景', matches: ['domain', 'experience'] },
+  { key: 'style', label: '思维风格', matches: ['style', 'preference'] },
+  { key: 'blind-spot', label: '盲点 / 约束', matches: ['blind-spot', 'constraint'] }
+]
+const OTHER_LABEL = '其他特征'
+
+function pickAxis(tags: string[]): string {
+  const lower = new Set(tags.map((t) => t.toLowerCase()))
+  for (const axis of AXIS_ORDER) {
+    if (axis.matches.some((m) => lower.has(m))) return axis.key
+  }
+  return OTHER_LABEL
+}
+
+/**
  * Render an array of `UserSkillPayload`-like rows (as fetched from
  * `memory_items` and ranked) into the markdown block injected into coach /
  * wizard / BMC-generator prompts.
@@ -266,6 +290,13 @@ function sanitizeForPromptInjection(input: string, maxLen = 240): string {
  * P11.18 · every interpolated field is run through
  * `sanitizeForPromptInjection` first so a malicious memory row can't
  * break out of its bullet to emit fake instructions.
+ *
+ * P12 · skills are grouped by primary tag axis (领域背景 / 思维风格 /
+ * 盲点·约束 / 其他特征). The downstream coach prompt explicitly references
+ * these groups so the LLM can target the right scaffold type per axis
+ * (e.g. blind-spot → evidence-needed, domain → adjust technical depth).
+ * Single-skill / single-axis collections collapse back to a flat bullet
+ * list so we don't waste prompt budget on degenerate headers.
  */
 export function renderUserSkillBlock(
   skills: Array<{
@@ -277,7 +308,8 @@ export function renderUserSkillBlock(
   }>
 ): string {
   if (!skills.length) return ''
-  const lines = skills.map((s) => {
+
+  const renderOne = (s: typeof skills[number]) => {
     const scopeTag = s.scope === 'user' ? '全局' : '本 idea'
     const safeTitle = sanitizeForPromptInjection(s.title, 60)
     const safeContent = sanitizeForPromptInjection(s.content, 240)
@@ -285,6 +317,33 @@ export function renderUserSkillBlock(
       ? Math.max(0, Math.min(1, s.confidence)).toFixed(2)
       : '0.00'
     return `- **${safeTitle}** [${scopeTag} · 置信 ${safeConfidence}] — ${safeContent}`
-  })
-  return lines.join('\n')
+  }
+
+  // Group by axis. Use a Map keyed by the AXIS_ORDER key (or OTHER_LABEL)
+  // so iteration order is deterministic.
+  const groups = new Map<string, typeof skills>()
+  for (const s of skills) {
+    const axis = pickAxis(s.tags ?? [])
+    const bucket = groups.get(axis) ?? []
+    bucket.push(s)
+    groups.set(axis, bucket)
+  }
+
+  // If everything fell into one group, render flat (no header) — keeps
+  // the prompt compact in the common 1-3-skill case.
+  if (groups.size <= 1) {
+    return skills.map(renderOne).join('\n')
+  }
+
+  const sections: string[] = []
+  for (const axis of AXIS_ORDER) {
+    const bucket = groups.get(axis.key)
+    if (!bucket || bucket.length === 0) continue
+    sections.push(`### ${axis.label}\n${bucket.map(renderOne).join('\n')}`)
+  }
+  const other = groups.get(OTHER_LABEL)
+  if (other && other.length > 0) {
+    sections.push(`### ${OTHER_LABEL}\n${other.map(renderOne).join('\n')}`)
+  }
+  return sections.join('\n\n')
 }
