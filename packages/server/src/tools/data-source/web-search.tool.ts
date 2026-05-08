@@ -398,10 +398,32 @@ export default class WebSearchTool extends BaseTool {
       }
     }
 
+    // P11.18 fix · graceful soft-fail. Previously this yielded an
+    // `error` ToolMessage which propagated as an exception in the
+    // ReAct loop, causing the agent to abort or loop on retries.
+    // In environments without TAVILY/BRAVE/SERPAPI keys (most dev
+    // setups) AND blocked DuckDuckGo (corporate firewall, China GFW),
+    // every web-search call would push the SLO error rate to 100%.
+    //
+    // Now: emit a successful empty-result payload + a `text` warning,
+    // so the agent can continue reasoning without web evidence rather
+    // than crash. The SLO records 'success' (no error), but the
+    // `degraded: true` flag in the payload lets downstream code
+    // distinguish "found nothing" from "search failed gracefully".
     yield {
-      type: 'error',
-      error: `所有 provider 都失败：${lastErr?.message ?? '未知错误'}`,
-      retryable: true,
+      type: 'text',
+      content: `网络搜索不可用（${lastErr?.message ?? '所有 provider 失败'}）。建议在 .env 配置 TAVILY_API_KEY 启用真实搜索；当前 agent 将依赖知识库 / 记忆 / 已有上下文继续推理。`,
+    }
+    yield {
+      type: 'json',
+      data: {
+        results: [],
+        provider: 'none',
+        cached: false,
+        query,
+        degraded: true,
+        degradedReason: lastErr?.message ?? '所有 provider 失败',
+      },
     }
   }
 }
