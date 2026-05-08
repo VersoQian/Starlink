@@ -1172,10 +1172,32 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
 
   setWorkspaceId: (workspaceId) => {
     if (get().workspaceId === workspaceId) return
-    set({ workspaceId })
-    // P10 fix · load persisted chat history for this workspace from
-    // localStorage. Without this, every page reload wipes chatMessages
-    // back to just the welcome bubble (createInitialChatMessages).
+    // P11.18 fix · CRITICAL workspace isolation. Previously this only
+    // updated `workspaceId` and (if localStorage hit) replaced
+    // chatMessages. If the new workspace had NO localStorage entry,
+    // chatMessages stayed as the OLD workspace's conversation. Same for
+    // macraNodes / nodes / edges → user navigated to /canvas/proj-001
+    // and saw chat from /canvas/coffee-kb-... or whatever last workspace.
+    //
+    // Now: ALWAYS reset to initial state on workspace change. If a
+    // persisted bucket exists for the new workspace, replace; otherwise
+    // start fresh. The hydrateFromConversation() flow downstream then
+    // pulls server-side BMC nodes via workspaceGraph query.
+    set({
+      workspaceId,
+      chatMessages: createInitialChatMessages(),
+      macraNodes: new Map(),
+      nodes: [],
+      edges: [],
+      selectedNodeIds: [],
+      detailPanel: { isOpen: false, nodeId: null },
+      focusedConflictId: null,
+      socraticTurnCounter: 0,
+      currentAgent: null,
+      pendingInterrupt: null
+    })
+
+    // Then attempt to hydrate chat from localStorage for this workspace.
     if (typeof window !== 'undefined') {
       try {
         const raw = window.localStorage.getItem(`starlink_conversations_${workspaceId}`)
