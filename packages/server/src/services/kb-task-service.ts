@@ -134,6 +134,42 @@ function rowToKb(row: Record<string, unknown>): GatewayKnowledgeBase {
 // Public API (signatures unchanged)
 // =============================================================================
 
+/**
+ * P11.18 fix G · cross-workspace KB-id pollution guard.
+ *
+ * Throws if (workspaceId, kbId) doesn't match an existing
+ * kb_definitions row, OR if the KB exists but belongs to a
+ * different workspace. Without this, a caller authenticated
+ * for workspace A could mutate kbId="kb-from-workspace-B" via
+ * addKnowledgeSeed / addKnowledgeFile / importKnowledgeUrl —
+ * resulting in kb_chunks rows with workspace_id=A and
+ * owner_user_id sourced from B's kb_definitions, polluting
+ * KB B's chunk space.
+ *
+ * "Not found" and "wrong workspace" both throw with the same
+ * generic FORBIDDEN message so the caller can't probe whether
+ * a kbId exists in some other workspace.
+ */
+async function assertKbBelongsToWorkspace(
+  workspaceId: string,
+  kbId: string
+): Promise<void> {
+  await ensureKbDefinitionsTable()
+  const result = await pool.query(
+    `SELECT workspace_id FROM kb_definitions WHERE id = $1 LIMIT 1`,
+    [kbId]
+  )
+  const row = result.rows[0] as { workspace_id?: string } | undefined
+  if (!row || row.workspace_id !== workspaceId) {
+    auditLogger.warn({
+      action: 'kb-task-service.assertKbBelongsToWorkspace.denied',
+      workflowId: workspaceId,
+      metadata: { kbId, found: !!row, ownerWorkspace: row?.workspace_id ?? null }
+    })
+    throw new Error('FORBIDDEN: kb does not belong to this workspace')
+  }
+}
+
 export async function listKnowledgeBases(
   workspaceId: string
 ): Promise<GatewayKnowledgeBase[]> {
@@ -627,6 +663,7 @@ export async function addKnowledgeFile(
   const now = new Date().toISOString()
   const title = (fileName || `file-${taskId.slice(0, 6)}`).slice(0, 200)
   try {
+    await assertKbBelongsToWorkspace(workspaceId, kbId)
     if (!content) {
       throw new Error('addKnowledgeFile: empty content')
     }
@@ -689,6 +726,7 @@ export async function addKnowledgeSeed(
   const now = new Date().toISOString()
   const title = `seed-${taskId.slice(0, 6)}`
   try {
+    await assertKbBelongsToWorkspace(workspaceId, kbId)
     const { docId, chunkCount } = await getKbStore().addDocument({
       kbId,
       workspaceId,
@@ -747,6 +785,7 @@ export async function importKnowledgeUrl(
   const taskId = nanoid()
   const now = new Date().toISOString()
   try {
+    await assertKbBelongsToWorkspace(workspaceId, kbId)
     const res = await fetch(url, { redirect: 'follow' })
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
     const raw = await res.text()
