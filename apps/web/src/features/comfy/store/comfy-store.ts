@@ -1183,6 +1183,16 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
     // persisted bucket exists for the new workspace, replace; otherwise
     // start fresh. The hydrateFromConversation() flow downstream then
     // pulls server-side BMC nodes via workspaceGraph query.
+    //
+    // P11.18 fix D · also tear down any active GraphQL subscription
+    // before switching. Without this, the previous workspace's
+    // watcher keeps consuming WebSocket events and writing them into
+    // the NEW workspace's state (graph nodes, chat messages, etc.)
+    // — silent cross-workspace data leak.
+    if (activeSubscription) {
+      activeSubscription()
+      activeSubscription = null
+    }
     set({
       workspaceId,
       chatMessages: createInitialChatMessages(),
@@ -1194,7 +1204,8 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       focusedConflictId: null,
       socraticTurnCounter: 0,
       currentAgent: null,
-      pendingInterrupt: null
+      pendingInterrupt: null,
+      currentConversationId: null
     })
 
     // Then attempt to hydrate chat from localStorage for this workspace.
@@ -2207,6 +2218,14 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId),
       })
 
+      // P11.18 fix D · register the watcher's cancel into the module
+      // singleton so workspace switches and explicit teardowns can
+      // call it. Previously this watcher was orphaned — only its
+      // own `done` promise could end it, which means workspace
+      // switches kept the old subscription alive and routed events
+      // into the new workspace's state.
+      activeSubscription = watcher.cancel
+
       // Tear watcher when conversation ends. Don't block the action.
       // P9 Block 4c · log subscription death so silent disconnects don't
       // leave Coach hanging at "thinking" forever with no diagnostic.
@@ -2216,6 +2235,11 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         const cur = get().currentConversationId
         if (cur === running.id) {
           set({ currentConversationId: null })
+        }
+        // Self-deregister so a later workspace switch / new session
+        // start doesn't double-cancel a dead subscription.
+        if (activeSubscription === watcher.cancel) {
+          activeSubscription = null
         }
       })
 
