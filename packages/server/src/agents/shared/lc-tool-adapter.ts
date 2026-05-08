@@ -73,10 +73,16 @@ function jsonSchemaToZod(
 
 export interface AdapterOptions {
   /**
-   * Phase B: stub context factory. Phase 4.x will wire workspaceId/userId
-   * from config.configurable so tools get real context per call.
+   * Per-call ToolContext factory. Receives the LangChain runConfig
+   * (forwarded from invokeRegisteredAgent) so the factory can pull
+   * workspaceId / userId / executionId out of `configurable` and
+   * hand the tool a real context instead of an empty stub.
+   *
+   * P11.18 fix: previously typed `() => ToolContext` and the only
+   * implementation passed `{}` → every tool saw _context.workspaceId
+   * === '' and KB-related searches hit kbId='default' empty path.
    */
-  contextFactory: () => ToolContext
+  contextFactory: (runConfig: RunConfigShape) => ToolContext
   /**
    * B4 hardening (2026-04-29): when set, every tool invocation emits a
    * `action-invocation` handoff before the call and `action-result` after,
@@ -89,8 +95,14 @@ export interface AdapterOptions {
   ownerAgentId?: string
 }
 
-interface RunConfigShape {
-  configurable?: { thread_id?: string }
+export interface RunConfigShape {
+  configurable?: {
+    thread_id?: string
+    workspaceId?: string
+    userId?: string
+    executionId?: string
+    agent_id?: string
+  }
 }
 
 export function toLangchainTool(
@@ -134,7 +146,7 @@ export function toLangchainTool(
       let result: unknown = null
       let lastError: string | null = null
       try {
-        for await (const msg of baseTool.execute(input, opts.contextFactory())) {
+        for await (const msg of baseTool.execute(input, opts.contextFactory(runConfig ?? {}))) {
           const m = msg as ToolMessage
           if (m.type === 'json') {
             result = m.data
@@ -215,9 +227,15 @@ export function toLangchainTools(
 }
 
 /**
- * Build a placeholder ToolContext from a config.configurable object. Phase B
- * gives stubs; Phase 4.x will replace with real values once context plumbing
- * lands.
+ * Build a ToolContext from a LangChain runConfig.configurable bag.
+ *
+ * The configurable object is populated by invokeRegisteredAgent /
+ * runCritic in business-langgraph.ts: { thread_id, agent_id,
+ * workspaceId, userId, executionId, ... }. This is the only path
+ * tool sub-agents (called via lcTool wrapper) see real workspace
+ * scope — without it, KB / memory / web-search tools fall back
+ * to defaults and either fail or pollute logs with empty
+ * workflowId fields.
  */
 export function buildToolContextFromConfigurable(
   cfg: Record<string, unknown>,
@@ -226,7 +244,7 @@ export function buildToolContextFromConfigurable(
   return {
     workspaceId: (cfg['workspaceId'] as string) ?? '',
     userId: (cfg['userId'] as string) ?? '',
-    executionId: (cfg['executionId'] as string) ?? '',
+    executionId: (cfg['executionId'] as string) ?? (cfg['thread_id'] as string) ?? '',
     state: (cfg['state'] as Record<string, unknown>) ?? {},
     credentials: (cfg['credentials'] as Record<string, string>) ?? {},
     abortSignal: signal,

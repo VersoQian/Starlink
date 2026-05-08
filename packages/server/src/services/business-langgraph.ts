@@ -1625,6 +1625,13 @@ ${snippets}
         configurable: {
           thread_id: state.traceId,
           agent_id: agentId,
+          // P11.18 · plumb workspaceId/userId so the lc-tool-adapter
+          // contextFactory can hand BMC sub-agent tools (knowledge-base,
+          // memory-search, web-search, dimension-actions) a real
+          // ToolContext instead of an empty stub.
+          workspaceId: state.workspaceId,
+          userId: state.userId,
+          executionId: state.traceId,
           prompt_vars: decision?.prompt_vars ?? {},
           overrides: decision?.overrides ?? {}
         },
@@ -3212,7 +3219,13 @@ ${conflictDigest || '（无冲突）'}
             // with the main graph's state.
             configurable: {
               thread_id: `critic-${state.userId}-${state.traceId}-r${state.roundNumber}`,
-              agent_id: 'critic-agent'
+              agent_id: 'critic-agent',
+              // P11.18 · same plumbing as invokeRegisteredAgent: critic
+              // tools (knowledge-base lookup, etc.) need real workspace
+              // scope or they fall back to empty/global searches.
+              workspaceId: state.workspaceId,
+              userId: state.userId,
+              executionId: state.traceId
             },
             tags: ['critic-agent', 'bmc']
           }

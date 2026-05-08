@@ -39,7 +39,17 @@ export function resolveLangchainToolsForAgent(
   }
   const { tools: baseTools } = resolveToolNames(profile.tools, agentToolRegistry)
   return toLangchainTools(baseTools, {
-    contextFactory: () => buildToolContextFromConfigurable({}, new AbortController().signal),
+    // P11.18 fix: per-call factory pulls workspaceId / userId from
+    // the LangChain runConfig.configurable bag that BusinessLangGraph
+    // populates at subgraph.invoke time (see invokeRegisteredAgent +
+    // runCritic). Previously this was `() => ...({}, ...)` which
+    // forced every tool to see _context.workspaceId === '' and made
+    // KB / memory / web-search lookups silently empty.
+    contextFactory: (runConfig) =>
+      buildToolContextFromConfigurable(
+        (runConfig?.configurable ?? {}) as Record<string, unknown>,
+        new AbortController().signal
+      ),
     // B4 hardening: tag every tool wrapped here with the calling agent's
     // id, so action-invocation / action-result handoff events show the
     // owner without us having to thread it through LangGraph's runConfig.
