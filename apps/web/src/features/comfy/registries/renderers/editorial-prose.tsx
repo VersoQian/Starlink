@@ -90,8 +90,18 @@ export function EditorialProse({ content, density = 'reading', paragraphProcesso
               </h3>
             ),
 
+          // P12 fix · h4 was styled as a "kicker eyebrow"
+          // (font-mono / 10px / uppercase / muted gray) which made
+          // sense for English mode but BMC agents emit h4 for
+          // genuine numbered sub-headers in Chinese ("1. V2EX 技术
+          // 社区精准投放", "3. B 站编程类 UP 主合作测评"). Mono+
+          // uppercase has no effect on CJK characters, and muted-gray
+          // (#6B7280) on the drawer's stratum-surface-low (#F2F4F6)
+          // background was nearly unreadable. Switch to the same
+          // display-serif weight as h3 but smaller so the visual
+          // hierarchy h2 > h3 > h4 still works.
           h4: ({ children }) => (
-            <h4 className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-stratum-muted mt-4 mb-1.5">
+            <h4 className="font-display font-[600] text-[13px] leading-[1.35] tracking-tight text-stratum-navy mt-3 mb-1">
               {children}
             </h4>
           ),
@@ -119,8 +129,13 @@ export function EditorialProse({ content, density = 'reading', paragraphProcesso
 
           li: ({ children }) => {
             const processed = listItemProcessor ? listItemProcessor(children) : children
+            // P12 fix · explicit text-stratum-ink so spans inside the
+            // li (especially "<strong>label</strong><span>: value</span>"
+            // patterns the BMC agents emit) inherit the same dark color.
+            // Without this, some browsers / certain ancestor classes
+            // caused the plain-text spans to render at a faded weight.
             return (
-              <li className={`${isReading ? 'my-2' : 'my-0.5'} editorial-list-item relative`}>
+              <li className={`${isReading ? 'my-2' : 'my-0.5'} editorial-list-item relative text-stratum-ink`}>
                 {processed}
               </li>
             )

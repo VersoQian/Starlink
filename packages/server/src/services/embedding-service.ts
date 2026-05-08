@@ -75,6 +75,55 @@ export function describeEmbeddingConfig(): {
   }
 }
 
+/**
+ * P12 fix M3 · in-memory LRU cache for query-side embeddings.
+ *
+ * Wizard prefill makes ~25 embedText() calls per workspace — 7 steps
+ * × ~3.5 phrasing variants (P12 fix M4). The seed queries are STATIC
+ * (defined in wizard-prefill-service.STEP_SEEDS), so the FIRST
+ * wizard pays the cost and every subsequent wizard hits cache.
+ *
+ * Aliyun text-embedding-v4 serializes per-API-key, so even with
+ * Promise.all the wall-clock was ~26s for 25 unique queries. With
+ * cache: first wizard ~26s (unchanged), next wizards ~ <500ms (PG
+ * vector search only, no embedding API).
+ *
+ * Also helps repeated user queries with similar phrasing (e.g. typing
+ * the same @-mention twice while iterating).
+ *
+ * LRU is keyed by `${redactedText}::${dimensions}` so a dimension
+ * config change auto-invalidates. Capacity 500 entries × ~6KB per
+ * 1536d vector = ~3MB; trivial. TTL 1h so stale embeddings don't
+ * survive a model swap (rare).
+ */
+const EMBEDDING_CACHE_MAX = 500
+const EMBEDDING_CACHE_TTL_MS = 60 * 60 * 1000
+const embeddingCache = new Map<string, { result: EmbeddingResult; expiresAt: number }>()
+
+function cacheGet(key: string): EmbeddingResult | null {
+  const entry = embeddingCache.get(key)
+  if (!entry) return null
+  if (entry.expiresAt < Date.now()) {
+    embeddingCache.delete(key)
+    return null
+  }
+  // LRU touch — re-insert moves to end of Map iteration order.
+  embeddingCache.delete(key)
+  embeddingCache.set(key, entry)
+  return entry.result
+}
+
+function cacheSet(key: string, result: EmbeddingResult): void {
+  if (embeddingCache.has(key)) embeddingCache.delete(key)
+  embeddingCache.set(key, { result, expiresAt: Date.now() + EMBEDDING_CACHE_TTL_MS })
+  // Evict oldest entries when capacity exceeded.
+  while (embeddingCache.size > EMBEDDING_CACHE_MAX) {
+    const oldest = embeddingCache.keys().next().value
+    if (oldest === undefined) break
+    embeddingCache.delete(oldest)
+  }
+}
+
 export async function embedText(text: string): Promise<EmbeddingResult> {
   const normalizedText = normalizeWhitespace(text).slice(0, MAX_EMBEDDING_TEXT_LENGTH)
   // F5 · PII redaction (opt-in via USER_SKILL_REDACT_PII_ON_EMBED=true).
@@ -86,9 +135,16 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
   const dimensions = getEmbeddingDimensions()
   const apiKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY
 
+  // P12 · cache check before any I/O.
+  const cacheKey = `${redacted}::${dimensions}`
+  const cached = cacheGet(cacheKey)
+  if (cached) return cached
+
   if (apiKey && redacted && !isLocalHashForced()) {
     try {
-      return await embedRemote(redacted, apiKey, dimensions)
+      const result = await embedRemote(redacted, apiKey, dimensions)
+      cacheSet(cacheKey, result)
+      return result
     } catch (error) {
       // Throttled: log every 1st + every 100th failure. Production with
       // a misconfigured embedding endpoint would otherwise drown the log.
@@ -102,12 +158,16 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
     }
   }
 
-  return {
+  const result: EmbeddingResult = {
     vector: createLocalEmbedding(redacted, dimensions),
     provider: 'local-hash',
     model: `local-hash-${dimensions}`,
     dimensions
   }
+  // Cache local-hash too — same key would have produced the same hash
+  // anyway, but the cache lookup saves the createLocalEmbedding work.
+  cacheSet(cacheKey, result)
+  return result
 }
 
 export function getEmbeddingDimensions() {
