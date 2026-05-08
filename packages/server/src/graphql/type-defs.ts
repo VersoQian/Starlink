@@ -66,6 +66,19 @@ export const typeDefs = gql`
     metadata: JSON
   }
 
+  """
+  P12 · single KB chunk lookup result. Used by the Evidence drawer
+  to show the supporting text for a [[ref:docId#chunk-N]] citation.
+  """
+  type KbChunkLookupResult {
+    docId: ID!
+    chunkIndex: Int!
+    content: String!
+    docTitle: String
+    kbId: ID!
+    kbName: String
+  }
+
   type EvidenceRef {
     evidenceId: ID!
     docId: ID!
@@ -543,6 +556,14 @@ export const typeDefs = gql`
     kbDocuments(workspaceId: ID!, kbId: ID!): [KbDocument!]!
     knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!
     knowledgeBaseSearch(workspaceId: ID!, kbId: ID!, query: String!, topK: Int): [KnowledgeEvidence!]!
+    """
+    P12 · fetch a specific KB chunk by docId (+ optional chunkIndex)
+    so the Evidence drawer can show the full snippet text when the
+    user clicks a [[ref:docId#chunk-N]] citation. Returns null if the
+    chunk doesn't exist or the caller has no read access. Auth: caller
+    must have workspace.read on the workspace owning the KB document.
+    """
+    kbChunkLookup(workspaceId: ID!, docId: ID!, chunkIndex: Int): KbChunkLookupResult
     workspaces: [WorkspaceDirectoryItem!]!
     workspaceAssets(workspaceId: ID!): [WorkspaceAsset!]!
     workspaceMetadataHistory(workspaceId: ID!): [WorkspaceMetadataHistoryEntry!]!

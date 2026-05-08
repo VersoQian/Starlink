@@ -30,6 +30,7 @@ import {
   listKnowledgeBaseDocuments,
   publishKnowledgeBase,
   searchKnowledgeBase,
+  lookupKbChunk,
   unbindKbFromAgent,
   updateKnowledgeBaseVisibility
 } from '../services/kb-task-service.js'
@@ -315,6 +316,22 @@ export const resolvers = {
       return await resolveOrThrow(async () => {
         await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
         return await getKnowledgeBaseStatus(args.workspaceId, args.kbId)
+      })
+    },
+    /**
+     * P12 · single-chunk lookup. The Evidence drawer calls this when
+     * the user clicks a [[ref:docId#chunk-N]] citation: it parses N
+     * out of the snippetId and asks for that exact chunk's content.
+     */
+    kbChunkLookup: async (
+      _: unknown,
+      args: { workspaceId: string; docId: string; chunkIndex?: number | null },
+      ctx: GraphQLContext
+    ) => {
+      return await resolveOrThrow(async () => {
+        await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read')
+        const idx = typeof args.chunkIndex === 'number' ? args.chunkIndex : 0
+        return await lookupKbChunk(args.workspaceId, args.docId, idx)
       })
     },
     knowledgeBaseSearch: async (

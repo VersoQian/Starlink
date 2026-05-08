@@ -931,6 +931,88 @@ export async function importKnowledgeUrl(
 }
 
 /**
+ * P12 · single-chunk lookup by (docId, chunkIndex).
+ *
+ * Used by the Evidence drawer when the user clicks a
+ * [[ref:docId#chunk-N]] citation. The frontend isn't streaming a
+ * conversation at the time, so its in-memory `knowledgeEvidence`
+ * array doesn't have the chunk — pull it directly from kb_chunks.
+ *
+ * Returns null on:
+ *   - workspaceId / docId mismatch (chunk belongs to another tenant)
+ *   - chunk doesn't exist
+ *   - PG error (best-effort, logged but not thrown so the drawer can
+ *     gracefully show "snippet unavailable")
+ *
+ * Authorization: the resolver must call assertWorkspaceAccess
+ * before us. We additionally verify workspace_id ownership on the
+ * row itself.
+ */
+export async function lookupKbChunk(
+  workspaceId: string,
+  docId: string,
+  chunkIndex: number
+): Promise<{
+  docId: string
+  chunkIndex: number
+  content: string
+  docTitle: string | null
+  kbId: string
+  kbName: string | null
+} | null> {
+  try {
+    const result = await pool.query(
+      `SELECT
+         c.content       AS content,
+         c.chunk_index   AS chunk_index,
+         c.kb_id         AS kb_id,
+         d.title         AS doc_title,
+         d.workspace_id  AS workspace_id,
+         k.name          AS kb_name
+       FROM kb_chunks c
+       JOIN kb_documents d ON d.id = c.doc_id
+       LEFT JOIN kb_definitions k ON k.id = c.kb_id
+       WHERE c.doc_id = $1 AND c.chunk_index = $2
+       LIMIT 1`,
+      [docId, chunkIndex]
+    )
+    const row = result.rows[0] as
+      | {
+          content: string
+          chunk_index: number
+          kb_id: string
+          doc_title: string | null
+          workspace_id: string
+          kb_name: string | null
+        }
+      | undefined
+    if (!row) return null
+    if (row.workspace_id !== workspaceId) {
+      // Tenant isolation — caller has access to workspaceId, but the
+      // chunk lives in a different workspace. Return null without
+      // distinguishing this from "not found" so the caller can't
+      // probe foreign-workspace KBs.
+      return null
+    }
+    return {
+      docId,
+      chunkIndex: row.chunk_index,
+      content: row.content,
+      docTitle: row.doc_title,
+      kbId: row.kb_id,
+      kbName: row.kb_name
+    }
+  } catch (err) {
+    auditLogger.warn({
+      action: 'kb-task-service.lookupKbChunk.failed',
+      workflowId: workspaceId,
+      metadata: { docId, chunkIndex, err: err instanceof Error ? err.message : String(err) }
+    })
+    return null
+  }
+}
+
+/**
  * Strip script/style + tags + collapse whitespace. NOT a real HTML parser
  * but adequate for the "fetch a blog post and ingest its prose" use case.
  * For PDFs / structured docs, a real extractor goes here in follow-up.

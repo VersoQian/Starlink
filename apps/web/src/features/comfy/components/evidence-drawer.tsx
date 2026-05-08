@@ -29,6 +29,23 @@ const CARDS_REFERENCING_QUERY = /* GraphQL */ `
   }
 `
 
+// P12 · lookup the original chunk content when the local
+// knowledgeEvidence store doesn't have it (typical case: user
+// clicks a citation in a cell that was generated in a previous
+// session and the streaming context is gone).
+const KB_CHUNK_LOOKUP_QUERY = /* GraphQL */ `
+  query KbChunkLookup($workspaceId: ID!, $docId: ID!, $chunkIndex: Int) {
+    kbChunkLookup(workspaceId: $workspaceId, docId: $docId, chunkIndex: $chunkIndex) {
+      docId
+      chunkIndex
+      content
+      docTitle
+      kbId
+      kbName
+    }
+  }
+`
+
 type EvidenceDrawerProps = {
   conversationId?: string | null
   className?: string
@@ -53,6 +70,55 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
     )
   }, [knowledgeEvidence, drawer.focusedEvidenceId])
 
+  // P12 · parse focusedEvidenceId into (docId, chunkIndex). The
+  // citation token format is `docId#chunk-N` (or just `docId` for
+  // legacy entries). We need both fields for the kbChunkLookup
+  // server query when the local knowledgeEvidence store didn't
+  // have a hit.
+  const workspaceId = useComfyStore((s) => s.workspaceId)
+  const { lookupDocId, lookupChunkIndex } = useMemo(() => {
+    const raw = drawer.focusedEvidenceId ?? ''
+    const hashIdx = raw.indexOf('#')
+    if (hashIdx < 0) return { lookupDocId: raw, lookupChunkIndex: 0 }
+    const docPart = raw.slice(0, hashIdx)
+    const snippetPart = raw.slice(hashIdx + 1)
+    // snippetIds typically look like "chunk-3" or "0-3"; pull the
+    // last integer in the string.
+    const m = snippetPart.match(/(\d+)(?!.*\d)/)
+    const idx = m ? Number(m[1]) : 0
+    return { lookupDocId: docPart, lookupChunkIndex: Number.isFinite(idx) ? idx : 0 }
+  }, [drawer.focusedEvidenceId])
+
+  // Server-side fallback: if the local store doesn't have the
+  // chunk content, fetch from kb_chunks via GraphQL.
+  const { data: serverChunk } = useQuery({
+    queryKey: ['kbChunkLookup', workspaceId, lookupDocId, lookupChunkIndex],
+    enabled:
+      drawer.isOpen &&
+      !!workspaceId &&
+      !!lookupDocId &&
+      !evidence,  // skip server hop when local hit
+    staleTime: 60_000,
+    queryFn: async () => {
+      const client = getGraphQLClient()
+      const response = await client.request<{
+        kbChunkLookup: {
+          docId: string
+          chunkIndex: number
+          content: string
+          docTitle: string | null
+          kbId: string
+          kbName: string | null
+        } | null
+      }>(KB_CHUNK_LOOKUP_QUERY, {
+        workspaceId,
+        docId: lookupDocId,
+        chunkIndex: lookupChunkIndex
+      })
+      return response.kbChunkLookup
+    }
+  })
+
   const { data: referencingCardIds, isLoading } = useQuery({
     queryKey: ['cardsReferencingEvidence', effectiveConversationId, drawer.focusedEvidenceId],
     enabled:
@@ -73,12 +139,23 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
 
   if (!drawer.isOpen) return null
 
-  const docId = (evidence as { docId?: string } | null)?.docId ?? drawer.focusedEvidenceId ?? ''
-  const snippetText = (evidence as { snippet?: string } | null)?.snippet ?? ''
+  // Coalesce local-store evidence + server-fetched chunk. Local
+  // store wins when present (has the score for ranking context).
+  const docId = (evidence as { docId?: string } | null)?.docId
+    ?? serverChunk?.docId
+    ?? lookupDocId
+    ?? ''
+  const snippetText = (evidence as { snippet?: string } | null)?.snippet
+    ?? serverChunk?.content
+    ?? ''
   const score = (evidence as { score?: number } | null)?.score
   const metadata = (evidence as { metadata?: Record<string, unknown> } | null)?.metadata
-  const title = (metadata?.title as string | undefined) ?? docId
-  const snippetId = (metadata?.snippetId as string | undefined) ?? ''
+  const title = (metadata?.title as string | undefined)
+    ?? serverChunk?.docTitle
+    ?? docId
+  const kbName = serverChunk?.kbName ?? null
+  const snippetId = (metadata?.snippetId as string | undefined)
+    ?? (serverChunk ? `chunk-${serverChunk.chunkIndex}` : '')
   const referenceCount = referencingCardIds?.length ?? 0
 
   const handleLocateCards = () => {
@@ -125,6 +202,12 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
                 <>
                   {' · '}
                   <span className="text-stratum-muted">REL</span> {score.toFixed(2)}
+                </>
+              ) : null}
+              {kbName ? (
+                <>
+                  {' · '}
+                  <span className="text-stratum-muted">KB</span> {kbName}
                 </>
               ) : null}
             </p>
