@@ -15,7 +15,16 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" className={fontVariables}>
-      <body className="min-h-screen bg-ink text-paper antialiased">
+      {/*
+        P12 fix · default text-paper (#F4F0E8 warm off-white) was
+        inheriting into every light-surface descendant (drawers,
+        modals, KB cards) where bg is overridden to white/gray but
+        text isn't, making body text near-invisible. Switch the
+        default to text-stratum-ink (dark) which contrasts with
+        the common light surfaces. Ink-themed (dark-bg) pages are
+        responsible for re-setting text-paper on their own root.
+      */}
+      <body className="min-h-screen bg-stratum-surface text-stratum-ink antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>

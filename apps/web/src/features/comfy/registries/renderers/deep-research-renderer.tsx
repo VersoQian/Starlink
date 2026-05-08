@@ -100,10 +100,16 @@ function DeepResearchView({ ctx }: { ctx: AgentOutputContext }) {
   // react-markdown's `components` lets us replace text rendering. We
   // hook into `p` and `li` so any inline [[ref:...]] gets tokenized.
   // Block-level elements (h2, h3) are restyled to newspaper kicker.
+  // P12 fix · explicit text-stratum-ink. The drawer is one of the
+  // few v2 surfaces with a LIGHT background (stratum-surface-low /
+  // bg-white). Without this, the body sets text-paper (#F4F0E8 warm
+  // off-white) which then inherits down through the markdown tree
+  // → drawer text becomes invisible. The strong/h2/h3 elements
+  // override individually but li/p/h4 plain spans inherit.
   const proseClass =
     ctx.surface === 'drawer'
-      ? 'max-w-none break-words text-[13px] leading-[1.7]'
-      : 'max-w-none break-words text-[12px] leading-[1.6]'
+      ? 'max-w-none break-words text-[13px] leading-[1.7] text-stratum-ink'
+      : 'max-w-none break-words text-[12px] leading-[1.6] text-stratum-ink'
 
   return (
     <div className={`${proseClass} space-y-3`}>
@@ -125,13 +131,27 @@ function DeepResearchView({ ctx }: { ctx: AgentOutputContext }) {
               {children}
             </h3>
           ),
+          // P12 fix · h4 was missing entirely → default browser style
+          // kicked in (inherited paper color, near-invisible). Add an
+          // explicit handler matching h3 weight a notch smaller, with
+          // tracking + dark navy color so numbered Chinese sub-headers
+          // like "1. V2EX 技术社区精准投放" render readable.
+          h4: ({ children }) => (
+            <h4 className="font-display font-[600] text-[12.5px] tracking-tight text-stratum-navy mt-2 mb-1">
+              {children}
+            </h4>
+          ),
           p: ({ children }) => (
             <p className="text-stratum-ink leading-[1.65] my-1.5">
               {tokenizeReactChildren(children, openEvidenceDrawer)}
             </p>
           ),
           li: ({ children }) => (
-            <li className="my-0.5">
+            // P12 fix · explicit text-stratum-ink so plain-text spans
+            // inside the li (the "<strong>label</strong><span>: value</span>"
+            // pattern agents emit) inherit the dark color, not the
+            // paper inherited from <body>.
+            <li className="my-0.5 text-stratum-ink">
               {tokenizeReactChildren(children, openEvidenceDrawer)}
             </li>
           ),
