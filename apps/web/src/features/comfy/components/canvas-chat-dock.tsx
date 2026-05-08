@@ -15,7 +15,7 @@
  * canvas header. Collapse → 48 × 48 round button on the canvas edge.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { MessageCircle, Send, Sparkles, X, ArrowRight, Copy, RefreshCw, Check } from 'lucide-react'
 import { useComfyStore } from '../store'
 import { useResizableDrawer, ResizeHandle } from '@/shared/hooks/use-resizable-drawer'
@@ -92,6 +92,18 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
   const chatMessages = useComfyStore((s) => s.chatMessages)
   const isProcessing = useComfyStore((s) => s.isOrchestratorProcessing)
   const chatReflecting = useComfyStore((s) => s.chatReflecting)
+  // P12 · post-graduation prominence. When BMC cells exist on canvas
+  // and the chat dock is closed, switch the floating chat button from
+  // a small icon to a labelled pill ("返回对话") so the user has an
+  // obvious entry back to the conversation surface — answers the
+  // "I generated BMC, now how do I keep talking?" UX gap.
+  const macraNodes = useComfyStore((s) => s.macraNodes)
+  const hasBmcNodes = useMemo(() => {
+    for (const n of macraNodes.values()) {
+      if (n.type === 'cc-bmc-card') return true
+    }
+    return false
+  }, [macraNodes])
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -126,6 +138,33 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
   })
 
   if (!open) {
+    // P12 · two visual modes for the closed-state floating button:
+    //   - Pre-graduation (hasBmcNodes=false): icon-only 48×48 circle
+    //   - Post-graduation (hasBmcNodes=true): labelled pill "返回对话"
+    //     Answers the "I generated BMC, now where do I keep talking?"
+    //     UX gap. Same onToggle action; just more discoverable.
+    if (hasBmcNodes) {
+      return (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="absolute top-1/2 left-4 -translate-y-1/2 z-10 inline-flex items-center gap-2 h-11 pl-3 pr-4 rounded-full bg-stratum-navy text-white shadow-lg border-[1.5px] border-stratum-navy hover:bg-stratum-navy-soft transition-colors pointer-events-auto"
+          aria-label={unreadCount > 0 ? `返回对话（${unreadCount} 条未读）` : '返回对话'}
+          title={unreadCount > 0 ? `${unreadCount} 条新消息` : '回到 chat dock 继续提问'}
+        >
+          <MessageCircle className="h-4 w-4" strokeWidth={1.75} />
+          <span className="font-display font-[600] text-[12.5px] tracking-tight">返回对话</span>
+          {unreadCount > 0 ? (
+            <span
+              aria-hidden="true"
+              className="ml-0.5 inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full bg-press text-white font-mono text-[9px] tabular-nums leading-none"
+            >
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          ) : null}
+        </button>
+      )
+    }
     return (
       <button
         type="button"
