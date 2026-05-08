@@ -34,17 +34,24 @@ async function main() {
 
     const sql = await readFile(migration.filePath, 'utf8')
     console.log(`[db:migrate] apply ${migration.id}`)
-    await pool.query('BEGIN')
+    // P11.18 fix I · pool.query may grab a DIFFERENT pooled connection
+    // per call, so BEGIN/sql/COMMIT/ROLLBACK could land on 3 different
+    // sessions and the migration would silently apply non-atomically.
+    // Acquire a dedicated client for the whole transaction.
+    const client = await pool.connect()
     try {
-      await pool.query(sql)
-      await pool.query(
+      await client.query('BEGIN')
+      await client.query(sql)
+      await client.query(
         'INSERT INTO schema_migrations (id) VALUES ($1)',
         [migration.id]
       )
-      await pool.query('COMMIT')
+      await client.query('COMMIT')
     } catch (error) {
-      await pool.query('ROLLBACK')
+      await client.query('ROLLBACK').catch(() => {})
       throw error
+    } finally {
+      client.release()
     }
   }
 

@@ -82,6 +82,14 @@ class ConversationSyncEngine {
       const jitterMs = Math.floor(Math.random() * 800)
       await new Promise((resolve) => setTimeout(resolve, baseDelayMs + jitterMs))
     },
+    // P11.18 fix J · ping the server every 30s and drop the socket if
+    // no pong arrives within 10s. Without this, a silently-dropped
+    // connection (proxy timeout / NAT eviction / laptop sleep) keeps
+    // the subscription "open" client-side but no events arrive — the
+    // user sees "thinking" forever. With ping/pong, the client now
+    // detects the dead socket within ~40s and triggers retryAttempts
+    // which calls onReconnect() to replay missed events.
+    keepAlive: 30000,
     connectionParams: async () => ({
       'x-user-id': getCurrentViewerId()
     }),
@@ -91,6 +99,18 @@ class ConversationSyncEngine {
         for (const stream of this.streams.values()) {
           for (const listener of stream.listeners) {
             void listener.onReconnect?.()
+          }
+        }
+      },
+      // P11.18 · log silent disconnects so support can diagnose
+      // why a client stopped receiving events.
+      closed: (event) => {
+        if (typeof event === 'object' && event && 'code' in event) {
+          const code = (event as { code?: number }).code
+          // 1000 = normal close, 1001 = going away (page reload). Anything
+          // else is worth surfacing.
+          if (code !== undefined && code !== 1000 && code !== 1001) {
+            console.warn('[conversation-sync] ws closed unexpectedly', { code })
           }
         }
       }
