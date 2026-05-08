@@ -285,7 +285,14 @@ export class MentionRouter {
       workspaceId: input.workspaceId,
       userId: input.userId,
       question: input.message,
-      seed
+      seed,
+      // P11.18 fix · forward KB chunks injected by injectAgentKbEvidence.
+      // Previously this was dropped on the floor → BMC mentions ignored
+      // bound KBs and produced citation-less output. Now the chunks
+      // reach BusinessState.knowledgeEvidence and buildKnowledgePrompt
+      // renders them into the agent's system prompt with the
+      // [[ref:docId#snippetId]] enforcement rule.
+      knowledgeEvidence: input.knowledgeEvidence ?? []
     })
 
     // P11.14 · chatFallback UX polish. Strip the agent's internal

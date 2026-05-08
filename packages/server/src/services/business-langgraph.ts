@@ -3454,6 +3454,15 @@ ${workspaceContext}
       userId: string
       question: string
       seed?: typeof EMPTY_SEEDED_STATE
+      /**
+       * P11.18 fix · KB chunks injected by mention-router's
+       * injectAgentKbEvidence. Without this, BMC mentions ignored
+       * KB bindings and produced citation-less output even when the
+       * agent had a KB attached. Forward into BusinessState so
+       * buildKnowledgePrompt can render the [[ref:]] block into the
+       * agent's system prompt.
+       */
+      knowledgeEvidence?: KnowledgeEvidence[]
     }
   ): Promise<{ nodes: MacraNodeData[]; chatFallback: string }> {
     const agentId = `${self}-agent`
