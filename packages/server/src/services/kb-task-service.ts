@@ -23,6 +23,8 @@ import {
 } from '@starlink/shared'
 import { pool } from '../infrastructure/db/pool.js'
 import { getKbStore } from '../application/kb-store.js'
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 
 const auditLogger = createAuditLogger('packages/server:services:kb-task-service')
 
@@ -150,6 +152,95 @@ function rowToKb(row: Record<string, unknown>): GatewayKnowledgeBase {
  * generic FORBIDDEN message so the caller can't probe whether
  * a kbId exists in some other workspace.
  */
+/**
+ * P11.18 fix H · basic SSRF guard for importKnowledgeUrl.
+ *
+ * importKnowledgeUrl takes a user-supplied URL and fetches it
+ * server-side. Without a check, the URL could target:
+ *   - cloud metadata services (169.254.169.254 on AWS/GCP/Azure)
+ *   - container internals (172.17.x.x docker, 100.64.x.x cgnat)
+ *   - localhost services (127.0.0.0/8, ::1)
+ *   - private RFC1918 ranges (10/8, 172.16/12, 192.168/16)
+ *   - link-local / multicast
+ *
+ * Allowed: explicit http:// or https:// to a hostname that
+ * resolves to a globally-routable unicast IP. We resolve via
+ * dns/lookup ahead of fetch -- there's a TOCTOU race where the
+ * DNS could change between the lookup and fetch's own resolution,
+ * but in practice this defends against the obvious internal-net
+ * exfiltration path. A stricter implementation would use a
+ * pinned-IP fetcher (resolve once, dial that IP with a Host
+ * header), which is overkill for the threat model here.
+ */
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split('.').map((p) => Number(p))
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true
+  const [a, b] = parts
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 0) return true
+  if (a === 169 && b === 254) return true // link-local + AWS/GCP metadata
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
+  if (a >= 224) return true // multicast / reserved
+  return false
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const lower = ip.toLowerCase()
+  if (lower === '::' || lower === '::1') return true
+  if (lower.startsWith('fe80:') || lower.startsWith('fe80::')) return true // link-local
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true // ULA
+  if (lower.startsWith('::ffff:')) {
+    // IPv4-mapped IPv6 — unwrap and check.
+    const v4 = lower.slice('::ffff:'.length)
+    if (isIP(v4) === 4) return isPrivateIPv4(v4)
+  }
+  return false
+}
+
+async function assertUrlIsExternal(url: string): Promise<void> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error('FORBIDDEN: invalid URL')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('FORBIDDEN: only http(s) URLs are allowed')
+  }
+  const host = parsed.hostname
+  if (!host) throw new Error('FORBIDDEN: URL has no hostname')
+
+  // If the host is itself an IP literal, check directly.
+  const ipKind = isIP(host)
+  if (ipKind === 4 && isPrivateIPv4(host)) {
+    throw new Error('FORBIDDEN: URL points to a private/internal IP')
+  }
+  if (ipKind === 6 && isPrivateIPv6(host)) {
+    throw new Error('FORBIDDEN: URL points to a private/internal IPv6')
+  }
+
+  // Otherwise resolve to all addresses and reject if any is private.
+  if (ipKind === 0) {
+    let resolved
+    try {
+      resolved = await dnsLookup(host, { all: true })
+    } catch {
+      throw new Error('FORBIDDEN: hostname does not resolve')
+    }
+    for (const r of resolved) {
+      if (r.family === 4 && isPrivateIPv4(r.address)) {
+        throw new Error('FORBIDDEN: URL resolves to a private/internal IP')
+      }
+      if (r.family === 6 && isPrivateIPv6(r.address)) {
+        throw new Error('FORBIDDEN: URL resolves to a private/internal IPv6')
+      }
+    }
+  }
+}
+
 async function assertKbBelongsToWorkspace(
   workspaceId: string,
   kbId: string
@@ -786,7 +877,13 @@ export async function importKnowledgeUrl(
   const now = new Date().toISOString()
   try {
     await assertKbBelongsToWorkspace(workspaceId, kbId)
-    const res = await fetch(url, { redirect: 'follow' })
+    await assertUrlIsExternal(url)
+    // redirect: 'manual' so a server can't 302 us to an internal IP
+    // after we passed the initial DNS check.
+    const res = await fetch(url, { redirect: 'manual' })
+    if (res.status >= 300 && res.status < 400) {
+      throw new Error(`URL responded with redirect ${res.status}; redirects disabled for SSRF safety`)
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
     const raw = await res.text()
     const text = stripHtmlMinimal(raw)
