@@ -25,7 +25,8 @@
  */
 
 import { useRef } from 'react'
-import { Download, LayoutGrid, PanelsTopLeft, RefreshCw, Upload, Zap } from 'lucide-react'
+import Link from 'next/link'
+import { ArrowLeft, Download, LayoutGrid, PanelsTopLeft, RefreshCw, Upload, Zap } from 'lucide-react'
 import { WORKFLOW_STAGE_LABELS, type WorkflowStage } from '../store/workflow-stage'
 
 type CanvasHeaderProps = {
@@ -82,6 +83,23 @@ export function CanvasHeader({
       }`}
       style={{ animationDelay: '0.1s' }}
     >
+      {/* P12 · "返回 Chat 首页" entry. Canvas pages are deep navigation —
+          users entering via /canvas/[workspaceId] from a deep link,
+          @-mention, or context-menu have no obvious way back to the
+          chat home (/chat). Adding a left-edge ArrowLeft pill ahead
+          of the brand mast gives a one-click return to the landing
+          page. Keeps the canvas header's existing brand + STAGE +
+          right-cluster layout intact. */}
+      <Link
+        href="/chat"
+        className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 mr-1 -ml-1 border-[0.5px] border-stratum-line bg-stratum-surface-low text-stratum-muted hover:bg-stratum-surface hover:text-stratum-navy hover:border-stratum-navy/40 font-instr text-[10px] uppercase tracking-kicker transition-colors shrink-0"
+        aria-label="返回 Chat 首页"
+        title="返回 Chat 首页"
+      >
+        <ArrowLeft className="h-3 w-3" strokeWidth={1.75} />
+        Chat
+      </Link>
+
       {/* Brand — starlink constellation glyph + Fraunces headline + mono kicker.
           Logo generated via nano-banana / gemini-3-pro-image (P11.16),
           paper-white square with 3 dots in triangle constellation, apex
