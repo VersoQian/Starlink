@@ -375,11 +375,31 @@ export class WizardPrefillService {
     const sections: string[] = []
     sections.push('## 7 个维度定义\n')
     for (const [step, label] of Object.entries(STEP_LABELS)) {
-      sections.push(`- **${step}** (${label}): ${STEP_SEEDS[step]}`)
+      // P12 fix · STEP_SEEDS[step] is now string[]; join for prompt
+      // readability (was previously a single string, not the array).
+      const seeds = STEP_SEEDS[step]
+      const seedText = Array.isArray(seeds) ? seeds.join(' / ') : String(seeds)
+      sections.push(`- **${step}** (${label}): ${seedText}`)
     }
     sections.push('\n## KB 检索片段（按维度分组）\n')
     let totalChars = 0
     const limit = 16_000
+    // P12 fix · also build a deduped "ALL CHUNKS" pool for cross-step
+    // inference. Frequent failure mode: a step's direct retrieval
+    // returns 0 chunks (e.g. "主要风险" against an interview
+    // transcript), but a chunk retrieved for ANOTHER step indirectly
+    // mentions the missing dimension ("Snyk 启动免费层升级" mentioned
+    // under value-angle is also a risk signal). The LLM scoring step
+    // can use this pool to mark partial instead of absent. Dedupe by
+    // docId+chunk-prefix so the LLM doesn't see the same chunk twice.
+    const allChunkIndex = new Map<string, { docId: string; snippet: string; score: number }>()
+    for (const c of chunks) {
+      const key = `${c.docId}#${c.snippet.slice(0, 30)}`
+      const prior = allChunkIndex.get(key)
+      if (!prior || prior.score < c.score) {
+        allChunkIndex.set(key, { docId: c.docId, snippet: c.snippet, score: c.score })
+      }
+    }
     for (const stepId of Object.keys(STEP_SEEDS)) {
       const stepChunks = byStep[stepId] ?? []
       if (stepChunks.length === 0) continue
@@ -393,8 +413,28 @@ export class WizardPrefillService {
         totalChars += line.length
       }
     }
+    // Cross-step pool — only emit if budget allows. This is supplemental
+    // material; primary scoring still uses the per-step grouped chunks.
+    const remainingBudget = limit - totalChars
+    if (remainingBudget > 500 && allChunkIndex.size > 0) {
+      sections.push('\n## 跨维度全集（任意维度可引用，用于补救 absent 判断）\n')
+      let crossChars = 0
+      const pool = Array.from(allChunkIndex.values()).sort((a, b) => b.score - a.score)
+      for (const c of pool) {
+        const line = `[doc:${c.docId}] ${c.snippet}`
+        if (crossChars + line.length > remainingBudget) break
+        sections.push(line)
+        crossChars += line.length
+      }
+    }
     sections.push('\n## 任务')
-    sections.push('对每个维度，依据上面的 KB 片段判断 status (covered/partial/absent) + draftAnswer + citations + confidence。返回纯 JSON。')
+    sections.push(
+      '对每个维度，依据上面的 KB 片段判断 status (covered/partial/absent) + ' +
+      'draftAnswer + citations + confidence。' +
+      '**重要**：如果一个维度的直接检索片段为空，但「跨维度全集」中有片段能** ' +
+      '间接** 提供该维度的线索（哪怕只是一两句相关），请标记为 partial 而非 absent，' +
+      '并在 draftAnswer 中说明这是基于间接线索的推断。返回纯 JSON。'
+    )
     return sections.join('\n')
   }
 
