@@ -840,6 +840,22 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     if (get().wizardChat.active) return
     set({ wizardChat: { active: true, stepIndex: 0, history: [], prefill: {} } })
 
+    // P12 fix M1 · immediate user feedback. KB prefill below can take
+    // 15-20s on first run (7 vector queries + RRF + LLM scoring). Without
+    // this loader bubble, clicking 向导 looks like "nothing happens" and
+    // users either click again (no-op due to active guard) or assume the
+    // button is broken. The loader is replaced by the actual prefillSummary
+    // once the GraphQL response arrives.
+    const loaderTs = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    if (workspaceId && withKbPrefill) {
+      get().appendChatMessage({
+        role: 'assistant',
+        content: '⏳ 正在启动 7 步向导，AI 在扫描知识库中…（首次会读取 ≤ 20s）',
+        timestamp: loaderTs,
+        source: 'scripted'
+      })
+    }
+
     // Sprint 1.2 · KB pre-read. If the workspace has KB content, run
     // a one-shot prefill and show the user a summary. The user can:
     //   - 跳过覆盖步骤：在已 covered 的 step 直接输入 /next 或确认按钮
@@ -982,7 +998,7 @@ ${firstStep.description}${draftHint}
   },
 
   submitWizardChatAnswer: async (workspaceId, answer) => {
-    const { wizardChat, appendChatMessage, createMacraNode } = get()
+    const { wizardChat, appendChatMessage } = get()
     if (!wizardChat.active) return
     const trimmed = answer.trim()
     if (!trimmed) return
@@ -1024,23 +1040,20 @@ ${firstStep.description}${draftHint}
       const result = response.processIdeationWizardStep
       const extracted = result?.extracted ?? null
 
-      // 2. Drop the extracted insight onto the canvas (live).
-      if (extracted) {
-        const nodeId = `insight-wizard-${currentStep.id}-${Date.now().toString(36)}`
-        createMacraNode({
-          id: nodeId,
-          type: 'insight-note',
-          label: extracted.label,
-          content: extracted.content,
-          summary: extracted.content.slice(0, 120),
-          fullContent: extracted.content,
-          metadata: {
-            source: 'ideation-wizard-chat',
-            wizardStep: currentStep.id,
-            wizardKind: extracted.kind
-          }
-        } as MacraNodeData)
-      }
+      // P12 fix · DON'T drop per-step insight-notes onto the canvas.
+      // Previously each wizard answer spawned an `insight-note` node
+      // (`insight-wizard-<stepId>-<ts>`) which made the canvas look
+      // chaotic — 7 nodes scattering as the user typed, before the
+      // real BMC pipeline even ran. The wizard history is already
+      // tracked in `wizardChat.history` (in-memory) and the final
+      // graduation step rebuilds the canvas from scratch with the
+      // BMC pipeline. The intermediate nodes were pure visual noise.
+      //
+      // We still keep `extracted` available in `wizardChat.history`
+      // (via extractedLabel) so the graduation summary can list
+      // "7 steps captured". And the BMC pipeline gets the full
+      // answer text via the seed string in onWizardComplete, so no
+      // information is lost.
 
       // 3. Update wizard state — record this step's history
       const nextHistory = [
@@ -1063,7 +1076,7 @@ ${firstStep.description}${draftHint}
           .join('\n')
         appendChatMessage({
           role: 'assistant',
-          content: `✓ 7 步采集完成。已抽 ${nextHistory.filter((h) => h.extractedLabel).length} 条线索到画布。
+          content: `✓ 7 步采集完成。已记录 ${nextHistory.filter((h) => h.extractedLabel).length} 条结构化线索（保存在向导历史中，画布暂不展示，避免视觉混乱）。
 
 **下一步**：8 个 agent 开始协作生成完整 BMC（headless 模式不卡 HITL）。画布会清空旧节点后逐步浮现新内容。`,
           source: 'scripted',

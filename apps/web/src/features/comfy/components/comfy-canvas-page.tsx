@@ -75,6 +75,20 @@ export function CanvasPage({
   const reattachToActiveSession = useComfyStore((state) => state.reattachToActiveSession)
 
   const handleExportCanvas = useCallback((): void => {
+    // P12 fix M2 · empty canvas warning. Exporting an empty BMC produces
+    // a JSON file with no nodes — useless on import. Tell the user
+    // before generating the download. Without this the click was silent
+    // and users assumed the button was broken.
+    const { nodes: storeNodes } = useComfyStore.getState()
+    if (storeNodes.length === 0) {
+      useComfyStore.getState().appendChatMessage({
+        role: 'assistant',
+        content: '⚠ 画布为空，无内容可导出。先用 7 步向导或 @-mention agent 生成 BMC 节点后再导出。',
+        source: 'scripted'
+      })
+      setChatOpen(true)
+      return
+    }
     const json = exportCanvasJson()
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -84,6 +98,11 @@ export function CanvasPage({
     link.download = `canvas-${workspaceId}-${stamp}.json`
     link.click()
     URL.revokeObjectURL(url)
+    useComfyStore.getState().appendChatMessage({
+      role: 'assistant',
+      content: `✓ 已导出 canvas-${workspaceId}-${stamp}.json（${storeNodes.length} 个节点）。`,
+      source: 'scripted'
+    })
   }, [exportCanvasJson, workspaceId])
 
   const handleImportCanvas = useCallback(
@@ -533,14 +552,41 @@ export function CanvasPage({
   }, [callLangGraph, isOrchestratorProcessing, seedInput])
 
   const handleRunCritic = useCallback(async () => {
+    // P12 fix M2 · empty-canvas guard. Re-Calc on empty BMC returns
+    // 0 conflicts but the previous "冲突扫描完成" message went into a
+    // collapsed chat dock, leaving the user with no visible feedback
+    // (just a tiny blue dot on the chat icon). Now we open the dock
+    // when there's no BMC to scan and tell the user why.
+    const { nodes: storeNodes } = useComfyStore.getState()
+    const bmcCount = storeNodes.filter(
+      (n) => typeof (n.data as { meta?: { macraType?: string } })?.meta?.macraType === 'string'
+        && (n.data as { meta: { macraType: string } }).meta.macraType === 'cc-bmc-card'
+    ).length
+    if (bmcCount === 0) {
+      appendChatMessage({
+        role: 'assistant',
+        content: '⚠ 画布上还没有 BMC 节点，无可检测的冲突。先用 7 步向导生成 BMC 后再 Re-Calc。',
+        source: 'scripted'
+      })
+      setChatOpen(true)
+      return
+    }
     try {
       await callCritic()
       appendChatMessage({
         role: 'assistant',
-        content: '冲突扫描完成。如发现问题，已在画布上标记。',
+        content: `冲突扫描完成（已检查 ${bmcCount} 个 BMC 节点）。如发现问题，已在画布上标记。`,
+        source: 'scripted'
       })
+      setChatOpen(true)
     } catch (error) {
       console.error('冲突检测失败:', error)
+      appendChatMessage({
+        role: 'assistant',
+        content: `❌ 冲突检测失败：${error instanceof Error ? error.message : String(error)}`,
+        source: 'error'
+      })
+      setChatOpen(true)
     }
   }, [appendChatMessage, callCritic])
 

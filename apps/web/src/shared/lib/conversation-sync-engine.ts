@@ -152,6 +152,15 @@ class ConversationSyncEngine {
   }
 
   private startStream(stream: ScopedStream) {
+    // P12 fix N1 · throttled error logging. Server restarts make
+    // graphql-ws emit one `error` per active subscription per retry
+    // attempt, and with up to 8 retry attempts × N streams that can
+    // be 12+ console errors per restart. The errors are also generic
+    // [object Event] which adds zero diagnostic value beyond the
+    // first one. Suppress duplicates within a 5s window per stream.
+    let lastErrorAt = 0
+    let suppressedSinceLast = 0
+
     stream.dispose = this.wsClient.subscribe(
       {
         query: CONVERSATION_PROGRESS_SUBSCRIPTION,
@@ -167,9 +176,24 @@ class ConversationSyncEngine {
           for (const listener of stream.listeners) {
             listener.onEvent(event)
           }
+          // Successful frame → reset the throttle so the NEXT real
+          // error (after a recovery period) does log immediately.
+          lastErrorAt = 0
+          suppressedSinceLast = 0
         },
         error: (error) => {
-          console.error('[conversation-sync-engine] subscription error', error)
+          const now = Date.now()
+          const since = now - lastErrorAt
+          if (lastErrorAt === 0 || since > 5000) {
+            const tail = suppressedSinceLast > 0
+              ? ` (+${suppressedSinceLast} suppressed in last 5s)`
+              : ''
+            console.error('[conversation-sync-engine] subscription error', error, tail)
+            lastErrorAt = now
+            suppressedSinceLast = 0
+          } else {
+            suppressedSinceLast++
+          }
         },
         complete: () => {
           // The graphql-ws client handles socket-level retries itself.

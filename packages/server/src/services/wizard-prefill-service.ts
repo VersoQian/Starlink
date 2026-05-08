@@ -44,18 +44,60 @@ export interface WizardPrefillResult {
 }
 
 /**
- * Per-step seed queries used for cosine retrieval. Picked so they hit
- * the typical KB content patterns (case studies / market reports /
- * pitch decks).
+ * Per-step seed queries used for cosine retrieval.
+ *
+ * P12 fix M4 · semantic gap mitigation. Single abstract seed strings
+ * like "商业模式 定价 收入来源" failed to retrieve concrete chunks
+ * such as user-interview transcripts ("6/8 受访者愿意付费 ¥99/月")
+ * even when the embedding was computed correctly. The vector + lexical
+ * RRF only had ONE shot per step, and abstract↔concrete phrasing
+ * mismatch dominated the score.
+ *
+ * Solution: each step now carries 3-5 query variants spanning abstract
+ * ("商业模式") + concrete ("定价 ¥99 月费 订阅") + outcome ("付费率
+ * 渗透率 客单价") phrasings. We run all variants in parallel and union
+ * the top-3 unique chunks per step. More variants ≠ much more cost
+ * because PG vector index hits are sub-millisecond; the bottleneck was
+ * always the embedding API on the query side, and that's already
+ * bounded by Promise.all in the caller.
  */
-const STEP_SEEDS: Record<string, string> = {
-  'core-idea':     '产品核心想法 价值主张 一句话总结',
-  'customer-pain': '客户痛点 用户问题 使用场景 困扰',
-  'value-angle':   '差异化 独特价值 竞争优势 切入点',
-  'hypothesis':    '关键假设 前提条件 待验证',
-  'validation':    '验证方法 测试渠道 MVP 试点',
-  'revenue':       '商业模式 定价 收入来源 付费意愿',
-  'risk':          '主要风险 失败原因 阻碍因素'
+const STEP_SEEDS: Record<string, string[]> = {
+  'core-idea': [
+    '产品核心想法 价值主张 一句话总结',
+    '我们做什么 产品定义 用一句话',
+    '解决什么问题 提供什么服务 卖什么'
+  ],
+  'customer-pain': [
+    '客户痛点 用户问题 使用场景 困扰',
+    '用户访谈 用户反馈 抱怨 不满',
+    '现有方案 缺陷 不便 痛苦点'
+  ],
+  'value-angle': [
+    '差异化 独特价值 竞争优势 切入点',
+    '与竞品对比 我们更好 独特之处',
+    '比 X 更 Y 优势 卖点 USP'
+  ],
+  'hypothesis': [
+    '关键假设 前提条件 待验证',
+    '我们假设 我们相信 我们认为',
+    '尚未验证 风险点 不确定性'
+  ],
+  'validation': [
+    '验证方法 测试渠道 MVP 试点',
+    '用户访谈 试用 测试 调研 问卷',
+    '小规模试验 PoC 早期客户'
+  ],
+  'revenue': [
+    '商业模式 定价 收入来源 付费意愿',
+    '订阅 月费 年费 一次性 付费意愿 单价',
+    '收费 佣金 抽成 广告 增值服务',
+    '受访者 用户 愿意支付 ¥ 价格 月'
+  ],
+  'risk': [
+    '主要风险 失败原因 阻碍因素',
+    '担心 顾虑 最坏情况 翻车',
+    '监管 合规 安全 隐私 法律风险'
+  ]
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -182,35 +224,71 @@ export class WizardPrefillService {
     }
 
     // 2. Per-step retrieval (top-3 chunks per dimension per KB).
+    //
+    // P12 fix M3 · queries used to run sequentially in nested for-loops:
+    //   stepIds × targetKbs ≈ 7 × N steps × ~300ms each = ~15-20s on
+    //   typical workspaces (single KB). Each searchKnowledgeBase call is
+    //   independent and side-effect-free (read-only PG vector + lexical
+    //   merge), so they parallelise safely. Build a flat task list across
+    //   the cartesian product, run via Promise.all, then re-assemble.
     const stepIds = Object.keys(STEP_SEEDS)
-    const allChunks: Array<{ step: string; docId: string; snippet: string; score: number }> = []
+    type Task = { stepId: string; kbId: string; seed: string }
+    const tasks: Task[] = []
     for (const stepId of stepIds) {
-      const seed = STEP_SEEDS[stepId]
+      const seeds = STEP_SEEDS[stepId]
       for (const kb of targetKbs) {
+        for (const seed of seeds) {
+          tasks.push({ stepId, kbId: kb.id, seed })
+        }
+      }
+    }
+    const taskResults = await Promise.all(
+      tasks.map(async (t) => {
         try {
           const results = await searchKnowledgeBase(
             args.workspaceId,
-            kb.id,
-            seed,
+            t.kbId,
+            t.seed,
             3,
             args.userId
           )
-          for (const r of results) {
-            allChunks.push({
-              step: stepId,
-              docId: r.docId,
-              snippet: r.snippet.slice(0, 240),
-              score: r.score
-            })
-          }
+          return { stepId: t.stepId, results }
         } catch (err) {
           auditLogger.warn({
             action: 'wizard-prefill.search-failed',
             workflowId: args.workspaceId,
             userId: args.userId,
-            metadata: { kbId: kb.id, step: stepId, err: err instanceof Error ? err.message : String(err) }
+            metadata: { kbId: t.kbId, step: t.stepId, err: err instanceof Error ? err.message : String(err) }
           })
+          return { stepId: t.stepId, results: [] as Awaited<ReturnType<typeof searchKnowledgeBase>> }
         }
+      })
+    )
+    // Multiple seed variants per step → many duplicate chunks. Dedupe
+    // by docId+chunkIndex within a step, keeping the highest-scoring
+    // hit. Then cap to top-3 per step so the LLM input stays small.
+    const perStepBest = new Map<string, Map<string, { docId: string; snippet: string; score: number }>>()
+    for (const tr of taskResults) {
+      let stepMap = perStepBest.get(tr.stepId)
+      if (!stepMap) {
+        stepMap = new Map()
+        perStepBest.set(tr.stepId, stepMap)
+      }
+      for (const r of tr.results) {
+        const key = `${r.docId}#${r.snippet.slice(0, 30)}`
+        const prior = stepMap.get(key)
+        if (!prior || prior.score < r.score) {
+          stepMap.set(key, { docId: r.docId, snippet: r.snippet.slice(0, 240), score: r.score })
+        }
+      }
+    }
+    const allChunks: Array<{ step: string; docId: string; snippet: string; score: number }> = []
+    for (const [stepId, stepMap] of perStepBest) {
+      const top3 = Array.from(stepMap.values())
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+      for (const r of top3) {
+        allChunks.push({ step: stepId, ...r })
       }
     }
 

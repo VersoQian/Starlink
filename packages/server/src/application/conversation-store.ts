@@ -81,6 +81,39 @@ const getWorkspaceMetadata = usePg ? getWorkspaceMetadataPg : getWorkspaceMetada
 const listWorkspaceMetadata = usePg ? listWorkspaceMetadataPg : listWorkspaceMetadataFile
 const listWorkspaceMetadataHistory = usePg ? listWorkspaceMetadataHistoryPg : listWorkspaceMetadataHistoryFile
 const updateWorkspaceMetadata = usePg ? updateWorkspaceMetadataPg : updateWorkspaceMetadataFile
+
+/**
+ * P12 fix N2 · short-lived metadata cache. See assertWorkspacePermission
+ * for why. Cache entry hits the PG once per workspace per ~1s; concurrent
+ * callers reach the same in-flight Promise so they don't all fire
+ * parallel queries on cold cache.
+ */
+const METADATA_CACHE_TTL_MS = 1000
+const metadataCache = new Map<
+  string,
+  { promise: Promise<WorkspaceMetadataRecord>; expiresAt: number }
+>()
+async function getWorkspaceMetadataCached(
+  workspaceId: string,
+  seedOwnerId: string
+): Promise<WorkspaceMetadataRecord> {
+  const now = Date.now()
+  const cached = metadataCache.get(workspaceId)
+  if (cached && cached.expiresAt > now) {
+    return cached.promise
+  }
+  const promise = getWorkspaceMetadata(workspaceId, { id: seedOwnerId })
+  // Cache the in-flight promise so concurrent first-callers share it
+  // (5 parallel resolvers on cold cache → 1 PG query, not 5).
+  metadataCache.set(workspaceId, { promise, expiresAt: now + METADATA_CACHE_TTL_MS })
+  // Drop from cache on rejection so a transient failure doesn't poison
+  // the next 1s of requests.
+  promise.catch(() => {
+    const current = metadataCache.get(workspaceId)
+    if (current?.promise === promise) metadataCache.delete(workspaceId)
+  })
+  return promise
+}
 export type ConversationStoreDeps = {
   eventBus: ConversationEventBus
   runtimeRepository: ConversationRuntimeRepository
@@ -1408,7 +1441,21 @@ export class ConversationStore {
     // Pass userId as seedOwner so that auto-created workspaces (URL
     // navigation to an unknown id) immediately give the requesting user
     // full ownership instead of leaving them locked out.
-    const metadata = await getWorkspaceMetadata(workspaceId, { id: userId })
+    //
+    // P12 fix N2 · short-lived metadata cache. A single GraphQL
+    // request typically calls 6+ resolvers, each independently asking
+    // for the same (workspaceId, userId) metadata row. Without a
+    // cache that's 6 PG round-trips per request — measured in audit
+    // logs as 6× workspace-access.granted within 30ms.
+    //
+    // 1-second TTL keyed by workspaceId is short enough that revoked
+    // permissions take effect within ~1s (acceptable: GraphQL
+    // requests typically complete in <100ms so they all see the
+    // same snapshot anyway), and long enough that a single multi-
+    // resolver request hits cache after the first call. We pass
+    // seedOwner only on cache miss so the auto-create semantics
+    // still apply for the first caller.
+    const metadata = await getWorkspaceMetadataCached(workspaceId, userId)
     return this.assertPermissionFromMetadata(metadata, userId, requiredPermission)
   }
 

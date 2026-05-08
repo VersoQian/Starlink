@@ -96,6 +96,18 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [selStart, setSelStart] = useState(0)
 
+  // P12 fix N3 · track when the user last had the dock open. While the
+  // dock is open we keep this in lockstep with chatMessages.length so the
+  // blue "unread" dot disappears as soon as the user opens chat. While
+  // the dock is closed we freeze it, so messages arriving in the
+  // meantime register as unread. Previous behaviour: dot showed whenever
+  // there were >1 messages — i.e. forever after the welcome bubble.
+  const [lastSeenLength, setLastSeenLength] = useState<number>(chatMessages.length)
+  useEffect(() => {
+    if (open) setLastSeenLength(chatMessages.length)
+  }, [open, chatMessages.length])
+  const unreadCount = open ? 0 : Math.max(0, chatMessages.length - lastSeenLength)
+
   useEffect(() => {
     if (!scrollRef.current) return
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -107,10 +119,10 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
         type="button"
         onClick={onToggle}
         className="absolute top-1/2 left-4 -translate-y-1/2 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-lg border border-stratum-line text-stratum-navy hover:text-stratum-blue transition-colors pointer-events-auto"
-        aria-label="打开对话"
+        aria-label={unreadCount > 0 ? `打开对话（${unreadCount} 条未读）` : '打开对话'}
       >
         <MessageCircle className="h-5 w-5" strokeWidth={1.75} />
-        {chatMessages.length > 1 ? (
+        {unreadCount > 0 ? (
           <span
             aria-hidden="true"
             className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-stratum-blue border-2 border-white"
