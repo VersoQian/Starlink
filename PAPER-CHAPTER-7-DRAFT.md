@@ -113,11 +113,13 @@
 
 ## 7.3 BMC 生成质量（baseline + 消融）★ 论文核心实验
 
-### 7.3.1 实验 7.3A · Starlink vs gpt-solo（14 case head-to-head）
+### 7.3.1 实验 7.3A · Starlink vs gpt-solo（12 case head-to-head）✅ 数据已收
 
-> 命令：`pnpm eval:yc`（当前正在跑）
-> 期望完成时间：~30-40min from start
-> 数据填入位置：本节表格 [PENDING]
+> 命令：`pnpm eval:yc`（已完成 2026-05-08T01:27:52）
+> 报告：`benchmark/reports/yc-vs-runners-20260508-012752.md`
+> 12 个 YC 真实创业案例，DeepSeek-v4-pro 担任 Agent-as-Judge
+
+**【已经填入】**：
 
 #### Baseline 设计：gpt-solo
 
@@ -129,29 +131,43 @@
 
 这种设计排除了 LLM 模型差异、prompt 差异、数据差异等其他变量，使比较聚焦于 multi-agent 协调机制本身的贡献。
 
-#### 主表 7.1 · YC 14 case 评分对比 [PENDING]
+#### 主表 7.1 · YC 12 case 评分对比（已填）
 
-| Case | Sector | gpt-solo mean | Starlink mean | Δ |
+| Case | Company | KB | Starlink (/27) | gpt-solo (/27) | Winner |
+|---|---|---|---|---|---|
+| yc-stripe-2024 | Stripe | 4 docs | 20 (2.22) | 21 (2.33) | gpt-solo |
+| yc-airbnb-2024 | Airbnb | 4 docs | 21 (2.33) | 23 (2.56) | gpt-solo |
+| yc-replit-2024 | Replit | – | 19 (2.11) | 19 (2.11) | tie |
+| yc-pebble-2016 | Pebble | – | 17 (1.89) | 19 (2.11) | gpt-solo |
+| extended-coursera-2024 | Coursera | – | 20 (2.22) | 18 (2.00) | **Starlink** |
+| yc-notion-2024 | Notion | – | 21 (2.33) | 18 (2.00) | **Starlink** |
+| yc-coinbase-2021 | Coinbase | – | 21 (2.33) | 18 (2.00) | **Starlink** |
+| yc-doordash-2020 | DoorDash | – | 18 (2.00) | 18 (2.00) | tie (counted Starlink) |
+| yc-twitch-2014 | Twitch | – | 20 (2.22) | 20 (2.22) | tie (counted Starlink) |
+| yc-segment-2020 | Segment | – | 20 (2.22) | 18 (2.00) | **Starlink** |
+| yc-brex-2024 | Brex | – | 21 (2.33) | 16 (1.78) | **Starlink** |
+| yc-substack-2024 | Substack | – | 20 (2.22) | 16 (1.78) | **Starlink** |
+| **总均值** | | | **19.8 (2.20)** | **18.7 (2.07)** | **Starlink +0.13** |
+
+**Aggregate (含 chars + duration)**:
+
+| runner | mean total | mean avg | mean candidate chars | mean duration |
 |---|---|---|---|---|
-| yc-stripe-2024 | fintech | [P] | [P] | [P] |
-| yc-airbnb-2024 | sharing-economy | [P] | [P] | [P] |
-| yc-doordash-2024 | logistics | [P] | [P] | [P] |
-| yc-pebble-2016 | hardware | [P] | [P] | [P] |
-| yc-replit-2024 | devtools | [P] | [P] | [P] |
-| yc-coursera-2024 | edtech | [P] | [P] | [P] |
-| yc-twitch-2024 | media | [P] | [P] | [P] |
-| yc-reddit-2024 | community | [P] | [P] | [P] |
-| yc-vercel-2024 | devtools | [P] | [P] | [P] |
-| yc-anduril-2024 | hardware/defense | [P] | [P] | [P] |
-| yc-patreon-2024 | creator-economy | [P] | [P] | [P] |
-| yc-robinhood-2024 | fintech | [P] | [P] | [P] |
-| yc-openai-2024 | ai/saas | [P] | [P] | [P] |
-| yc-bonus-2024 | (depends on dataset) | [P] | [P] | [P] |
-| **平均** | | **[P]** | **[P]** | **[P]** |
+| **Starlink** | **19.8/27** | **2.20** | **13,710** | **2,901.5s** |
+| gpt-solo | 18.7/27 | 2.07 | 805 | 11.6s |
 
-#### Per-criterion 分解（图 7.1）[PENDING]
+> **关键观察**：
+> - **Win/Loss/Tie**：Starlink 6 win + 3 tie + 3 loss = **75% non-loss**
+> - **质量差距**：+0.13 mean score (~6.3% relative improvement)
+> - **内容深度**：Starlink 输出 17× 字数（13710 vs 805），适合长程决策支持
+> - **效率成本**：Starlink 250× 慢（48min vs 12s/case），论文需诚实承认这是为质量付出的代价
 
-bar chart 五个 criterion 的 gpt-solo / Starlink 对比柱状图。
+#### Per-criterion 分解（图 7.1 — 待绘）
+
+每个 case 9 维度评分（CU=customer-segments, VA=value-propositions, CH=channels, CU=customer-relationships, RE=revenue-streams, KE=key-resources, KE=key-activities, KE=key-partnerships, CO=cost-structure）：
+
+> **诊断性发现**：gpt-solo 在 column 8（**KEY_PARTNERSHIPS**）上**12/12 case 全部 0 分**，而 Starlink 平均 1.9 分。这是 multi-agent 协调的最显著优势 —— 单 LLM 在 9-cell 一次性生成时几乎总是遗漏 key-partnerships 这一维度，因为该维度需要 cross-cell 推理（"哪些合作能放大 channels + key-resources"）。Starlink 通过 product-agent 专门负责 KP 维度，确保覆盖。
+
 
 #### 7.3.1 讨论
 - 哪些 sector Starlink 优势最大？（预期 hardware / defense / fintech 这种需要交叉验证的）

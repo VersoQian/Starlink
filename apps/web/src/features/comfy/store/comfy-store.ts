@@ -1678,11 +1678,39 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           }
         }
 
-        set({
-          nodes: reactFlowNodes,
-          edges: graph.edges.map(mapCanvasEdgeToReactFlow),
-          macraNodes: macraNodesMap,
-          ...(Object.keys(citationsMap).length > 0 ? { citations: citationsMap } : {})
+        // P11.18 fix · DEFENSIVE merge instead of pure REPLACE when the
+        // incoming snapshot is SMALLER than current state. This protects
+        // against the "一条直线" bug where a stale graph snapshot
+        // (e.g. from reconnect race) would wipe out 15 of 18 accumulated
+        // BMC nodes. PG is authoritative for new nodes; we never DELETE
+        // accumulated cells unless explicitly told via removedNodeIds in
+        // a graph/diff event.
+        set((state) => {
+          const incoming = reactFlowNodes
+          const currentCount = state.nodes.length
+          const incomingCount = incoming.length
+          const shouldMerge = currentCount > 0 && incomingCount < currentCount
+          if (shouldMerge) {
+            console.warn(
+              `[applyGraph] incoming snapshot smaller than current (${incomingCount} < ${currentCount}); merging to protect against stale-snapshot wipe`
+            )
+            return {
+              nodes: mergeById(state.nodes, incoming),
+              edges: mergeById(state.edges, graph.edges.map(mapCanvasEdgeToReactFlow)),
+              macraNodes: (() => {
+                const merged = new Map(state.macraNodes)
+                macraNodesMap.forEach((v, k) => merged.set(k, v))
+                return merged
+              })(),
+              ...(Object.keys(citationsMap).length > 0 ? { citations: citationsMap } : {})
+            }
+          }
+          return {
+            nodes: incoming,
+            edges: graph.edges.map(mapCanvasEdgeToReactFlow),
+            macraNodes: macraNodesMap,
+            ...(Object.keys(citationsMap).length > 0 ? { citations: citationsMap } : {})
+          }
         })
       }
 

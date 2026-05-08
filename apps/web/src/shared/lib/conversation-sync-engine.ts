@@ -238,6 +238,32 @@ export function watchConversation(options: WatchConversationOptions) {
 
       if (event.type === 'status') {
         if (event.status === 'completed') {
+          // P11.18 fix · before resolving, do ONE final FULL refetch
+          // from PG and REPLACE the local graph state. This consolidates
+          // any nodes that may have been lost due to:
+          //   - WS event drops (silent reconnect)
+          //   - delta events arriving out-of-order
+          //   - subscriber latency (event published before client subscribed)
+          // PG is authoritative — by the time status=completed fires,
+          // every node has been persisted via graphStore.persistGraph.
+          // User-visible repro before fix: BMC pipeline persists 18 nodes
+          // to PG, but only 3 reach frontend → user sees "一条直线" until
+          // they manually reload.
+          if (options.loadLatestGraph) {
+            options
+              .loadLatestGraph()
+              .then((latestGraph) => {
+                if (latestGraph) options.onGraphAppended?.(latestGraph)
+              })
+              .catch((err) => {
+                console.warn('[conversation-sync] final refetch failed', err)
+              })
+              .finally(() => {
+                cancel()
+                resolve()
+              })
+            return
+          }
           cancel()
           resolve()
         }
