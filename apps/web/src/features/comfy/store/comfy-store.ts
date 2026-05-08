@@ -9,8 +9,6 @@ import type {
   MacraNodeData,
   MacraEdgeData,
   CanvasAction,
-  CriticRequest,
-  CriticResponse
 } from '@/types/macra'
 import type { CanvasNode, CanvasEdge, WorkspaceGraphResponse } from '@/types/graph'
 import {
@@ -2620,88 +2618,75 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
   },
 
   // ============== AI Critic 调用 ==============
+  // P12 fix · was hitting Next.js /api/macra/critic which uses its
+  // OWN LLM_API_KEY env (not configured in dev → 500 Internal Server
+  // Error). Now routes through the proper backend `mentionAgent`
+  // GraphQL mutation, which goes through the full critic pipeline:
+  //   - critic-agent.yaml ReAct loop
+  //   - LLM-failed → rule-based fallback
+  //   - canvas_graphs persistence
+  //   - conflict-alert nodes + red-dashed edges via build-conflict-edges
+  //   - audit log (`critic.llm-failed-rule-based-fallback`)
+  // The legacy /api/macra/critic route can be removed once we confirm
+  // no other caller; for now the Next.js route stays as orphan code.
   callCritic: async () => {
-    const { nodes, macraNodes, lastCriticRun } = get()
+    const { nodes, lastCriticRun, workspaceId } = get()
 
-    // 避免频繁调用（至少间隔5秒）
+    // Throttle: 5s minimum gap between manual Re-Calc clicks.
     if (lastCriticRun && Date.now() - lastCriticRun < 5000) {
       return
     }
-
-    // 只在节点数 > 3 时触发
+    // Need at least 4 nodes for cross-dimension conflict detection.
     if (nodes.length <= 3) {
       return
+    }
+    if (!workspaceId) {
+      throw new Error('Critic 调用失败：未关联 workspace')
     }
 
     set({ isCriticProcessing: true, lastCriticRun: Date.now() })
 
     try {
-      const { edges } = get()
-
-      const request: CriticRequest = {
-        canvas_data: {
-          nodes: Array.from(macraNodes.values()),
-              edges: edges.map(e => ({
-                source: e.source,
-                target: e.target,
-                label: e.label as string,
-                type: (e.type as MacraEdgeData['type']) || 'default'
-              }))
-            }
-          }
-
-      const response = await fetch('/api/macra/critic', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request)
+      const { getGraphQLClient } = await import('@/shared/lib/graphql-client')
+      const client = getGraphQLClient()
+      const response = await client.request<{
+        mentionAgent: {
+          agentId: string
+          reply: string
+          refused: boolean
+          refusalReason: string | null
+          appendedNodes: Array<{ id: string }>
+          appendedEdges: Array<{ id: string }>
+        }
+      }>(MENTION_AGENT_MUTATION, {
+        input: {
+          workspaceId,
+          agentId: 'critic-agent',
+          message: '基于当前画布的所有 BMC 节点检测跨维度逻辑冲突 / 资源-目标冲突 / 合规-业务冲突。',
+        },
       })
 
-      if (!response.ok) {
-        throw new Error(`Critic API 失败: ${response.statusText}`)
-      }
-
-      const data: CriticResponse = await response.json()
-
-      if (data.conflicts && data.conflicts.length > 0) {
-        // 创建冲突可视化
-        for (const conflict of data.conflicts) {
-          const conflictAction: CanvasAction = {
-            action: 'create_edge',
-            data: {
-              source: conflict.source_node_id,
-              target: conflict.target_node_id,
-              label: conflict.visualization.label,
-              type: 'conflict',
-              animated: conflict.visualization.style.animated,
-              style: {
-                stroke: conflict.visualization.style.stroke,
-                strokeWidth: conflict.visualization.style.strokeWidth
-              }
-            }
-          }
-
-          await get().applyCanvasActions([conflictAction])
-
-          // 可选：创建冲突警示节点
-          const alertNode: MacraNodeData = {
-            id: `conflict-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'conflict-alert',
-            label: `冲突警告`,
-            content: `**原因**: ${conflict.reason}\n\n**建议**: ${conflict.suggestion}`,
-            metadata: {
-              agent_signature: 'Adversarial_Critic',
-              confidence: 'high'
-            },
-            severity: conflict.severity,
-            conflictType: 'other',
-            position: {
-              x: Math.random() * 300 + 200,
-              y: Math.random() * 300 + 200
-            }
-          }
-
-          get().createMacraNode(alertNode)
-        }
+      const result = response.mentionAgent
+      if (result.refused) {
+        get().appendChatMessage({
+          role: 'assistant',
+          content: `Critic 暂未给出更新：${result.refusalReason ?? '未知原因'}`,
+          source: 'scripted',
+        })
+      } else {
+        // Backend mentionAgent already persisted appended nodes / edges
+        // to canvas_graphs and pushed via subscription. The watcher in
+        // `subscribeConversationProgress` handles state merge — no need
+        // to apply locally. We DO show the reply text in chat for
+        // user feedback.
+        const conflictCount = result.appendedNodes.length
+        get().appendChatMessage({
+          role: 'assistant',
+          content: conflictCount > 0
+            ? `Critic 检测到 ${conflictCount} 处可能冲突，已在画布上标记为红虚线。\n\n${result.reply}`
+            : `Critic 扫描完成，未发现重大冲突。\n\n${result.reply}`,
+          source: 'scripted',
+        })
       }
 
       set({ isCriticProcessing: false })

@@ -48,6 +48,14 @@ export interface WorkspaceMemoryRecord {
   tags?: string[]
   sourceTraceId: string
   metadata?: Record<string, unknown>
+  /**
+   * P12 fix · the bridged PG store inserts into memory_items which has
+   * NOT NULL constraint on user_id. Previously the field wasn't on the
+   * record shape, so writeConversationSummary failed every time with
+   * "null value in column 'user_id' violates not-null constraint".
+   * Now optional but BusinessLangGraph passes it through.
+   */
+  userId?: string | null
 }
 
 export interface WorkspaceMemoryStore {
@@ -186,6 +194,11 @@ export class PgBridgedWorkspaceStore implements WorkspaceMemoryStore {
 
     await this.conversationMemoryStore.upsertMemory({
       workspaceId,
+      // P12 fix · forward userId so memory_items.user_id constraint
+      // is satisfied. Caller (BusinessLangGraph.writeConversationSummary)
+      // passes userId from BusinessState; if a synthetic call omits it,
+      // we fall back to '__system__' so the row still inserts cleanly.
+      userId: entry.userId ?? '__system__',
       scope: 'workspace',
       kind: 'summary',
       title,

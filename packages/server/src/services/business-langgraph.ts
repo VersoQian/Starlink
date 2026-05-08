@@ -1775,6 +1775,11 @@ ${snippets}
         content,
         tags,
         sourceTraceId: args.traceId,
+        // P12 fix · forward userId so memory_items NOT NULL constraint
+        // satisfied. Without this, every BMC stream end logs
+        // "null value in column 'user_id' violates not-null constraint"
+        // and silently loses the cross-conversation summary.
+        userId: args.userId,
         metadata: {
           bmcNodeCount: args.bmcNodeCount,
           conflictCount: args.conflictCount,
