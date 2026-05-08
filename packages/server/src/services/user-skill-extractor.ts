@@ -151,6 +151,21 @@ export class UserSkillExtractor {
 
       const summaries = await this.memoryStore.listUserSummaries(params.userId, 5)
       if (summaries.length === 0) {
+        // P12 fix L · symmetric completion log so frontend doesn't see
+        // tier-selected without a paired terminal event. The early-exit
+        // path was previously silent; on-demand refresh callers (e.g.
+        // /memory panel "立即更新") had no way to distinguish "still
+        // running" from "ran and found nothing".
+        auditLogger.info({
+          action: 'user-skill-extractor.completed',
+          userId: params.userId,
+          metadata: {
+            mode,
+            traceId: params.traceId,
+            reason: 'no-recent-summaries',
+            applied: 0
+          }
+        })
         return 0
       }
       const existing = await this.memoryStore.searchUserSkills(
