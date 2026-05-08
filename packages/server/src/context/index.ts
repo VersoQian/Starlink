@@ -86,30 +86,40 @@ const executionStore = new ExecutionStore()
 const graphCompiler = new GraphCompiler()
 const graphExecutor = new GraphExecutor(toolRegistry)
 
-let toolsLoaded = false
+// P11.18 fix · race-condition guard. Previously a boolean flag let
+// concurrent first-callers (multiple GraphQL requests on cold start)
+// each see `toolsLoaded === false` and trigger parallel loadAllTools
+// calls, causing 38 duplicate-registration warnings per extra caller.
+// Cache the in-flight promise so concurrent callers await the SAME
+// load and only execute it once.
+let toolsLoadPromise: Promise<void> | null = null
 
 async function ensureToolsLoaded(): Promise<void> {
-  if (!toolsLoaded) {
-    try {
-      await loadAllTools(toolRegistry)
-      setToolRegistryForAgents(toolRegistry)
-    } catch (err) {
-      console.warn('[context] Failed to load tools:', err)
-    }
-    toolsLoaded = true
+  if (!toolsLoadPromise) {
+    toolsLoadPromise = (async () => {
+      try {
+        await loadAllTools(toolRegistry)
+        setToolRegistryForAgents(toolRegistry)
+      } catch (err) {
+        console.warn('[context] Failed to load tools:', err)
+      }
+    })()
   }
+  await toolsLoadPromise
 }
 
-let yamlAgentsLoaded = false
+let yamlAgentsLoadPromise: Promise<void> | null = null
 async function ensureAgentsLoaded(): Promise<void> {
-  if (!yamlAgentsLoaded) {
-    try {
-      await ensureYamlAgentsLoaded()
-    } catch (err) {
-      console.warn('[context] Failed to load YAML agents:', err)
-    }
-    yamlAgentsLoaded = true
+  if (!yamlAgentsLoadPromise) {
+    yamlAgentsLoadPromise = (async () => {
+      try {
+        await ensureYamlAgentsLoaded()
+      } catch (err) {
+        console.warn('[context] Failed to load YAML agents:', err)
+      }
+    })()
   }
+  await yamlAgentsLoadPromise
 }
 
 export async function createContext(
