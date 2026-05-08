@@ -20,6 +20,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { QuizPanel, type QuizQuestion } from './quiz-panel'
 import { renderAgentOutput } from '../registries/agent-output-renderer-registry'
+import { useResizableDrawer, ResizeHandle } from '@/shared/hooks/use-resizable-drawer'
 
 /**
  * Map a node's `metadata.agent_signature` (e.g. 'Market_Agent',
@@ -77,6 +78,21 @@ export function CCBMCDetailDrawer() {
     return state.macraNodes.get(state.detailPanel.nodeId) ?? null
   })
   const [activeTab, setActiveTab] = useState<TabType>('overview')
+
+  // P12 · resizable. Drag the LEFT edge of the right-anchored drawer
+  // to widen / narrow it. 380-1100px range; default 500px (the
+  // existing baseline). Persisted in localStorage so the user's
+  // preferred reading width sticks across reloads. Hooks must run
+  // unconditionally before the early-return below — React rules of
+  // hooks. The handle JSX is rendered inside the aside so it only
+  // mounts when the drawer is actually visible.
+  const { width: drawerWidth, startDrag: startDrawerDrag } = useResizableDrawer({
+    storageKey: 'starlink:bmcDetailDrawer:width',
+    defaultWidth: 500,
+    minWidth: 380,
+    maxWidth: 1100,
+    direction: 'left'
+  })
 
   if (!detailPanel?.isOpen || !detailPanel?.nodeId) {
     return null
@@ -224,10 +240,12 @@ export function CCBMCDetailDrawer() {
 
       {/* 抽屉主体 — brutalist 1.5px 边，无阴影无圆角 */}
       <aside
-        className="fixed right-0 top-0 bottom-0 w-[500px] max-w-[100vw] bg-white border-l-[1.5px] border-stratum-line z-50 flex flex-col animate-editorial-publish"
+        className="fixed right-0 top-0 bottom-0 max-w-[100vw] bg-white border-l-[1.5px] border-stratum-line z-50 flex flex-col animate-editorial-publish"
         role="dialog"
         aria-modal="true"
+        style={{ width: drawerWidth }}
       >
+        <ResizeHandle edge="left" onMouseDown={startDrawerDrag} />
         {/* 头部 — byline glyph + Fraunces 标题 + mono 维度 kicker */}
         <header className="flex items-start justify-between gap-3 px-6 py-4 border-b-[1.5px] border-stratum-line shrink-0">
           <div className="flex items-baseline gap-3 min-w-0">

@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MessageCircle, Send, Sparkles, X, ArrowRight, Copy, RefreshCw, Check } from 'lucide-react'
 import { useComfyStore } from '../store'
+import { useResizableDrawer, ResizeHandle } from '@/shared/hooks/use-resizable-drawer'
 import { CanvasUserSkillChip } from './canvas-user-skill-chip'
 import { MentionAutocomplete } from './mention-autocomplete'
 import { getAgent } from '../registries/agent-registry'
@@ -113,6 +114,17 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [chatMessages.length, open])
 
+  // P12 · resizable. Hook must run unconditionally before any early
+  // return (rules-of-hooks). The width is only consumed in the open
+  // branch below.
+  const { width, startDrag } = useResizableDrawer({
+    storageKey: 'starlink:chatDock:width',
+    defaultWidth: 360,
+    minWidth: 280,
+    maxWidth: 720,
+    direction: 'right'
+  })
+
   if (!open) {
     return (
       <button
@@ -141,15 +153,17 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
 
   return (
     <aside
-      className="absolute left-4 top-4 bottom-4 z-10 w-[360px] flex flex-col bg-white border-[1px] border-stratum-line shadow-md pointer-events-auto"
+      className="absolute left-4 top-4 bottom-4 z-10 flex flex-col bg-white border-[1px] border-stratum-line shadow-md pointer-events-auto"
       role="region"
       aria-label="多 Agent 对话"
       style={{
+        width,
         // BMC-card aesthetic: 3px ink-tinted left edge instead of round corners.
         // Reads as "this surface is part of the editorial canvas family".
         boxShadow: 'inset 3px 0 0 0 #2A2826, 0 4px 14px rgba(10,10,10,0.08)'
       }}
     >
+      <ResizeHandle edge="right" onMouseDown={startDrag} />
       <header className="flex items-center justify-between px-4 py-3 border-b-[0.5px] border-stratum-line">
         <div>
           <p className="font-body text-[9px] font-bold uppercase tracking-[0.18em] text-stratum-muted">
