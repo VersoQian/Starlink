@@ -5,6 +5,7 @@ import {
   type ToolMessage,
 } from '@starlink/shared'
 import { LLMClient } from '../../services/llm-client.js'
+import { parseLlmJson } from '../shared/llm-json.js'
 
 export default class RiskAssessmentTool extends BaseTool {
   readonly definition: ToolDefinition = {
@@ -75,9 +76,9 @@ export default class RiskAssessmentTool extends BaseTool {
         maxTokens: 2048,
       })
 
-      const parsed = JSON.parse(response.content ?? '{"risks":[]}') as {
+      const parsed = parseLlmJson<{
         risks: Array<{ category: string; level: string; description: string }>
-      }
+      }>(response.content, { risks: [] })
 
       yield { type: 'progress', percent: 100, message: '风险评估完成' }
       yield { type: 'json', data: { risks: parsed.risks } }

@@ -6,6 +6,7 @@
 import { BaseTool } from '@starlink/shared'
 import type { ToolDefinition, ToolContext, ToolMessage } from '@starlink/shared'
 import { LLMClient } from '../../services/llm-client.js'
+import { parseLlmJson } from '../shared/llm-json.js'
 
 const SYSTEM_PROMPT =
   '你是 Critic_Agent（审查专家），负责对 CC-BMC 商业模型画布的所有维度进行逻辑一致性审查。' +
@@ -96,7 +97,14 @@ export default class CriticAgentTool extends BaseTool {
       suggestion: string
     }>
     try {
-      const parsed = JSON.parse(response.content ?? '{}')
+      const parsed = parseLlmJson<{
+        conflicts?: Array<{
+          description: string
+          severity: string
+          relatedAgents: string[]
+          suggestion: string
+        }>
+      }>(response.content, { conflicts: [] })
       conflicts = parsed.conflicts ?? []
     } catch {
       conflicts = [

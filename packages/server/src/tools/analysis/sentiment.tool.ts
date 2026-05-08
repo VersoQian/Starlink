@@ -5,6 +5,7 @@ import {
   type ToolMessage,
 } from '@starlink/shared'
 import { LLMClient } from '../../services/llm-client.js'
+import { parseLlmJson } from '../shared/llm-json.js'
 
 export default class SentimentAnalysisTool extends BaseTool {
   readonly definition: ToolDefinition = {
@@ -77,10 +78,10 @@ export default class SentimentAnalysisTool extends BaseTool {
         maxTokens: 128,
       })
 
-      const parsed = JSON.parse(response.content ?? '{}') as {
-        score: number
-        label: string
-      }
+      const parsed = parseLlmJson<{ score: number; label: string }>(
+        response.content,
+        { score: 0, label: 'neutral' }
+      )
 
       yield { type: 'progress', percent: 100, message: '分析完成' }
       yield {

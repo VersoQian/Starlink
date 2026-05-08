@@ -5,6 +5,7 @@
 import { BaseTool } from '@starlink/shared'
 import type { ToolDefinition, ToolContext, ToolMessage } from '@starlink/shared'
 import { LLMClient } from '../../services/llm-client.js'
+import { parseLlmJson } from '../shared/llm-json.js'
 
 const SYSTEM_PROMPT =
   '你是一个文本摘要专家。请将用户提供的文本压缩为简洁、准确的摘要，保留核心要点。' +
@@ -83,7 +84,10 @@ export default class SummarizerTool extends BaseTool {
 
     let summary: string
     try {
-      const parsed = JSON.parse(response.content ?? '{}')
+      const parsed = parseLlmJson<{ summary?: string }>(
+        response.content,
+        { summary: response.content ?? '' }
+      )
       summary = parsed.summary ?? response.content ?? ''
     } catch {
       summary = response.content ?? ''

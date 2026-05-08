@@ -5,6 +5,7 @@ import {
   type ToolMessage,
 } from '@starlink/shared'
 import { LLMClient } from '../../services/llm-client.js'
+import { parseLlmJson } from '../shared/llm-json.js'
 
 export default class CompetitiveCompareTool extends BaseTool {
   readonly definition: ToolDefinition = {
@@ -85,9 +86,10 @@ export default class CompetitiveCompareTool extends BaseTool {
         maxTokens: 2048,
       })
 
-      const parsed = JSON.parse(response.content ?? '{"matrix":{}}') as {
-        matrix: object
-      }
+      const parsed = parseLlmJson<{ matrix: object }>(
+        response.content,
+        { matrix: {} }
+      )
 
       yield { type: 'progress', percent: 100, message: '对比分析完成' }
       yield { type: 'json', data: { matrix: parsed.matrix } }

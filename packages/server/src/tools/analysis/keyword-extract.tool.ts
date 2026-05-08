@@ -5,6 +5,7 @@ import {
   type ToolMessage,
 } from '@starlink/shared'
 import { LLMClient } from '../../services/llm-client.js'
+import { parseLlmJson } from '../shared/llm-json.js'
 
 export default class KeywordExtractTool extends BaseTool {
   readonly definition: ToolDefinition = {
@@ -81,9 +82,10 @@ export default class KeywordExtractTool extends BaseTool {
         maxTokens: 512,
       })
 
-      const parsed = JSON.parse(response.content ?? '{"keywords":[]}') as {
-        keywords: string[]
-      }
+      const parsed = parseLlmJson<{ keywords: string[] }>(
+        response.content,
+        { keywords: [] }
+      )
 
       yield { type: 'progress', percent: 100, message: '提取完成' }
       yield {
