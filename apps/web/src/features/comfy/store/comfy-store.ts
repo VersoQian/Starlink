@@ -2263,6 +2263,28 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       set({ socraticTurnCounter: nextCounter })
       if (nextCounter % META_CHECK_INTERVAL === 0) {
         try {
+          // P11.18 fix · re-read fresh canvas snapshot for meta-check.
+          // Previously this reused `canvasNodes` / `state.edges.length`
+          // captured at the START of reflectOnChat — which means if the
+          // user just triggered BMC generation (and 9 cells materialised
+          // mid-await), the meta-check still saw the OLD empty canvas
+          // and emitted "画布完全空白" while the canvas was actually full.
+          // Bug repro: type idea → "准备生成BMC" → BMC generates → meta
+          // says "canvas empty, suggest /wizard" — directly contradicting
+          // what the user sees.
+          const fresh = get()
+          const freshNodeArray = Array.from(fresh.macraNodes.values())
+          const freshCanvasNodes = freshNodeArray.map((n) => ({
+            id: n.id,
+            kind: n.type ?? 'cc-bmc-card',
+            label: n.label ?? '',
+            content: typeof n.content === 'string' ? n.content : '',
+          }))
+          const freshNodeCountByKind: Record<string, number> = {}
+          for (const n of freshNodeArray) {
+            const k = n.type ?? 'unknown'
+            freshNodeCountByKind[k] = (freshNodeCountByKind[k] ?? 0) + 1
+          }
           const metaResponse = await client.request<{
             reflectOnIdeation: { scaffold: ChatScaffold; content: string; source: 'llm' | 'scripted' | 'error' }
           }>(
@@ -2277,13 +2299,13 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               input: {
                 event: { type: 'meta-check' },
                 canvas: {
-                  nodes: canvasNodes,
-                  edgeCount: state.edges.length,
-                  nodeCountByKind,
+                  nodes: freshCanvasNodes,
+                  edgeCount: fresh.edges.length,
+                  nodeCountByKind: freshNodeCountByKind,
                 },
                 recentChat,
                 firedMetaIds: [],
-                workspaceId: state.workspaceId,
+                workspaceId: fresh.workspaceId,
               },
             }
           )

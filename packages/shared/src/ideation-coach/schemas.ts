@@ -36,6 +36,19 @@ export type ScaffoldKind = z.infer<typeof ScaffoldKindSchema>
 
 const NodeKindZ = z.enum(IDEATION_NODE_KINDS)
 
+/**
+ * P11.18 · Looser node-kind schema for the canvas snapshot. The
+ * Coach's input may include post-graduation BMC nodes (cc-bmc-card,
+ * agent-avatar, insight-note, conflict-alert, data-source, report-card)
+ * in addition to the strict IDEATION_NODE_KINDS. Zod's enum was
+ * silently dropping these to undefined, which made the prompt builder
+ * see canvas.nodes as empty even when the BMC was full — directly
+ * causing the "画布完全空白" message bug. Use a lenient z.string()
+ * here so the prompt builder receives the raw kind string and can
+ * route on it (cc-bmc-card → "BMC stage" branch).
+ */
+const CanvasNodeKindZ = z.string()
+
 export const ReflectionRequestSchema = z.object({
   event: z.discriminatedUnion('type', [
     z.object({
@@ -65,7 +78,9 @@ export const ReflectionRequestSchema = z.object({
       .array(
         z.object({
           id: z.string(),
-          kind: NodeKindZ,
+          // P11.18 fix · accept any string kind so post-graduation BMC
+          // node types (cc-bmc-card etc.) survive validation.
+          kind: CanvasNodeKindZ,
           label: z.string(),
           content: z.string()
         })
