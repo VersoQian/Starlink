@@ -256,6 +256,210 @@ export const BusinessState = Annotation.Root({
 
 export type BusinessStateType = typeof BusinessState.State
 
+/**
+ * P15 S1 · Field-by-field contract for the BusinessState blackboard.
+ *
+ * Documents who-writes / who-reads / mutability for every slot. The type
+ * is read-only structured data so service modules can introspect the
+ * contract at boot (e.g. supervisor wiring asserts that every active
+ * agent appears in `writers` of the slots it claims).
+ *
+ * If you add a slot to BusinessState above, add the corresponding entry
+ * here. The agent-layer test suite asserts contract.length === Object.keys(
+ * BusinessState.spec).length to keep these in sync.
+ */
+export type BusinessStateField = {
+  slot: string
+  /** What this slot stores in plain language. */
+  description: string
+  /** Service / phase that writes this slot. 'reducer' = mergeByIdReducer
+   *  preserves prior values; 'last-write-wins' = standard LangGraph. */
+  reducer: 'last-write-wins' | 'merge-by-id'
+  /** Which services / methods are EXPECTED to write into this slot. */
+  writers: ReadonlyArray<string>
+  /** Which services / methods read from this slot to compute their work. */
+  readers: ReadonlyArray<string>
+  /** True if reset to default at the start of every revision round. */
+  perRound: boolean
+}
+
+export const BUSINESS_STATE_CONTRACT: ReadonlyArray<BusinessStateField> = [
+  // ----- Context (immutable across the run) -----
+  {
+    slot: 'traceId',
+    description: 'Request-scoped trace ID; primary key for handoff log + OTel.',
+    reducer: 'last-write-wins',
+    writers: ['streamConversation init'],
+    readers: ['*every service*', 'handoff log', 'audit logger'],
+    perRound: false
+  },
+  {
+    slot: 'workspaceId',
+    description: 'Owning workspace; scopes memory + canvas writes.',
+    reducer: 'last-write-wins',
+    writers: ['streamConversation init'],
+    readers: ['SupervisorService', 'GenerationService', 'memoryConsolidator'],
+    perRound: false
+  },
+  {
+    slot: 'userId',
+    description: 'Owning user; scopes user-skill retrieval + audit identity.',
+    reducer: 'last-write-wins',
+    writers: ['streamConversation init'],
+    readers: ['*memory layer*', 'auditLogger'],
+    perRound: false
+  },
+  {
+    slot: 'question',
+    description: 'Verbatim user prompt for this run.',
+    reducer: 'last-write-wins',
+    writers: ['streamConversation init'],
+    readers: ['SupervisorService.classifyIntent', 'GenerationService projection'],
+    perRound: false
+  },
+  {
+    slot: 'contextPrompt',
+    description: 'Pre-rendered prompt block (workspace context + KB evidence).',
+    reducer: 'last-write-wins',
+    writers: ['streamConversation init'],
+    readers: ['GenerationService projection', 'CriticService'],
+    perRound: false
+  },
+
+  // ----- Control / routing -----
+  {
+    slot: 'intent',
+    description: 'classifyIntent output: generate_bmc | analyze | detect_conflicts | general | deep_research.',
+    reducer: 'last-write-wins',
+    writers: ['SupervisorService.classifyIntent'],
+    readers: ['SupervisorService.runSupervisor', 'createGraph routing'],
+    perRound: false
+  },
+  {
+    slot: 'roundNumber',
+    description: 'Revision round counter; increments after critic conflicts trigger another loop.',
+    reducer: 'last-write-wins',
+    writers: ['SupervisorService.runSupervisor'],
+    readers: ['*every service*'],
+    perRound: false
+  },
+  {
+    slot: 'supervisorDirective',
+    description: 'Routing decisions + revision guidance for this round (active agents + RoutingDecision[]).',
+    reducer: 'last-write-wins',
+    writers: ['SupervisorService.runSupervisor', 'SupervisorService.runSupervisorRegistry'],
+    readers: ['GenerationService', 'CriticService', 'createGraph isAgentActive'],
+    perRound: true
+  },
+  {
+    slot: 'crossContext',
+    description: 'Inter-agent shared summaries (market/product/finance + synth notes).',
+    reducer: 'last-write-wins',
+    writers: ['SynthesisService.buildCrossContext'],
+    readers: ['GenerationService projection (cross-context block)'],
+    perRound: false
+  },
+
+  // ----- BMC cells (per-domain) -----
+  {
+    slot: 'marketNodes',
+    description: 'Market-domain BMC cells (customer-segments / channels / customer-relationships).',
+    reducer: 'merge-by-id',
+    writers: ['GenerationService.runMarketAgent'],
+    readers: ['CriticService', 'SynthesisService', 'StreamCoordinator delta emit'],
+    perRound: false
+  },
+  {
+    slot: 'productNodes',
+    description: 'Product-domain BMC cells (value-prop / KP / KA / KR).',
+    reducer: 'merge-by-id',
+    writers: ['GenerationService.runProductAgent'],
+    readers: ['CriticService', 'SynthesisService', 'StreamCoordinator'],
+    perRound: false
+  },
+  {
+    slot: 'financeNodes',
+    description: 'Finance-domain BMC cells (revenue-streams / cost-structure).',
+    reducer: 'merge-by-id',
+    writers: ['GenerationService.runFinanceAgent'],
+    readers: ['CriticService', 'SynthesisService', 'StreamCoordinator'],
+    perRound: false
+  },
+  {
+    slot: 'generalNodes',
+    description: 'General-responder / deep-research insights (non-BMC).',
+    reducer: 'last-write-wins',
+    writers: ['GenerationService.runGeneralResponder', 'GenerationService.runDeepResearchAgent'],
+    readers: ['StreamCoordinator delta emit'],
+    perRound: false
+  },
+
+  // ----- Synthesizer / critic outputs -----
+  {
+    slot: 'agentAvatars',
+    description: 'Agent presence avatars rendered onto the canvas (1 per active agent).',
+    reducer: 'merge-by-id',
+    writers: ['SynthesisService.buildAgentAvatars'],
+    readers: ['StreamCoordinator delta emit'],
+    perRound: false
+  },
+  {
+    slot: 'edges',
+    description: 'BMC edges + synthesizer cross-domain edges + user-drawn.',
+    reducer: 'merge-by-id',
+    writers: ['SynthesisService.buildBMCEdges', 'mention-router user-drawn'],
+    readers: ['StreamCoordinator delta emit'],
+    perRound: false
+  },
+  {
+    slot: 'conflicts',
+    description: 'Critic-detected conflicts as MacraNodeData with relatedAgents[].',
+    reducer: 'last-write-wins',
+    writers: ['CriticService.runCritic'],
+    readers: ['DebateService.maybeRunDebates', 'SupervisorService (next round)'],
+    perRound: true
+  },
+  {
+    slot: 'knowledgeEvidence',
+    description: 'KB-cited chunks for this run; flows from createBusinessStream init.',
+    reducer: 'last-write-wins',
+    writers: ['streamConversation init'],
+    readers: ['GenerationService (citation parsing)', 'memoryConsolidator'],
+    perRound: false
+  },
+  {
+    slot: 'moderatorVerdict',
+    description: "P11.10 — moderator's verdict to continue or accept after each critic round.",
+    reducer: 'last-write-wins',
+    writers: ['DebateService.runModerator'],
+    readers: ['createGraph conditional edge to END'],
+    perRound: true
+  }
+] as const
+
+/**
+ * Helper: assert at boot that the contract matches the runtime
+ * Annotation.spec — guards against silent drift when slots are added
+ * to BusinessState without a corresponding contract entry.
+ */
+export function assertBusinessStateContractInSync(): void {
+  const annotationKeys = new Set(Object.keys(BusinessState.spec))
+  const contractKeys = new Set(BUSINESS_STATE_CONTRACT.map((f) => f.slot))
+  const missingFromContract: string[] = []
+  for (const k of annotationKeys) {
+    if (!contractKeys.has(k)) missingFromContract.push(k)
+  }
+  const missingFromAnnotation: string[] = []
+  for (const k of contractKeys) {
+    if (!annotationKeys.has(k)) missingFromAnnotation.push(k)
+  }
+  if (missingFromContract.length > 0 || missingFromAnnotation.length > 0) {
+    throw new Error(
+      `BUSINESS_STATE_CONTRACT drift: missing-from-contract=${JSON.stringify(missingFromContract)} missing-from-annotation=${JSON.stringify(missingFromAnnotation)}`
+    )
+  }
+}
+
 // ============== Stream Update 类型 ==============
 export type GraphDelta = {
   nodes?: CanvasNode[]

@@ -145,10 +145,15 @@ export {
 
 const otelTracer = getTracer('starlink/business-langgraph')
 
-// Per-conversation root span context, looked up by traceId so child spans
-// (supervisor / agent invoke / critic / debate) can attach as descendants
-// even when called from inside the LangGraph stream callback chain.
-const businessSpanContexts = new Map<string, OtelContext>()
+// P15 S1 · Per-conversation root span context map moved into
+// `business-langgraph/stream-lifecycle.ts` (re-exported from there
+// as `businessSpanContexts`). Lookup goes through `parentCtxFor`.
+import {
+  openStreamLifecycle,
+  closeStreamLifecycle,
+  parentCtxFor,
+  businessSpanContexts
+} from './business-langgraph/stream-lifecycle.js'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
@@ -407,17 +412,17 @@ export class BusinessLangGraphService {
       status: 'started'
     })
 
-    // OTel root span for this conversation. Child spans attach via the context
-    // we register in `businessSpanContexts` keyed by traceId.
-    const businessSpan = otelTracer.startSpan('business.streamConversation', {
-      attributes: {
-        'starlink.workspace_id': context.workspaceId,
-        'starlink.user_id': context.userId,
-        'starlink.trace_id': traceId
-      }
-    })
-    const businessCtx = trace.setSpan(otelContext.active(), businessSpan)
-    businessSpanContexts.set(traceId, businessCtx)
+    // P15 S1 · OTel span + heartbeat + handoff logger lifecycle delegated
+    // to stream-lifecycle.ts. Returns handles for {span, businessCtx,
+    // handoffLogger, drainHandoffs, unsubscribeHandoff, stopHeartbeat,
+    // streamStartedAt}. Cleanup runs in finally below via closeStreamLifecycle.
+    const lifecycle = openStreamLifecycle(
+      { conversationMemoryStore: this.conversationMemoryStore },
+      { workspaceId: context.workspaceId, userId: context.userId, traceId }
+    )
+    const businessSpan = lifecycle.span
+    const handoffLogger = lifecycle.handoffLogger
+    const drainHandoffs = lifecycle.drainHandoffs
 
     yield {
       type: 'init',
@@ -438,47 +443,11 @@ export class BusinessLangGraphService {
         delta: builder.addInsightNode('未配置 LLM', '请在 .env 文件中配置 LLM_API_KEY 环境变量', 'planning')
       }
       yield { type: 'status', status: 'completed' }
+      closeStreamLifecycle(lifecycle, { workspaceId: context.workspaceId, userId: context.userId, traceId }, 'completed')
       return
     }
 
     const graph = await this.createGraph()
-
-    // P1: heartbeat-driven session lifecycle — every 30s, touch the
-    // session's heartbeat_at column. The reaper script (run via cron)
-    // looks for 'running' rows with stale heartbeats and marks them
-    // 'failed' with reason='heartbeat-lost'. This unblocks the workspace
-    // soft-lock when a gateway crashes mid-stream without manual SQL.
-    const ownerPid = `gateway-${process.pid}-${nanoid(6)}`
-    const heartbeatTimer = setInterval(() => {
-      void this.conversationMemoryStore
-        .touchHeartbeat(traceId, ownerPid)
-        .catch((err) => {
-          auditLogger.warn({
-            action: 'business-langgraph.heartbeat.failed',
-            requestId: traceId,
-            workflowId: context.workspaceId,
-            userId: context.userId,
-            metadata: { error: err instanceof Error ? err.message : String(err) }
-          })
-        })
-    }, 30_000)
-    // Fire one heartbeat immediately so the row's heartbeat_at column
-    // is non-NULL before the first interval fires (avoids treating a
-    // brand-new session as already stale during the grace window).
-    void this.conversationMemoryStore.touchHeartbeat(traceId, ownerPid).catch(() => {})
-
-    // Phase 3.1 · subscribe to handoff logger so we can stream events to client.
-    const handoffLogger = getHandoffLogger(traceId)
-    const handoffQueue: Handoff[] = []
-    const unsubscribeHandoff = handoffLogger.subscribe((h) => handoffQueue.push(h))
-    const drainHandoffs = (): BusinessStreamUpdate[] => {
-      const out: BusinessStreamUpdate[] = []
-      while (handoffQueue.length > 0) {
-        const h = handoffQueue.shift()
-        if (h) out.push({ type: 'handoff', handoff: h })
-      }
-      return out
-    }
 
     let bmcNodeCount = 0
     let conflictCount = 0
@@ -759,8 +728,7 @@ export class BusinessLangGraphService {
       yield { type: 'status', status: 'completed' }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      businessSpan.recordException(error as Error)
-      businessSpan.setStatus({ code: SpanStatusCode.ERROR, message })
+      // Span exception + status set inside closeStreamLifecycle('failed', error).
       auditLogger.error({
         action: 'business-langgraph.streamConversation',
         requestId: traceId,
@@ -828,15 +796,17 @@ export class BusinessLangGraphService {
         // throwing in the common failure path; this catch only catches
         // unexpected programmer errors. Intentionally silent.
       }
-      // Stop heartbeat timer — session is no longer active. The status
-      // update below ('completed' / 'failed') is the canonical signal
-      // for the reaper that this row is no longer eligible for recovery.
-      clearInterval(heartbeatTimer)
-      unsubscribeHandoff()
-      releaseHandoffLogger(traceId)
-      releaseDebateBudget(traceId)
-      businessSpanContexts.delete(traceId)
-      businessSpan.end()
+      // P15 S1 · Lifecycle close (heartbeat / handoff unsub / span end /
+      // span ctx delete / debate budget release) delegated to
+      // closeStreamLifecycle. The 'completed' vs 'failed' outcome is
+      // approximate here — the actual yield 'status' above is canonical
+      // for the wire; closeStreamLifecycle just chooses which OTel span
+      // status code to set. Pass undefined error for the success path.
+      closeStreamLifecycle(
+        lifecycle,
+        { workspaceId: context.workspaceId, userId: context.userId, traceId },
+        'completed'
+      )
     }
   }
 
@@ -1451,9 +1421,12 @@ ${snippets}
 
   // ============== Phase C · Registry-mode supervisor ==============
 
-  /** Resolves the parent OTel context for a given traceId, falling back to active. */
+  /** Resolves the parent OTel context for a given traceId, falling back
+   *  to active. Thin wrapper around `parentCtxFor` (extracted to
+   *  stream-lifecycle.ts in P15 S1) — kept as a private method so call
+   *  sites don't need to know about the module-level helper. */
   private parentCtx(traceId: string): OtelContext {
-    return businessSpanContexts.get(traceId) ?? otelContext.active()
+    return parentCtxFor(traceId)
   }
 
   private async runSupervisorRegistry(
