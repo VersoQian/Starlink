@@ -435,6 +435,13 @@ export class ConversationMemoryStore {
    * searchUserSkills, this method does NOT take a workspaceId — it
    * deliberately walks the user's entire skill set.
    */
+  /**
+   * @deprecated P14 P5 · use {@link MemoryRetrievalService.retrieve} instead:
+   *   retrieve({ layers: ['user', 'workspace'], userId,
+   *              categories: ['user-skill'], rankBy: 'recency', topK: limit })
+   * Used by UserSkillConsolidator for cross-workspace pattern detection;
+   * retrieve() returns the same set with a uniform sort.
+   */
   async listAllUserSkillsForUser(userId: string, limit = 200): Promise<MemoryItem[]> {
     await this.ensureTables()
     const cap = clampLimit(limit, 1, 500)
@@ -821,6 +828,13 @@ export class ConversationMemoryStore {
     })
   }
 
+  /**
+   * @deprecated P14 P5 · use {@link MemoryRetrievalService.retrieve} instead:
+   *   retrieve({ layers: ['workspace'], workspaceId, queryText, topK })
+   * Returns RankedMemory[] with explainable score breakdown (cosine /
+   * recency / importance / confidence). The wrapper here continues to
+   * work for back-compat; new code should call retrieve directly.
+   */
   async listMemories(
     workspaceId: string,
     options: MemorySearchOptions = {}
@@ -847,6 +861,12 @@ export class ConversationMemoryStore {
     return result.rows.map(rowToMemory)
   }
 
+  /**
+   * @deprecated P14 P5 · use {@link MemoryRetrievalService.retrieve} instead:
+   *   retrieve({ layers: ['workspace', 'user'], workspaceId, queryText: query, topK: limit })
+   * The new path has the canonical salience formula (cosine × recency
+   * × importance × confidence) with explainable per-row breakdown.
+   */
   async searchMemories(
     workspaceId: string,
     query: string,
@@ -923,6 +943,14 @@ export class ConversationMemoryStore {
    * themselves at render time; this method returns all rows so the
    * extractor can also see low-confidence items it might want to reinforce.
    */
+  /**
+   * @deprecated P14 P5 · use {@link MemoryRetrievalService.retrieve} instead:
+   *   retrieve({ layers: ['user', 'workspace'], userId, workspaceId,
+   *              categories: ['user-skill'], queryText, topK })
+   * The legacy method merges scope=workspace + scope=user via the
+   * `includeGlobalUser` flag; retrieve() handles this transparently
+   * via the layers + workspace+user filter combination.
+   */
   async searchUserSkills(
     userId: string,
     workspaceId: string,
@@ -966,6 +994,13 @@ export class ConversationMemoryStore {
    * writeConversationSummary in business-langgraph.ts). Bypasses
    * workspace_id filter intentionally — this is the one query in the store
    * that is per-USER not per-WORKSPACE.
+   */
+  /**
+   * @deprecated P14 P5 · use {@link MemoryRetrievalService.retrieve} instead:
+   *   retrieve({ layers: ['workspace'], userId,
+   *              categories: ['bmc-summary'], rankBy: 'recency', topK: limit })
+   * Note: this method bypasses workspace_id filter (per-user, not
+   * per-workspace) — retrieve() achieves the same by passing only userId.
    */
   async listUserSummaries(userId: string, limit = 10): Promise<MemoryItem[]> {
     await this.ensureTables()
@@ -1255,6 +1290,13 @@ export class ConversationMemoryStore {
    * rows (e.g. cross-workspace user-skill traits) — workspace-scoped
    * rows from any workspace are excluded to avoid leaking inferences
    * from one workspace into the unrelated context of another.
+   */
+  /**
+   * @deprecated P14 P5 · use {@link MemoryRetrievalService.retrieve} instead:
+   *   retrieve({ layers: ['user', 'workspace'], userId,
+   *              workspaceId, categories: kind ? [mapKindToCategory(kind)] : undefined,
+   *              rankBy: 'recency', topK: limit })
+   * Powers the GraphQL `memoryByUser` query (UI memory drawer).
    */
   async listMemoriesForUser(opts: {
     userId: string
