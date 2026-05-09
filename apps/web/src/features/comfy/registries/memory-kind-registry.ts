@@ -24,15 +24,57 @@ import {
   Sparkles,
 } from 'lucide-react'
 
+/**
+ * P14 P2 · live MemoryKind values (server enum). The 3 deprecated values
+ * (`preference` / `insight` / `constraint`) had 0 production write sites
+ * audited 2026-05-09 and were dropped from the server enum, but UI still
+ * accepts them as a fallback for legacy DB rows that pre-date the cleanup.
+ */
 export type MemoryKindKey =
-  | 'preference'
   | 'decision'
-  | 'insight'
-  | 'constraint'
   | 'summary'
   | 'canvas'
   | 'user-skill'
+  // Deprecated below — kept here so the registry can render legacy rows:
+  | 'preference'
+  | 'insight'
+  | 'constraint'
   | (string & {})
+
+/**
+ * P14 · canonical 5-layer hierarchy for memory_items (replaces legacy
+ * `scope`). Matches `packages/shared/src/schemas/memory.ts`.
+ */
+export type MemoryLayerKey = 'session' | 'workspace' | 'user' | 'global'
+
+/**
+ * P14 · cognitive-science facet for memory content classification
+ * (replaces the lifecycle-axis half of legacy `kind`).
+ */
+export type MemoryFacetKey = 'episodic' | 'semantic' | 'procedural'
+
+/**
+ * Layer registry — short Mandarin label + color tint for chip rendering
+ * in the memory drawer. Matches `tokens-v2.ts` byline accents so layers
+ * are visually distinguishable but not screaming.
+ */
+export const MEMORY_LAYER_REGISTRY: Record<MemoryLayerKey, { label: string; tintClass: string; description: string }> = {
+  session:   { label: '本会话', tintClass: 'text-stratum-blue',   description: 'L1 · 当前对话内的临时记忆（30 日 TTL）' },
+  workspace: { label: '本画布', tintClass: 'text-byline-product', description: 'L2 · 一个 idea 内的记忆（90 日 TTL）' },
+  user:      { label: '跨画布', tintClass: 'text-byline-market',  description: 'L3 · 用户级长期画像（永久）' },
+  global:    { label: '全局',   tintClass: 'text-stratum-muted',  description: 'L4 · 知识库（独立表 kb_chunks）' }
+}
+
+/**
+ * Facet registry — cognitive-science labels mirroring how the memory
+ * literature partitions long-term memory (episodic = events, semantic =
+ * facts, procedural = how-to).
+ */
+export const MEMORY_FACET_REGISTRY: Record<MemoryFacetKey, { label: string; tintClass: string; description: string }> = {
+  episodic:   { label: '情节记忆', tintClass: 'text-byline-product', description: '一次具体经历（会话总结、决策、画布快照）' },
+  semantic:   { label: '语义记忆', tintClass: 'text-byline-market',  description: '抽象的事实/技能（用户画像、偏好、约束）' },
+  procedural: { label: '过程记忆', tintClass: 'text-stratum-muted',  description: '怎么做（工作流模板，当前未启用）' }
+}
 
 export type MemoryKindDescriptor = {
   key: MemoryKindKey
@@ -65,29 +107,32 @@ const KIND_REGISTRY: Record<string, MemoryKindDescriptor> = {
     sortOrder: 1,
     description: '已敲定的关键选择',
   },
+  // P14 P2 · the 3 entries below are deprecated — server stopped writing
+  // them 2026-05-09 (0 production sites). Kept so the UI can still render
+  // legacy DB rows that pre-date migration 016 backfill.
   insight: {
     key: 'insight',
-    label: '洞察',
+    label: '洞察 (旧)',
     tintClass: 'text-byline-product',
     icon: Lightbulb,
     sortOrder: 2,
-    description: '推演中浮现的判断与证据',
+    description: '【已弃用 P14 P2】legacy kind — 新代码用 facet=semantic + category=workspace-fact',
   },
   constraint: {
     key: 'constraint',
-    label: '约束',
+    label: '约束 (旧)',
     tintClass: 'text-stratum-danger',
     icon: Lock,
     sortOrder: 3,
-    description: '不可逾越的边界与限制',
+    description: '【已弃用 P14 P2】legacy kind — 新代码用 facet=semantic + category=user-constraint',
   },
   preference: {
     key: 'preference',
-    label: '偏好',
+    label: '偏好 (旧)',
     tintClass: 'text-byline-market',
     icon: Bookmark,
     sortOrder: 4,
-    description: '用户在风格 / 优先级上的取向',
+    description: '【已弃用 P14 P2】legacy kind — 新代码用 facet=semantic + category=user-preference',
   },
   summary: {
     key: 'summary',

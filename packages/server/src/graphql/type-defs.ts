@@ -157,7 +157,19 @@ export const typeDefs = gql`
     id: ID!
     workspaceId: ID!
     userId: ID
+    """
+    P14 · canonical layer in the 5-level memory hierarchy (session /
+    workspace / user / global). Optional during the deprecation window;
+    may be absent on rows pre-dating migration 016.
+    """
+    layer: String
+    """P14 · cognitive-science facet (episodic / semantic / procedural)."""
+    facet: String
+    """P14 · business-term within (layer, facet) — bmc-summary, user-skill, etc."""
+    category: String
+    """@deprecated P14 P2 — use layer instead."""
     scope: String!
+    """@deprecated P14 P2 — use facet + category instead."""
     kind: String!
     title: String!
     content: String!

@@ -22,7 +22,16 @@ export interface MemoryItem {
   id: string
   workspaceId: string
   userId: string | null
+  /** P14 · canonical layer in the 5-level memory hierarchy. Null on
+   *  rows pre-dating migration 016 (deprecation window). */
+  layer: string | null
+  /** P14 · cognitive-science facet (episodic / semantic / procedural). */
+  facet: string | null
+  /** P14 · business-term within (layer, facet). */
+  category: string | null
+  /** @deprecated P14 P2 — use {@link layer}. */
   scope: string
+  /** @deprecated P14 P2 — use {@link facet} + {@link category}. */
   kind: string
   title: string
   content: string
@@ -54,6 +63,9 @@ const MY_MEMORIES_QUERY = /* GraphQL */ `
       id
       workspaceId
       userId
+      layer
+      facet
+      category
       scope
       kind
       title
@@ -92,6 +104,9 @@ const CORRECT_MEMORY_MUTATION = /* GraphQL */ `
       id
       workspaceId
       userId
+      layer
+      facet
+      category
       scope
       kind
       title

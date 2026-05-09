@@ -27,6 +27,12 @@ import {
   type MemoryItem,
   type KnowledgeEvidenceRef
 } from '../hooks/use-memory-list'
+import {
+  MEMORY_LAYER_REGISTRY,
+  MEMORY_FACET_REGISTRY,
+  type MemoryLayerKey,
+  type MemoryFacetKey
+} from '../registries/memory-kind-registry'
 
 interface MemoryDrawerProps {
   open: boolean
@@ -269,11 +275,44 @@ function MemoryItemCard({ item }: { item: MemoryItem }) {
     <li className="border border-stratum-line bg-white px-4 py-3 hover:shadow-[0_2px_8px_-2px_rgba(0,0,0,0.08)] transition-shadow">
       <header className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2 mb-0.5">
-            <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-stratum-muted">
-              {item.kind} · {item.scope}
-            </span>
-            <span className="font-mono text-[9px] tabular-nums text-stratum-muted">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mb-0.5">
+            {/* P14 · canonical 3-axis chips when present (layer/facet/category).
+                Falls back to legacy `kind · scope` for rows pre-dating
+                migration 016 backfill. */}
+            {item.layer || item.facet || item.category ? (
+              <>
+                {item.layer ? (
+                  <span
+                    className={`font-mono text-[9px] font-bold uppercase tracking-[0.14em] ${
+                      MEMORY_LAYER_REGISTRY[item.layer as MemoryLayerKey]?.tintClass ?? 'text-stratum-muted'
+                    }`}
+                    title={MEMORY_LAYER_REGISTRY[item.layer as MemoryLayerKey]?.description ?? item.layer}
+                  >
+                    {MEMORY_LAYER_REGISTRY[item.layer as MemoryLayerKey]?.label ?? item.layer}
+                  </span>
+                ) : null}
+                {item.facet ? (
+                  <span
+                    className={`font-mono text-[9px] uppercase tracking-[0.14em] ${
+                      MEMORY_FACET_REGISTRY[item.facet as MemoryFacetKey]?.tintClass ?? 'text-stratum-muted'
+                    }`}
+                    title={MEMORY_FACET_REGISTRY[item.facet as MemoryFacetKey]?.description ?? item.facet}
+                  >
+                    · {MEMORY_FACET_REGISTRY[item.facet as MemoryFacetKey]?.label ?? item.facet}
+                  </span>
+                ) : null}
+                {item.category ? (
+                  <span className="font-mono text-[9px] tabular-nums text-stratum-muted">
+                    · {item.category}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-stratum-muted">
+                {item.kind} · {item.scope}
+              </span>
+            )}
+            <span className="font-mono text-[9px] tabular-nums text-stratum-muted ml-auto">
               conf {confidencePct}% · imp {importancePct}%
             </span>
           </div>
