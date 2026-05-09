@@ -86,6 +86,13 @@ const DEFAULT_WEIGHTS = {
   confidence: 0.2
 } as const
 
+export type SalienceWeights = {
+  cosine: number
+  recency: number
+  importance: number
+  confidence: number
+}
+
 const TAU_DAYS_BY_LAYER: Record<MemoryLayer, number> = {
   session: 1,
   workspace: 14,
@@ -94,6 +101,59 @@ const TAU_DAYS_BY_LAYER: Record<MemoryLayer, number> = {
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/**
+ * Pure salience formula — extracted as a standalone function so unit
+ * tests can exercise the math without spinning up a DB. Returns the
+ * composite score in [0, 1] AND the per-component breakdown.
+ *
+ * When `cosine` is null (no queryText), the cosine weight collapses to
+ * 0 and the remaining 3 weights scale up to keep the score in [0, 1].
+ */
+export function computeSalience(input: {
+  cosine: number | null   // null = no queryText
+  ageDays: number         // days since item.lastUsedAt
+  layer: MemoryLayer
+  importance: number
+  confidence: number
+  weights?: Partial<SalienceWeights>
+  tauDaysByLayer?: Partial<Record<MemoryLayer, number>>
+}): {
+  score: number
+  breakdown: { cosine: number; recency: number; importance: number; confidence: number }
+} {
+  const w = { ...DEFAULT_WEIGHTS, ...input.weights }
+  const tauMap = { ...TAU_DAYS_BY_LAYER, ...input.tauDaysByLayer }
+  const tau = tauMap[input.layer] ?? 14
+  const recency = Number.isFinite(tau) ? Math.exp(-Math.max(0, input.ageDays) / tau) : 1
+  const importance = clamp01(input.importance)
+  const confidence = clamp01(input.confidence)
+  const cosineComponent = clamp01(input.cosine ?? 0)
+
+  const hasQuery = input.cosine !== null
+  const sumRest = w.recency + w.importance + w.confidence
+  const scale = hasQuery ? 1 : 1 / sumRest
+  const wCosine = hasQuery ? w.cosine : 0
+  const wRecency = w.recency * scale
+  const wImp = w.importance * scale
+  const wConf = w.confidence * scale
+
+  const score =
+    wCosine * cosineComponent +
+    wRecency * recency +
+    wImp * importance +
+    wConf * confidence
+
+  return {
+    score,
+    breakdown: {
+      cosine: cosineComponent,
+      recency,
+      importance,
+      confidence
+    }
+  }
+}
 
 export class MemoryRetrievalService {
   constructor(
@@ -215,24 +275,10 @@ export class MemoryRetrievalService {
     topK: number
   ): RankedMemory[] {
     const now = Date.now()
-    const weights = { ...DEFAULT_WEIGHTS, ...this.options.weights }
-    const tauDays = { ...TAU_DAYS_BY_LAYER, ...this.options.tauDays }
-
     const hasQuery = Boolean(query.queryText && query.queryText.trim().length > 0)
-    // When no queryText, redistribute the cosine weight proportionally
-    // across the remaining three so the four weights still sum to 1
-    // and the score still ranges in [0,1]. Scale factor = 1 / (1 - cosine).
-    const wCosine = hasQuery ? weights.cosine : 0
-    const sumRest = weights.recency + weights.importance + weights.confidence
-    const scale = hasQuery ? 1 : 1 / sumRest
-    const wRecency = weights.recency * scale
-    const wImp = weights.importance * scale
-    const wConf = weights.confidence * scale
-    // After normalization, wCosine + wRecency + wImp + wConf ≈ 1.
 
     const ranked = rows.map((row): RankedMemory => {
       const layer = (typeof row.layer === 'string' ? row.layer : deriveLayerFromScope(row.scope)) as MemoryLayer
-      const cosine = clamp01(typeof row._cosine === 'number' ? row._cosine : 0)
       const lastUsedRaw = row.last_used_at ?? row.updated_at
       const lastUsedMs = lastUsedRaw instanceof Date
         ? lastUsedRaw.getTime()
@@ -240,24 +286,29 @@ export class MemoryRetrievalService {
         ? new Date(lastUsedRaw).getTime()
         : now
       const ageDays = Math.max(0, (now - lastUsedMs) / MS_PER_DAY)
-      const tau = tauDays[layer] ?? 14
-      const recency = Number.isFinite(tau) ? Math.exp(-ageDays / tau) : 1
-      const importance = clamp01(Number(row.importance ?? 0.5))
-      const confidence = clamp01(Number(row.confidence ?? 0.7))
+      const cosine = hasQuery
+        ? (typeof row._cosine === 'number' ? row._cosine : 0)
+        : null
+      const importance = Number(row.importance ?? 0.5)
+      const confidence = Number(row.confidence ?? 0.7)
 
-      const score = rankBy === 'recency'
-        ? recency
-        : (
-            wCosine * cosine +
-            wRecency * recency +
-            wImp * importance +
-            wConf * confidence
-          )
+      const { score, breakdown } = computeSalience({
+        cosine,
+        ageDays,
+        layer,
+        importance,
+        confidence,
+        weights: this.options.weights,
+        tauDaysByLayer: this.options.tauDays
+      })
+
+      // recency-rank-by override — return only the recency component.
+      const finalScore = rankBy === 'recency' ? breakdown.recency : score
 
       return {
         ...rowToMemoryItem(row, layer),
-        score,
-        scoreBreakdown: { cosine, recency, importance, confidence },
+        score: finalScore,
+        scoreBreakdown: breakdown,
         layer
       }
     })

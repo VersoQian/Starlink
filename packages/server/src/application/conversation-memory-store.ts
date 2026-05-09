@@ -76,9 +76,10 @@ export type UpsertMemoryInput = {
   metadata?: JsonRecord
 }
 
-/** Internal helper: derive (layer, facet, category) from legacy (scope, kind)
- *  when caller didn't supply the new axes. Mirrors migration 016 backfill. */
-function deriveCanonicalAxes(input: UpsertMemoryInput): {
+/** Helper: derive (layer, facet, category) from legacy (scope, kind)
+ *  when caller didn't supply the new axes. Mirrors migration 016 backfill.
+ *  Exported for unit tests; not part of the public store API. */
+export function deriveCanonicalAxes(input: Pick<UpsertMemoryInput, 'layer' | 'facet' | 'category' | 'scope' | 'kind'>): {
   layer: MemoryLayer
   facet: MemoryFacet
   category: MemoryCategory
