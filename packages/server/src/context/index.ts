@@ -3,6 +3,7 @@ import { GraphQLError } from 'graphql'
 import { ConversationStore } from '../application/conversation-store.js'
 import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
 import { MemoryCaptureService } from '../application/memory-capture.js'
+import { MemoryRetrievalService } from '../application/memory-retrieval.js'
 import { TaskEventStore } from '../application/task-event-store.js'
 import { createConversationEventBus } from '../application/conversation-event-bus.js'
 import { createConversationRuntimeRepository } from '../application/conversation-runtime-repository.js'
@@ -71,6 +72,13 @@ setWorkspaceMemoryStore(
 // etc.) should call this instead of upsertMemory / appendMessage / record
 // directly. Old call sites continue to work during the deprecation window.
 export const sharedMemoryCaptureService = new MemoryCaptureService(sharedConversationMemoryStore)
+
+// P14 P5 · MemoryRetrievalService — singleton for the unified read API.
+// Implements the canonical salience formula (cosine × recency × importance
+// × confidence) over the new layer/facet/category axes. Old legacy methods
+// (searchMemories / searchUserSkills / listUserSummaries / etc.) keep
+// working for back-compat; new code calls retrieve() directly.
+export const sharedMemoryRetrievalService = new MemoryRetrievalService(sharedConversationMemoryStore)
 
 // P3 · Single shared UserSkillExtractor instance (per process). The
 // extractor's call counter (Map<userId, count>) is in-memory; a single
