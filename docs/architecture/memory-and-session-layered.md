@@ -1,11 +1,172 @@
-# Memory + Session 层化架构设计 · 2026-05-09
+# Memory + Session 层化架构 · 2026-05-09
 
-> 范围：Starlink 后端的「记忆 + 会话」基础设施。当前已有 ~2700 行散布在 4 个文件
-> 的代码（conversation-memory-store / workspace-memory-store / user-skill-extractor /
-> user-skill-consolidator）+ 7 个 SQL 表，但**层次/生命周期/命名**没有正式契约。
+> **STATUS · P14 已完成 ship（10 commits, 35a2656 → 00ba5f2）**
 >
-> 本文档目标：定下 5 层 × 4 阶段的 canonical 模型，识别现有实现的断层，给出
-> 增量重构 plan。**不在本文档实施**——仅作为后续工作的指导。
+> 范围：Starlink 后端的「记忆 + 会话」基础设施。
+>
+> 本文档既是设计稿也是当前实现的事实文档——所有 5 层 × CCRF 4 阶段
+> + facet/category 三轴 + conversations/runs 拆表 + 5 个 service +
+> LLM 蒸馏 都已 ship。下方 §一-§六 是当时的设计与 audit；§十、§十一 是
+> P14 完成后的最终架构 + 文件映射表（论文直接抽用）。
+
+---
+
+## 十、最终架构（P14 完成后状态）· 论文可抽图
+
+### 10.1 5 层模型
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ L4 · Global       全用户共享          kb_chunks                         │
+│                   ∞ TTL              （独立表，KB ingestion 写）          │
+├────────────────────────────────────────────────────────────────────────┤
+│ L3 · User         一个用户跨 ws       memory_items WHERE layer='user'   │
+│                   ∞ TTL              （user-skill / user-preference /   │
+│                                       user-constraint）                   │
+├────────────────────────────────────────────────────────────────────────┤
+│ L2 · Workspace    一个 idea          memory_items WHERE layer='workspace'│
+│                   90d TTL            + canvas_graphs                     │
+│                                      （bmc-summary / canvas-snapshot /   │
+│                                       decision / workspace-fact）         │
+├────────────────────────────────────────────────────────────────────────┤
+│ L1 · Session      一次 conversation   conversation_messages（raw chat） │
+│                   30d TTL            + memory_items WHERE layer='session'│
+├────────────────────────────────────────────────────────────────────────┤
+│ L0 · Working      当前 stream         BusinessState (in-mem only)        │
+│                   stream 结束即丢     LangGraph checkpoints (HITL only)  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 Schema 三轴（替代旧 7 kinds × 3 scopes 死格矩阵）
+
+```
+memory_items.layer      ∈ {session, workspace, user, global}
+memory_items.facet      ∈ {episodic, semantic, procedural}
+memory_items.category   ∈ {bmc-summary, canvas-snapshot, decision,
+                            user-skill, user-preference, user-constraint,
+                            workspace-fact, chat-message, ...}
+```
+
+例：
+- BMC stream summary：`(workspace, episodic, bmc-summary)`
+- 用户 5 年 PM 经验：`(user, semantic, user-skill)`
+- LLM 蒸馏的 chat 回顾：`(workspace, episodic, bmc-summary, tags=[chat-history])`
+- Raw chat turn：`(session, episodic, chat-message)` — 走 conversation_messages 表，不向量化
+
+旧 `kind` / `scope` 列保留 6 个月作 deprecation 兜底。
+
+### 10.3 CCRF 4 阶段 + 5 个 service
+
+```
+[1] CAPTURE      MemoryCaptureService.capture()
+                 ├─ appendChatMessage          (L1 raw)
+                 ├─ captureBmcSummary          (L2 episodic)
+                 ├─ captureUserSkill           (L3 semantic, encrypted)
+                 └─ captureConversationOutcome (L2 canvas + decision)
+                 Invariants: dedup by sourceTraceId / lazy embedding /
+                             layer-required field validation
+
+[2] CONSOLIDATE  MemoryConsolidator.consolidate*()
+                 ├─ consolidateRunEnd
+                 │   ├─ user-skill extract     (L1 → L3)
+                 │   └─ ChatHistoryDistiller   (LLM L1 → L2，3+ user turns)
+                 ├─ consolidateUserPatterns   (admin refresh, force)
+                 ├─ consolidateCrossWorkspace (L2 → L3 promotion)
+                 └─ decayStaleSemantic        (cron, confidence × 0.95)
+
+[3] RETRIEVE     MemoryRetrievalService.retrieve(query): RankedMemory[]
+                 salience(item, query) = 0.40·cosine(emb)
+                                       + 0.20·recency_decay(last_used)
+                                       + 0.20·importance
+                                       + 0.20·confidence
+                 recency_decay = exp(-days / TAU)
+                 TAU: session=1, workspace=14, user=90, global=∞
+                 (no query → 0.40 redistributes uniformly to 0.333 each)
+
+[4] FORGET       MemoryReaper.reap()
+                 Layer-specific TTL archive (archived_at = now()):
+                   session   = 30d  (raw chat)
+                   workspace = 90d  (episodic only; semantic untouched)
+                   user      = ∞
+                 CLI: pnpm --filter @starlink/server memory:reap
+```
+
+### 10.4 Session 三层拆分（P3 完成）
+
+```
+Conversation                         (long-lived: 用户在画布的"在线时间")
+├── conversations 表
+├── id, workspace_id, user_id, status (open/closed)
+├── current_run_id ──────┐
+└── 包含 N 个 Run        │
+                         ▼
+                    Run                  (30-90s: 一次 LangGraph stream)
+                    ├── runs 表
+                    ├── status (queued/streaming/waiting-hitl/
+                    │           completed/failed/cancelled)
+                    ├── langgraph_thread_id, latest_question,
+                    │   context_snapshot, heartbeat_at, owner_pid,
+                    │   hitl_directive, failure_reason
+                    └── 可选 Wizard
+                                         ▼
+                                    Wizard                  (7 步引导)
+                                    └── runs.metadata.wizard
+                                        { stepIndex, history, prefill }
+```
+
+旧 `conversation_sessions` 已 DROP（migration 018），三层语义彻底拆开。
+
+### 10.5 关键不变量（论文 §3 直接引用）
+
+```
+recency_decay(t, now) = exp(-(now - t) / TAU)
+
+TAU(layer) = {
+  session:    1   day
+  workspace:  14  days
+  user:       90  days
+  global:     ∞   (constant 1)
+}
+
+salience(item, query) = 0.40 · cosine(item.embedding, query.embedding)
+                      + 0.20 · recency_decay(item.last_used_at)
+                      + 0.20 · item.importance
+                      + 0.20 · item.confidence
+
+When queryText is empty:
+  cosine_weight = 0
+  remaining 3 weights normalize to 0.333 each (sum = 1)
+```
+
+---
+
+## 十一、文件映射
+
+| 角色 | 文件 |
+|---|---|
+| **Schema** | `packages/shared/src/schemas/memory.ts` |
+| **Migration P1** | `packages/server/migrations/016_memory_facet_category.sql` |
+| **Migration P3** | `packages/server/migrations/017_conversations_runs_split.sql` |
+| **Migration drop** | `packages/server/migrations/018_drop_conversation_sessions.sql` |
+| **底层 store** | `packages/server/src/application/conversation-memory-store.ts` |
+| **Capture** | `packages/server/src/application/memory-capture.ts` |
+| **Retrieve** | `packages/server/src/application/memory-retrieval.ts` |
+| **Consolidate** | `packages/server/src/application/memory-consolidator.ts` |
+| **Distill** | `packages/server/src/application/chat-history-distiller.ts` |
+| **Reaper** | `packages/server/src/application/memory-reaper.ts` |
+| **Reaper CLI** | `packages/server/src/scripts/memory-reap.ts` |
+| **Singletons** | `packages/server/src/context/index.ts`（sharedMemory* exports） |
+| **User-skill 老服务（被 Consolidator 包装）** | `packages/server/src/services/user-skill-extractor.ts` `services/user-skill-consolidator.ts` |
+| **加密** | `packages/server/src/services/user-skill-crypto.ts` |
+
+业务代码（business-langgraph / mention-router / resolvers）只引 4 个 singleton service，不再直接动 SQL。
+
+---
+
+## ⏬ 历史归档（P14 实施前的 audit + plan）
+
+> 以下 §一-§九 是 2026-05-09 P14 实施前的事实层 audit 与 7-phase plan。
+> 实施后所有 phase 均已 ship；保留作为对照。
 
 ---
 
