@@ -158,6 +158,10 @@ import { SupervisorService } from './business-langgraph/supervisor-service.js'
 import { GenerationService } from './business-langgraph/generation-service.js'
 import { CriticService } from './business-langgraph/critic-service.js'
 import { DebateService } from './business-langgraph/debate-service.js'
+import {
+  SynthesisService,
+  computeBMCEdgesForCells as computeBMCEdgesForCellsImpl
+} from './business-langgraph/synthesis-service.js'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
@@ -166,44 +170,13 @@ const auditLogger = createAuditLogger('packages/server:business-langgraph')
  * list of BMC cells (any subset of the 9 dimensions), produces the
  * canonical 9 edges for whichever endpoints exist. Tagged with
  * kind: 'bmc-structure' so the frontend renders them in the default
- * gray-dashed style. Used by both the streamConversation main path
- * (BusinessLangGraphService.buildBMCEdges) and mention-router post-
- * generation edge recomputation (computeBmcEdgesForCells public method).
+ * gray-dashed style.
+ *
+ * P15 S6 · moved into SynthesisService; this is a stable re-export so
+ * mention-router and other external callers don't have to update import
+ * paths.
  */
-export function computeBMCEdgesForCells(nodes: MacraNodeData[]): CanvasEdge[] {
-  const edges: CanvasEdge[] = []
-  const findNode = (domain: string) => nodes.find((n) => n.domain === domain)
-  const valueProp = findNode('价值主张')
-  const customerSeg = findNode('客户细分')
-  const channels = findNode('渠道通路')
-  const customerRel = findNode('客户关系')
-  const revenue = findNode('收入来源')
-  const keyRes = findNode('核心资源')
-  const keyAct = findNode('关键业务')
-  const keyPart = findNode('重要合作')
-  const cost = findNode('成本结构')
-  const addEdge = (source: MacraNodeData | undefined, target: MacraNodeData | undefined, label: string) => {
-    if (source && target) {
-      edges.push({
-        id: `${source.id}->${target.id}`,
-        source: source.id,
-        target: target.id,
-        label,
-        kind: 'bmc-structure'
-      })
-    }
-  }
-  addEdge(valueProp, customerSeg, '服务于')
-  addEdge(channels, customerSeg, '触达')
-  addEdge(customerRel, customerSeg, '维系')
-  addEdge(keyRes, valueProp, '支撑')
-  addEdge(keyAct, valueProp, '创造')
-  addEdge(customerSeg, revenue, '带来')
-  addEdge(keyRes, cost, '产生')
-  addEdge(keyAct, cost, '产生')
-  addEdge(keyPart, keyRes, '提供')
-  return edges
-}
+export const computeBMCEdgesForCells = computeBMCEdgesForCellsImpl
 
 // ============== Main Service ==============
 export class BusinessLangGraphService {
@@ -285,6 +258,10 @@ export class BusinessLangGraphService {
    *  Moderator's verdict node stays here for now (LLM-coupled). */
   private readonly debateService: DebateService
 
+  /** P15 S6 · Synthesis service (cross-context summaries + agent
+   *  avatars + BMC structural edges). Heavy runSynthesizer stays. */
+  private readonly synthesisService: SynthesisService
+
   constructor(
     model: BusinessModel | null = createLLMModel(),
     options: {
@@ -305,6 +282,7 @@ export class BusinessLangGraphService {
     this.generationService = new GenerationService()
     this.criticService = new CriticService(this.conversationMemoryStore)
     this.debateService = new DebateService()
+    this.synthesisService = new SynthesisService()
   }
 
   /** P15 S4 · setHitlResumeDirective delegated to CriticService. */
@@ -2645,124 +2623,27 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     }
   }
 
+  /** P15 S6 · buildCrossContext delegated to SynthesisService. */
   private buildCrossContext(state: BusinessStateType): CrossContext {
-    const summarizeNodes = (nodes: MacraNodeData[]) =>
-      renderCompactBmcCardsForPrompt(nodes)
-
-    const marketSummary = summarizeNodes(state.marketNodes)
-    const productSummary = summarizeNodes(state.productNodes)
-    const financeSummary = summarizeNodes(state.financeNodes)
-
-    // 基于规则的一致性检查
-    const allNodes = [...state.marketNodes, ...state.productNodes, ...state.financeNodes]
-    const notes: string[] = []
-
-    const hasHighEnd = allNodes.some((n) => /高端|奢侈|premium|中产/.test(n.content))
-    const hasLowPrice = allNodes.some((n) => /低价|廉价|降价|平价/.test(n.content))
-    if (hasHighEnd && hasLowPrice) {
-      notes.push('- 定价与客户定位可能存在矛盾：高端客户群 vs 低价策略')
-    }
-
-    const hasHeavyAssets = allNodes.some((n) => /重资产|自建|工厂|生产线/.test(n.content))
-    const hasLightModel = allNodes.some((n) => /轻资产|平台|外包|代工/.test(n.content))
-    if (hasHeavyAssets && hasLightModel) {
-      notes.push('- 资源模型矛盾：同时提及重资产自建和轻资产平台模式')
-    }
-
-    // Phase 2.6 · TL;DR — 1-3 句的整体核心结论。
-    //   - 0 风险 0 节点：空字符串（流程没真正出 BMC，emit 跳过）
-    //   - 0 风险有节点：基于 9 维覆盖度 + 一句话定位结论
-    //   - >0 风险：把规则触发的核心矛盾用 1 句拎出来，提醒用户重点看
-    const consistencySummary = buildConsistencySummary({
-      bmcNodeCount: allNodes.length,
-      hasHighEnd,
-      hasLowPrice,
-      hasHeavyAssets,
-      hasLightModel,
-      ruleNoteCount: notes.length
-    })
-
-    return {
-      marketSummary,
-      productSummary,
-      financeSummary,
-      consistencyNotes: notes.length > 0
-        ? `## 维度间一致性分析\n\n${notes.join('\n')}\n\n请各 Agent 在下一轮修正中关注以上问题。`
-        : '',
-      consistencySummary
-    }
+    return this.synthesisService.buildCrossContext(state)
   }
 
+  /** P15 S6 · buildAgentAvatars delegated to SynthesisService. */
   private buildAgentAvatars(state: BusinessStateType): MacraNodeData[] {
-    const avatars: MacraNodeData[] = []
-
-    if (state.marketNodes.length > 0) {
-      avatars.push({
-        id: 'avatar-market',
-        type: 'agent-avatar',
-        label: '市场分析专家',
-        content: `我已为你分析了目标客户、渠道通路和客户关系三个维度。\n\n**核心洞察**：${state.marketNodes[0]?.label || '市场分析'}`,
-        agentType: AGENT_TYPES.MARKET,
-        isInteractive: true,
-        metadata: {
-          agent_signature: AGENT_TYPES.MARKET,
-          confidence: 'high',
-          stage: 'execution'
-        }
-      })
-    }
-
-    if (state.productNodes.length > 0) {
-      avatars.push({
-        id: 'avatar-product',
-        type: 'agent-avatar',
-        label: '产品策略专家',
-        content: `我已为你分析了价值主张、核心资源、关键业务和重要合作。\n\n**核心洞察**：${state.productNodes[0]?.label || '产品策略'}`,
-        agentType: AGENT_TYPES.PRODUCT,
-        isInteractive: true,
-        metadata: {
-          agent_signature: AGENT_TYPES.PRODUCT,
-          confidence: 'high',
-          stage: 'execution'
-        }
-      })
-    }
-
-    if (state.financeNodes.length > 0) {
-      avatars.push({
-        id: 'avatar-finance',
-        type: 'agent-avatar',
-        label: '财务分析专家',
-        content: `我已为你分析了收入来源和成本结构。\n\n**核心洞察**：${state.financeNodes[0]?.label || '财务分析'}`,
-        agentType: AGENT_TYPES.FINANCE,
-        isInteractive: true,
-        metadata: {
-          agent_signature: AGENT_TYPES.FINANCE,
-          confidence: 'high',
-          stage: 'execution'
-        }
-      })
-    }
-
-    return avatars
+    return this.synthesisService.buildAgentAvatars(state)
   }
 
+  /** P15 S6 · buildBMCEdges delegated to SynthesisService. */
   private buildBMCEdges(state: BusinessStateType): CanvasEdge[] {
-    return computeBMCEdgesForCells([
-      ...state.marketNodes,
-      ...state.productNodes,
-      ...state.financeNodes
-    ])
+    return this.synthesisService.buildBMCEdges(state)
   }
 
   /**
    * P11.13 / T2.2 · Public helper for mention-router to recompute BMC
-   * structural edges given a flat list of cells (existing seed + newly
-   * generated). Lets @-mention paths produce edges instead of dangling
-   * orphans on the canvas.
+   * structural edges. P15 S6 · delegated to SynthesisService.
    */
   computeBmcEdgesForCells(nodes: MacraNodeData[]): CanvasEdge[] {
-    return computeBMCEdgesForCells(nodes)
+    return this.synthesisService.computeBmcEdgesForCells(nodes)
   }
 
   // ============== Moderator (P11.10) ==============
