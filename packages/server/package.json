@@ -12,6 +12,7 @@
     "clean": "rimraf dist",
     "lint": "tsc --noEmit",
     "db:migrate": "pnpm run build && node --env-file=.env dist/infrastructure/db/migrate.js",
+    "memory:reap": "pnpm run build && node --env-file=.env dist/scripts/memory-reap.js",
     "db:use:local": "cp .env.pg-local .env && echo 'Switched to local Postgres profile'",
     "db:use:supabase": "cp .env.supabase .env && echo 'Switched to Supabase profile (remember to bypass proxy + run db:migrate first time)'",
     "db:show": "head -1 .env && grep -E '^DATABASE_URL=|^LANGGRAPH_MODEL=' .env",

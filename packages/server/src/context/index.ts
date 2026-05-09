@@ -5,6 +5,7 @@ import { ConversationMemoryStore } from '../application/conversation-memory-stor
 import { MemoryCaptureService } from '../application/memory-capture.js'
 import { MemoryRetrievalService } from '../application/memory-retrieval.js'
 import { MemoryConsolidator } from '../application/memory-consolidator.js'
+import { MemoryReaper } from '../application/memory-reaper.js'
 import { UserSkillConsolidator } from '../services/user-skill-consolidator.js'
 import { TaskEventStore } from '../application/task-event-store.js'
 import { createConversationEventBus } from '../application/conversation-event-bus.js'
@@ -103,6 +104,11 @@ export const sharedMemoryConsolidator = new MemoryConsolidator(
   sharedUserSkillExtractor,
   sharedUserSkillConsolidator
 )
+
+// P14 P7 · MemoryReaper — TTL maintenance. Layer-specific archival rules:
+// session=30d, workspace=90d, user=∞. Invoked from cron via the
+// `memory:reap` npm script.
+export const sharedMemoryReaper = new MemoryReaper()
 
 // Sprint 1.1 · single shared WizardPrefillService. The LLM client picks
 // up the same env config used by the Socratic coach (DEEPSEEK_API_KEY /
