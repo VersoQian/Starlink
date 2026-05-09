@@ -6,7 +6,10 @@ import type {
   ConversationSession,
   MemoryItem,
   MemoryKind,
-  MemoryScope
+  MemoryScope,
+  MemoryLayer,
+  MemoryFacet,
+  MemoryCategory
 } from '@starlink/shared'
 import {
   conversationMessageSchema,
@@ -47,8 +50,22 @@ export type UpsertMemoryInput = {
   id?: string
   workspaceId: string
   userId?: string | null
+  /** @deprecated P14 · use {@link layer} (workspace/user). 'agent' is dead. */
   scope?: MemoryScope
+  /** @deprecated P14 · use {@link facet} + {@link category}. */
   kind?: MemoryKind
+  /**
+   * P14 · 5-layer memory hierarchy. Required in new code; back-compat code
+   * may still pass `scope` and the store will derive layer.
+   */
+  layer?: MemoryLayer
+  /** P14 · cognitive-science classification of content type. */
+  facet?: MemoryFacet
+  /**
+   * P14 · business term within a (layer, facet) tuple. See
+   * KNOWN_MEMORY_CATEGORIES. Free-form to allow domain extensions.
+   */
+  category?: MemoryCategory
   title: string
   content: string
   sourceType?: string
@@ -57,6 +74,62 @@ export type UpsertMemoryInput = {
   confidence?: number
   tags?: string[]
   metadata?: JsonRecord
+}
+
+/** Internal helper: derive (layer, facet, category) from legacy (scope, kind)
+ *  when caller didn't supply the new axes. Mirrors migration 016 backfill. */
+function deriveCanonicalAxes(input: UpsertMemoryInput): {
+  layer: MemoryLayer
+  facet: MemoryFacet
+  category: MemoryCategory
+} {
+  if (input.layer && input.facet && input.category) {
+    return { layer: input.layer, facet: input.facet, category: input.category }
+  }
+  const scope = input.scope ?? 'workspace'
+  const kind = input.kind ?? 'summary'
+
+  const layer: MemoryLayer = input.layer
+    ?? (scope === 'user' ? 'user' : 'workspace')
+
+  const facet: MemoryFacet = input.facet ?? (
+    kind === 'summary' || kind === 'canvas' || kind === 'decision'
+      ? 'episodic'
+      : 'semantic'
+  )
+
+  const category: MemoryCategory = input.category ?? (
+    kind === 'summary' ? 'bmc-summary'
+      : kind === 'canvas' ? 'canvas-snapshot'
+      : kind === 'decision' ? 'decision'
+      : kind === 'user-skill' ? 'user-skill'
+      : kind === 'preference' ? 'user-preference'
+      : kind === 'insight' ? 'workspace-fact'
+      : kind === 'constraint' ? 'user-constraint'
+      : kind
+  )
+  return { layer, facet, category }
+}
+
+/** Reverse mapping: pick a sensible legacy `kind` value when caller only
+ *  supplied the new triple. Used when writing both old + new columns during
+ *  the deprecation window so legacy read paths keep finding rows. */
+function legacyKindFromCanonical(canonical: {
+  layer: MemoryLayer
+  facet: MemoryFacet
+  category: MemoryCategory
+}): MemoryKind {
+  const c = canonical.category
+  if (c === 'bmc-summary') return 'summary'
+  if (c === 'canvas-snapshot') return 'canvas'
+  if (c === 'decision') return 'decision'
+  if (c === 'user-skill') return 'user-skill'
+  if (c === 'user-preference') return 'preference'
+  if (c === 'workspace-fact') return 'insight'
+  if (c === 'user-constraint') return 'constraint'
+  // Unknown / extension category — fall back to facet-driven default so
+  // legacy enum constraint isn't violated.
+  return canonical.facet === 'episodic' ? 'summary' : 'insight'
 }
 
 type MemorySearchOptions = {
@@ -166,6 +239,12 @@ const initTables = runtimeDdlEnabled ? pool.query(`
   ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding VECTOR(1536);
   ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding_model TEXT;
   ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding_dimensions INTEGER;
+  -- P14 · 5-layer × facet × category axes (added 2026-05-09). The runtime
+  -- DDL block here mirrors migration 016; this branch fires only when
+  -- CONVERSATION_MEMORY_RUNTIME_DDL=true (e.g. fresh dev DB / smoke tests).
+  ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS layer TEXT;
+  ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS facet TEXT;
+  ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS category TEXT;
 
   CREATE INDEX IF NOT EXISTS idx_memory_items_workspace_updated
     ON memory_items (workspace_id, updated_at DESC);
@@ -533,6 +612,11 @@ export class ConversationMemoryStore {
   async upsertMemory(input: UpsertMemoryInput): Promise<MemoryItem> {
     await this.ensureTables()
     const id = input.id ?? await this.findMemoryIdBySource(input) ?? nanoid()
+    // P14 · derive canonical (layer, facet, category) from input — caller
+    // can pass either the new triple OR the old (scope, kind) pair (or
+    // both); derivation prefers explicit new-axis values and falls back
+    // to backfill rules from migration 016.
+    const canonical = deriveCanonicalAxes(input)
     // Embedding is computed BEFORE encryption — embeddings are never
     // encrypted (they need to be queryable for `<=>` similarity). This
     // means the embedding vector itself can leak content via inversion
@@ -540,7 +624,7 @@ export class ConversationMemoryStore {
     // residual risk. For non-user-skill rows, plaintext is stored anyway,
     // so the embedding is no extra leak.
     const embedding = await embedText(renderMemoryEmbeddingInput(input))
-    const isUserSkill = (input.kind ?? 'insight') === 'user-skill'
+    const isUserSkill = canonical.category === 'user-skill'
     // For user-skill rows, encrypt sensitive fields (title, content,
     // metadata.revisionTrend nested fields) at the storage boundary.
     // No-op when USER_SKILL_ENCRYPTION_KEY is unset → plaintext fallthrough.
@@ -554,15 +638,23 @@ export class ConversationMemoryStore {
     }
     const result = await pool.query(
       `INSERT INTO memory_items (
-        id, workspace_id, user_id, scope, kind, title, content, source_type,
+        id, workspace_id, user_id,
+        scope, kind, layer, facet, category,
+        title, content, source_type,
         source_id, importance, confidence, tags, metadata,
         embedding, embedding_model, embedding_dimensions
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text[], $13::jsonb,
-        $14::vector, $15, $16
+        $1, $2, $3,
+        $4, $5, $6, $7, $8,
+        $9, $10, $11,
+        $12, $13, $14, $15::text[], $16::jsonb,
+        $17::vector, $18, $19
       )
       ON CONFLICT (id) DO UPDATE SET
+        layer = EXCLUDED.layer,
+        facet = EXCLUDED.facet,
+        category = EXCLUDED.category,
         title = EXCLUDED.title,
         content = EXCLUDED.content,
         importance = EXCLUDED.importance,
@@ -579,8 +671,14 @@ export class ConversationMemoryStore {
         id,
         input.workspaceId,
         input.userId ?? null,
-        input.scope ?? 'workspace',
-        input.kind ?? 'insight',
+        // Legacy (scope, kind) — write the input value if explicit, else
+        // back-derive from canonical so old read paths still work.
+        input.scope ?? (canonical.layer === 'user' ? 'user' : 'workspace'),
+        input.kind ?? legacyKindFromCanonical(canonical),
+        // Canonical (layer, facet, category) — the new authoritative axes.
+        canonical.layer,
+        canonical.facet,
+        canonical.category,
         storedTitle,
         storedContent,
         input.sourceType ?? 'manual',
@@ -1329,6 +1427,11 @@ function rowToMemory(row: Record<string, unknown>): MemoryItem {
     id: row.id,
     workspaceId: row.workspace_id,
     userId: row.user_id ?? null,
+    // P14 · canonical axes — undefined when reading rows written before
+    // migration 016 ran on a non-runtime-DDL database.
+    layer: typeof row.layer === 'string' ? row.layer : undefined,
+    facet: typeof row.facet === 'string' ? row.facet : undefined,
+    category: typeof row.category === 'string' ? row.category : undefined,
     scope: row.scope,
     kind: row.kind,
     title: isUserSkill ? decryptIfNeeded(row.title as string) : row.title,
