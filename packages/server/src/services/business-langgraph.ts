@@ -155,6 +155,7 @@ import {
   businessSpanContexts
 } from './business-langgraph/stream-lifecycle.js'
 import { SupervisorService } from './business-langgraph/supervisor-service.js'
+import { GenerationService } from './business-langgraph/generation-service.js'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
@@ -252,19 +253,12 @@ export class BusinessLangGraphService {
    * failure, keeps the agent's original summary as a fallback. Disabled
    * when BMC_SUMMARIZER_ENABLED=false.
    */
+  /** P15 S3 · distillCellSummaries delegated to GenerationService. */
   private async distillCellSummaries(
     state: BusinessStateType,
     nodes: MacraNodeData[]
   ): Promise<MacraNodeData[]> {
-    return distillSummariesForCells(
-      nodes,
-      {
-        traceId: state.traceId,
-        workspaceId: state.workspaceId,
-        userId: state.userId
-      },
-      { llm: this.getSummarizerLLM() }
-    )
+    return this.generationService.distillCellSummaries(state, nodes)
   }
 
   /** P15 S2 · Supervisor service (intent classification + cross-context
@@ -273,6 +267,11 @@ export class BusinessLangGraphService {
    *  service collects the smaller helpers that don't depend on HITL
    *  state or generator-specific logic. */
   private readonly supervisorService: SupervisorService
+
+  /** P15 S3 · Generation service (cell-summary distillation + citation
+   *  parsing for every BMC-domain agent). Heavy run*Agent methods stay
+   *  in this class for now. */
+  private readonly generationService: GenerationService
 
   constructor(
     model: BusinessModel | null = createLLMModel(),
@@ -291,6 +290,7 @@ export class BusinessLangGraphService {
       model: this.model,
       buildWorkspaceContextPrompt: (s) => this.buildWorkspaceContextPrompt(s)
     })
+    this.generationService = new GenerationService()
   }
 
   /**
@@ -1312,23 +1312,9 @@ ${snippets}
    * Collect evidenceSet in the format expected by citation-parser, deriving
    * snippetId when the raw KnowledgeEvidence entries lack one.
    */
+  /** P15 S3 · toParserEvidence delegated to GenerationService. */
   private toParserEvidence(evidence: KnowledgeEvidence[] | undefined): Evidence[] {
-    if (!evidence || evidence.length === 0) return []
-    return evidence.map((e) => {
-      const snippetId = deriveSnippetId(
-        e.docId,
-        e.metadata as { chunkIndex?: number } | undefined,
-        e.snippet
-      )
-      return {
-        id: `${e.docId}-${snippetId}`,
-        docId: e.docId,
-        snippetId,
-        text: e.snippet,
-        score: e.score,
-        metadata: (e.metadata ?? {}) as Evidence['metadata']
-      }
-    })
+    return this.generationService.toParserEvidence(evidence)
   }
 
   /**
@@ -1337,30 +1323,12 @@ ${snippets}
    *   - replace `content` with the clean text (tokens removed)
    *   - attach citation/no-ref/invalidRefs/groundingRate info to node.metadata
    */
+  /** P15 S3 · applyCitationParsing delegated to GenerationService. */
   private applyCitationParsing(
     nodes: MacraNodeData[],
     evidence: KnowledgeEvidence[] | undefined
   ): MacraNodeData[] {
-    const parserEvidence = this.toParserEvidence(evidence)
-    return nodes.map((node) => {
-      const rawContent = typeof node.content === 'string' ? node.content : ''
-      if (!rawContent.includes('[[')) {
-        return node
-      }
-      const parsed = parseCitations(rawContent, parserEvidence)
-      const groundingRate = computeGroundingRate(parsed)
-      return {
-        ...node,
-        content: parsed.cleanText,
-        metadata: {
-          ...(node.metadata ?? {}),
-          citations: parsed.spans,
-          noRefRanges: parsed.noRefRanges,
-          invalidRefs: parsed.invalidRefs,
-          groundingRate
-        }
-      }
-    })
+    return this.generationService.applyCitationParsing(nodes, evidence)
   }
 
   /** P15 S2 · isAgentActive delegated to SupervisorService. */
