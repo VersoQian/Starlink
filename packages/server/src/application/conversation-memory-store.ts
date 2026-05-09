@@ -204,6 +204,48 @@ const initTables = runtimeDdlEnabled ? pool.query(`
     ON conversation_sessions (heartbeat_at NULLS FIRST)
     WHERE status = 'running';
 
+  -- P14 P3 · conversations + runs split (mirrors migration 017). This
+  -- runtime DDL fires only on fresh dev DBs; production environments run
+  -- the SQL migration which also backfills from conversation_sessions.
+  CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    current_run_id TEXT,
+    opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    closed_at TIMESTAMPTZ,
+    metadata JSONB NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS idx_conversations_workspace_opened
+    ON conversations (workspace_id, opened_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_conversations_user_opened
+    ON conversations (user_id, opened_at DESC);
+
+  CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    langgraph_thread_id TEXT,
+    latest_question TEXT,
+    context_snapshot JSONB NOT NULL DEFAULT '{}',
+    heartbeat_at TIMESTAMPTZ,
+    owner_pid TEXT,
+    hitl_directive JSONB,
+    failure_reason TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    metadata JSONB NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS idx_runs_conversation_started
+    ON runs (conversation_id, started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_runs_active_heartbeat
+    ON runs (workspace_id, heartbeat_at NULLS FIRST)
+    WHERE status IN ('queued', 'streaming', 'waiting-hitl');
+
   CREATE TABLE IF NOT EXISTS conversation_messages (
     id TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL,
@@ -277,45 +319,64 @@ export class ConversationMemoryStore {
 
   async createSession(input: CreateSessionInput): Promise<ConversationSession> {
     await this.ensureTables()
-    // P11.13 / T4.3 · close the workspace-soft-lock race window.
+    // P14 P3 · "session" now means (conversation, run) pair. Each call
+    // INSERTs one conversations row + one runs row, sets the
+    // conversations.current_run_id pointer, and synthesizes a back-compat
+    // ConversationSession view from the run row for callers.
     //
-    // Originally createSession inserted the row WITHOUT setting
-    // heartbeat_at. The first heartbeat write happened ~10s later when
-    // streamConversation's first heartbeat tick fired. Between
-    // INSERT and first heartbeat there was a ~60s grace window in
-    // which findActiveSession() would treat the row as "no recent
-    // activity" and let a concurrent @-mention bypass the lock,
-    // letting two business graphs mutate the same workspace.
-    //
-    // Fix: stamp heartbeat_at = now() on the INSERT itself so the
-    // row is "live" the moment it exists. The periodic heartbeat
-    // tick still updates it as before.
-    const result = await pool.query(
-      `INSERT INTO conversation_sessions (
-        id, workspace_id, user_id, title, status, latest_question, context_snapshot, heartbeat_at
+    // P11.13 / T4.3 · stamp heartbeat_at = now() on the run INSERT so
+    // findActiveSession's heartbeat-aware soft-lock catches the row as
+    // "live" immediately (without the prior ~60s grace gap).
+    const conversationId = input.id
+    const runId = `${conversationId}-r1`
+    const newRunStatus = mapLegacyToRunStatus(input.status)
+
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        `INSERT INTO conversations (id, workspace_id, user_id, title, status, current_run_id, opened_at, metadata)
+         VALUES ($1, $2, $3, $4, 'open', $5, now(), '{}'::jsonb)
+         ON CONFLICT (id) DO UPDATE SET
+           workspace_id = EXCLUDED.workspace_id,
+           user_id = EXCLUDED.user_id,
+           title = EXCLUDED.title,
+           status = 'open',
+           current_run_id = EXCLUDED.current_run_id,
+           closed_at = NULL`,
+        [conversationId, input.workspaceId, input.userId, input.title, runId]
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
-      ON CONFLICT (id) DO UPDATE SET
-        workspace_id = EXCLUDED.workspace_id,
-        user_id = EXCLUDED.user_id,
-        title = EXCLUDED.title,
-        status = EXCLUDED.status,
-        latest_question = EXCLUDED.latest_question,
-        context_snapshot = EXCLUDED.context_snapshot,
-        heartbeat_at = now(),
-        updated_at = now()
-      RETURNING *`,
-      [
-        input.id,
-        input.workspaceId,
-        input.userId,
-        input.title,
-        input.status,
-        input.latestQuestion ?? null,
-        JSON.stringify(input.contextSnapshot ?? {})
-      ]
-    )
-    return rowToSession(result.rows[0])
+      const runResult = await client.query(
+        `INSERT INTO runs (
+          id, conversation_id, workspace_id, user_id, status,
+          latest_question, context_snapshot, heartbeat_at, started_at, metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now(), '{}'::jsonb)
+        ON CONFLICT (id) DO UPDATE SET
+          status = EXCLUDED.status,
+          latest_question = EXCLUDED.latest_question,
+          context_snapshot = EXCLUDED.context_snapshot,
+          heartbeat_at = now()
+        RETURNING *`,
+        [
+          runId,
+          conversationId,
+          input.workspaceId,
+          input.userId,
+          newRunStatus,
+          input.latestQuestion ?? null,
+          JSON.stringify(input.contextSnapshot ?? {})
+        ]
+      )
+      await client.query('COMMIT')
+      const convRow = await pool.query('SELECT title, opened_at, closed_at FROM conversations WHERE id = $1', [conversationId])
+      return rowFromRunAndConversation(runResult.rows[0], convRow.rows[0])
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   async updateSessionStatus(
@@ -324,45 +385,76 @@ export class ConversationMemoryStore {
     options?: { latestQuestion?: string | null; contextSnapshot?: JsonRecord; completed?: boolean }
   ): Promise<ConversationSession | null> {
     await this.ensureTables()
+    // P14 P3 · update the conversation's current run; close the conversation
+    // when status is terminal AND completed flag set.
+    const runStatus = mapLegacyToRunStatus(status)
+    const isTerminal = runStatus === 'completed' || runStatus === 'failed' || runStatus === 'cancelled'
     const result = await pool.query(
-      `UPDATE conversation_sessions
-       SET status = $2,
-           latest_question = COALESCE($3, latest_question),
-           context_snapshot = COALESCE($4::jsonb, context_snapshot),
-           completed_at = CASE WHEN $5 THEN now() ELSE completed_at END,
-           updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
+      `UPDATE runs r
+         SET status = $2,
+             latest_question = COALESCE($3, latest_question),
+             context_snapshot = COALESCE($4::jsonb, context_snapshot),
+             completed_at = CASE WHEN $5 THEN now() ELSE completed_at END
+       FROM conversations c
+       WHERE c.id = $1 AND r.id = c.current_run_id
+       RETURNING r.*`,
       [
         conversationId,
-        status,
+        runStatus,
         options?.latestQuestion ?? null,
         options?.contextSnapshot ? JSON.stringify(options.contextSnapshot) : null,
-        Boolean(options?.completed)
+        Boolean(options?.completed) || isTerminal
       ]
     )
-    return result.rowCount ? rowToSession(result.rows[0]) : null
+    if (!result.rowCount) return null
+    if (isTerminal && options?.completed !== false) {
+      await pool.query(
+        `UPDATE conversations
+            SET status = 'closed',
+                closed_at = COALESCE(closed_at, now())
+          WHERE id = $1`,
+        [conversationId]
+      )
+    }
+    const conv = await pool.query('SELECT title, opened_at, closed_at FROM conversations WHERE id = $1', [conversationId])
+    return rowFromRunAndConversation(result.rows[0], conv.rows[0])
   }
 
   async getSession(conversationId: string): Promise<ConversationSession | null> {
     await this.ensureTables()
+    // P14 P3 · synthesize from (conversations × current run) JOIN.
     const result = await pool.query(
-      'SELECT * FROM conversation_sessions WHERE id = $1',
+      `SELECT r.*, c.title AS c_title, c.opened_at AS c_opened_at, c.closed_at AS c_closed_at
+         FROM conversations c
+         JOIN runs r ON r.id = c.current_run_id
+        WHERE c.id = $1`,
       [conversationId]
     )
-    return result.rowCount ? rowToSession(result.rows[0]) : null
+    if (!result.rowCount) return null
+    const row = result.rows[0]
+    return rowFromRunAndConversation(row, {
+      title: row.c_title,
+      opened_at: row.c_opened_at,
+      closed_at: row.c_closed_at
+    })
   }
 
   async listSessions(workspaceId: string, limit = 20): Promise<ConversationSession[]> {
     await this.ensureTables()
     const result = await pool.query(
-      `SELECT * FROM conversation_sessions
-       WHERE workspace_id = $1
-       ORDER BY updated_at DESC
-       LIMIT $2`,
+      `SELECT r.*, c.title AS c_title, c.opened_at AS c_opened_at, c.closed_at AS c_closed_at
+         FROM conversations c
+         JOIN runs r ON r.id = c.current_run_id
+        WHERE c.workspace_id = $1
+        ORDER BY c.opened_at DESC
+        LIMIT $2`,
       [workspaceId, clampLimit(limit, 1, 100)]
     )
-    return result.rows.map(rowToSession)
+    return result.rows.map((row: Record<string, unknown>) => rowFromRunAndConversation(row, {
+      title: row.c_title,
+      opened_at: row.c_opened_at,
+      closed_at: row.c_closed_at
+    }))
   }
 
   /**
@@ -404,11 +496,15 @@ export class ConversationMemoryStore {
    */
   async countCompletedSessionsForUser(userId: string): Promise<number> {
     await this.ensureTables()
+    // P14 P3 · count distinct conversations whose current run is in a
+    // terminal state. Equivalent to the legacy meaning since every
+    // backfilled conversation_sessions row maps to a conversations row.
     const result = await pool.query(
       `SELECT COUNT(*) AS n
-         FROM conversation_sessions
-        WHERE user_id = $1
-          AND status IN ('completed', 'failed')`,
+         FROM conversations c
+         JOIN runs r ON r.id = c.current_run_id
+        WHERE c.user_id = $1
+          AND r.status IN ('completed', 'failed')`,
       [userId]
     )
     const n = result.rows[0]?.n
@@ -423,10 +519,14 @@ export class ConversationMemoryStore {
    */
   async touchHeartbeat(conversationId: string, ownerPid: string): Promise<void> {
     await this.ensureTables()
+    // P14 P3 · heartbeat is run-level state.
     await pool.query(
-      `UPDATE conversation_sessions
-         SET heartbeat_at = now(), owner_pid = $2, updated_at = now()
-       WHERE id = $1 AND status = 'running'`,
+      `UPDATE runs r
+         SET heartbeat_at = now(), owner_pid = $2
+       FROM conversations c
+       WHERE c.id = $1
+         AND r.id = c.current_run_id
+         AND r.status IN ('queued', 'streaming', 'waiting-hitl')`,
       [conversationId, ownerPid]
     )
   }
@@ -439,10 +539,12 @@ export class ConversationMemoryStore {
    */
   async setHitlDirective(conversationId: string, directive: Record<string, unknown>): Promise<void> {
     await this.ensureTables()
+    // P14 P3 · HITL directive is run-level state.
     await pool.query(
-      `UPDATE conversation_sessions
-         SET hitl_directive = $2::jsonb, updated_at = now()
-       WHERE id = $1`,
+      `UPDATE runs r
+         SET hitl_directive = $2::jsonb
+       FROM conversations c
+       WHERE c.id = $1 AND r.id = c.current_run_id`,
       [conversationId, JSON.stringify(directive)]
     )
   }
@@ -454,11 +556,23 @@ export class ConversationMemoryStore {
    */
   async consumeHitlDirective(conversationId: string): Promise<Record<string, unknown> | null> {
     await this.ensureTables()
+    // P14 P3 · directive is run-level; read-then-clear in a CTE so we
+    // capture the OLD value (PG's `RETURNING` after `SET … = NULL` would
+    // return the post-update NULL — a latent bug in the legacy code).
     const result = await pool.query(
-      `UPDATE conversation_sessions
-         SET hitl_directive = NULL, updated_at = now()
-       WHERE id = $1 AND hitl_directive IS NOT NULL
-       RETURNING hitl_directive`,
+      `WITH target AS (
+         SELECT r.id, r.hitl_directive
+           FROM runs r
+           JOIN conversations c ON c.id = $1 AND r.id = c.current_run_id
+          WHERE r.hitl_directive IS NOT NULL
+       ),
+       cleared AS (
+         UPDATE runs r SET hitl_directive = NULL
+           FROM target t
+          WHERE r.id = t.id
+         RETURNING r.id
+       )
+       SELECT t.hitl_directive FROM target t`,
       [conversationId]
     )
     const raw = result.rows[0]?.hitl_directive
@@ -491,19 +605,27 @@ export class ConversationMemoryStore {
     const olderThanMs = opts?.olderThanMs ?? 90_000
     const graceMs = opts?.graceMs ?? 60_000
     const limit = clampLimit(opts?.limit ?? 50, 1, 500)
+    // P14 P3 · stale check is run-level: any active run whose heartbeat is
+    // older than threshold. The reaper marks them failed.
     const result = await pool.query(
-      `SELECT * FROM conversation_sessions
-        WHERE status = 'running'
-          AND created_at < now() - ($2 || ' milliseconds')::interval
+      `SELECT r.*, c.title AS c_title, c.opened_at AS c_opened_at, c.closed_at AS c_closed_at
+         FROM runs r
+         JOIN conversations c ON c.id = r.conversation_id
+        WHERE r.status IN ('queued', 'streaming', 'waiting-hitl')
+          AND r.started_at < now() - ($2 || ' milliseconds')::interval
           AND (
-            heartbeat_at IS NULL
-            OR heartbeat_at < now() - ($1 || ' milliseconds')::interval
+            r.heartbeat_at IS NULL
+            OR r.heartbeat_at < now() - ($1 || ' milliseconds')::interval
           )
-        ORDER BY updated_at ASC
+        ORDER BY r.started_at ASC
         LIMIT $3`,
       [olderThanMs, graceMs, limit]
     )
-    return result.rows.map(rowToSession)
+    return result.rows.map((row: Record<string, unknown>) => rowFromRunAndConversation(row, {
+      title: row.c_title,
+      opened_at: row.c_opened_at,
+      closed_at: row.c_closed_at
+    }))
   }
 
   /**
@@ -513,15 +635,24 @@ export class ConversationMemoryStore {
    */
   async failSession(conversationId: string, reason: string): Promise<void> {
     await this.ensureTables()
+    // P14 P3 · fail the current run + close the conversation.
     await pool.query(
-      `UPDATE conversation_sessions
+      `UPDATE runs r
          SET status = 'failed',
              failure_reason = $2,
-             completed_at = now(),
-             updated_at = now()
-       WHERE id = $1
-         AND status = 'running'`,
+             completed_at = now()
+       FROM conversations c
+       WHERE c.id = $1
+         AND r.id = c.current_run_id
+         AND r.status IN ('queued', 'streaming', 'waiting-hitl')`,
       [conversationId, reason]
+    )
+    await pool.query(
+      `UPDATE conversations
+          SET status = 'closed',
+              closed_at = COALESCE(closed_at, now())
+        WHERE id = $1`,
+      [conversationId]
     )
   }
 
@@ -547,32 +678,44 @@ export class ConversationMemoryStore {
     options?: { userId?: string }
   ): Promise<ConversationSession | null> {
     await this.ensureTables()
+    // P14 P3 · find an active RUN in the workspace; the conversation
+    // wrapper is fetched alongside via JOIN. Heartbeat-aware soft-lock
+    // semantics preserved: a run with stale heartbeat is treated as
+    // crashed-gateway leftover and ignored (reaper will mark it failed).
     const userId = options?.userId
     const params: unknown[] = [workspaceId]
     let userFilter = ''
     if (userId) {
       params.push(userId)
-      userFilter = ` AND user_id = $${params.length}`
+      userFilter = ` AND r.user_id = $${params.length}`
     }
     const result = await pool.query(
-      `SELECT * FROM conversation_sessions
-        WHERE workspace_id = $1
-          AND status = 'running'
+      `SELECT r.*, c.title AS c_title, c.opened_at AS c_opened_at, c.closed_at AS c_closed_at
+         FROM runs r
+         JOIN conversations c ON c.id = r.conversation_id
+        WHERE r.workspace_id = $1
+          AND r.status IN ('queued', 'streaming', 'waiting-hitl')
           ${userFilter}
           AND (
             -- Fresh heartbeat: still considered active
-            heartbeat_at > now() - INTERVAL '90 seconds'
+            r.heartbeat_at > now() - INTERVAL '90 seconds'
             OR (
               -- Within grace window after creation, no heartbeat yet
-              heartbeat_at IS NULL
-              AND created_at > now() - INTERVAL '60 seconds'
+              r.heartbeat_at IS NULL
+              AND r.started_at > now() - INTERVAL '60 seconds'
             )
           )
-        ORDER BY updated_at DESC
+        ORDER BY r.started_at DESC
         LIMIT 1`,
       params
     )
-    return result.rowCount ? rowToSession(result.rows[0]) : null
+    if (!result.rowCount) return null
+    const row = result.rows[0]
+    return rowFromRunAndConversation(row, {
+      title: row.c_title,
+      opened_at: row.c_opened_at,
+      closed_at: row.c_closed_at
+    })
   }
 
   async appendMessage(input: AppendMessageInput): Promise<ConversationMessage> {
@@ -593,12 +736,12 @@ export class ConversationMemoryStore {
         JSON.stringify(input.metadata ?? {})
       ]
     )
-    await pool.query(
-      `UPDATE conversation_sessions
-       SET updated_at = now()
-       WHERE id = $1`,
-      [input.conversationId]
-    )
+    // P14 P3 · old code touched conversation_sessions.updated_at here so
+    // listSessions ordering reflected most-recent-activity. After the
+    // split, conversations has no updated_at column (status=open is
+    // sufficient liveness); the run's heartbeat_at is reserved for
+    // streaming-process liveness, NOT chat-message arrival. Drop the
+    // touch — listSessions orders by opened_at DESC.
     return rowToMessage(result.rows[0])
   }
 
@@ -1064,8 +1207,13 @@ export class ConversationMemoryStore {
   }> {
     await this.ensureTables()
 
+    // P14 P3 · export sessions via the new conversations + current run JOIN.
     const sessions = await pool.query(
-      `SELECT * FROM conversation_sessions WHERE user_id = $1 ORDER BY created_at ASC`,
+      `SELECT r.*, c.title AS c_title, c.opened_at AS c_opened_at, c.closed_at AS c_closed_at
+         FROM conversations c
+         JOIN runs r ON r.id = c.current_run_id
+        WHERE c.user_id = $1
+        ORDER BY c.opened_at ASC`,
       [userId]
     )
     const messages = await pool.query(
@@ -1110,7 +1258,11 @@ export class ConversationMemoryStore {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       userId,
-      sessions: sessions.rows.map((row: Record<string, unknown>) => rowToSession(row)),
+      sessions: sessions.rows.map((row: Record<string, unknown>) => rowFromRunAndConversation(row, {
+        title: row.c_title,
+        opened_at: row.c_opened_at,
+        closed_at: row.c_closed_at
+      })),
       messages: messages.rows.map((row: Record<string, unknown>) => rowToMessage(row)),
       memoryItems: memoryItems.rows.map((row: Record<string, unknown>) => rowToMemory(row)),
       knowledgeBases: kbsRows,
@@ -1406,6 +1558,73 @@ function rowToSession(row: Record<string, unknown>): ConversationSession {
     ownerPid: (row.owner_pid as string | undefined) ?? null,
     failureReason: (row.failure_reason as string | undefined) ?? null
   })
+}
+
+/** P14 P3 · synthesize the legacy ConversationSession view from a runs row
+ *  + the parent conversations row. The "session" abstraction is preserved
+ *  for back-compat; underneath, each call hits both new tables.
+ *
+ *  - id        ← conversations.id (i.e. the conversationId)
+ *  - title     ← conversations.title
+ *  - createdAt ← conversations.opened_at
+ *  - completedAt ← conversations.closed_at OR run.completed_at
+ *  - status / latestQuestion / contextSnapshot / heartbeatAt / ownerPid /
+ *    failureReason ← run-level fields
+ */
+function rowFromRunAndConversation(
+  run: Record<string, unknown>,
+  conv: Record<string, unknown> | undefined
+): ConversationSession {
+  const synthesized: Record<string, unknown> = {
+    id: run.conversation_id ?? run.id,
+    workspace_id: run.workspace_id,
+    user_id: run.user_id,
+    title: conv?.title ?? '',
+    status: mapRunStatusToLegacy(String(run.status ?? 'streaming')),
+    latest_question: run.latest_question ?? null,
+    context_snapshot: run.context_snapshot,
+    created_at: conv?.opened_at ?? run.started_at,
+    updated_at: run.heartbeat_at ?? run.started_at,
+    completed_at: conv?.closed_at ?? run.completed_at ?? null,
+    heartbeat_at: run.heartbeat_at ?? null,
+    owner_pid: run.owner_pid ?? null,
+    failure_reason: run.failure_reason ?? null
+  }
+  return rowToSession(synthesized)
+}
+
+/** Map run-table status enum to the legacy session status. */
+function mapRunStatusToLegacy(runStatus: string): ConversationSession['status'] {
+  switch (runStatus) {
+    case 'queued':
+    case 'streaming':
+    case 'waiting-hitl':
+      return 'running'
+    case 'completed':
+      return 'completed'
+    case 'failed':
+      return 'failed'
+    case 'cancelled':
+      return 'archived'
+    default:
+      return 'running'
+  }
+}
+
+/** Reverse mapping for createSession + updateSessionStatus. */
+function mapLegacyToRunStatus(legacy: ConversationSession['status']): string {
+  switch (legacy) {
+    case 'running':
+      return 'streaming'
+    case 'completed':
+      return 'completed'
+    case 'failed':
+      return 'failed'
+    case 'archived':
+      return 'cancelled'
+    default:
+      return 'streaming'
+  }
 }
 
 function rowToMessage(row: Record<string, unknown>): ConversationMessage {
