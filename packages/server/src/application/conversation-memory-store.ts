@@ -173,40 +173,10 @@ function clamp01(value: number): number {
 const runtimeDdlEnabled = process.env.CONVERSATION_MEMORY_RUNTIME_DDL === 'true'
 
 const initTables = runtimeDdlEnabled ? pool.query(`
-  CREATE TABLE IF NOT EXISTS conversation_sessions (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL,
-    latest_question TEXT,
-    context_snapshot JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    completed_at TIMESTAMPTZ
-  );
-
-  -- P1: heartbeat-driven session lifecycle (see migrations/009)
-  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
-  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS owner_pid TEXT;
-  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
-
-  -- P11.16: HITL resume directive — set by approveDecision /
-  -- resumeConversation mutation, consumed by next runSupervisor.
-  -- Persisted here (not just in-memory) so process restart between
-  -- the user's decision and the LangGraph resume doesn't drop it.
-  ALTER TABLE conversation_sessions ADD COLUMN IF NOT EXISTS hitl_directive JSONB;
-
-  CREATE INDEX IF NOT EXISTS idx_conversation_sessions_workspace_updated
-    ON conversation_sessions (workspace_id, updated_at DESC);
-
-  CREATE INDEX IF NOT EXISTS idx_conversation_sessions_running_heartbeat
-    ON conversation_sessions (heartbeat_at NULLS FIRST)
-    WHERE status = 'running';
-
   -- P14 P3 · conversations + runs split (mirrors migration 017). This
   -- runtime DDL fires only on fresh dev DBs; production environments run
-  -- the SQL migration which also backfills from conversation_sessions.
+  -- the SQL migration. The legacy conversation_sessions table was DROPped
+  -- in migration 018 (2026-05-09) — no longer recreated here.
   CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
