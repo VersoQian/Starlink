@@ -2,6 +2,67 @@
 
 > 与 `memory-and-session-layered.md`（数据层）配套的「12-agent 协作层」事实文档。
 > P14 完成 + agent layer audit（2026-04-26 → 2026-05-09 完整修复）后的最终状态。
+> **P15 (2026-05-09 续) ship 完毕**：BusinessLangGraphService 拆为 6 service +
+> mention-router 抽出 KB-binding helper + 16 个新 service 单测 + 全量测试 310/310。
+
+---
+
+## 0. P15 拆分后服务地图（最重要的论文图）
+
+```
+                   ┌─────────────────────────────────────────────────────┐
+                   │              BusinessLangGraphService               │
+                   │              (orchestrator facade · 3500 → ~3000)   │
+                   │                                                       │
+                   │  createGraph + run* node bodies + thin facades       │
+                   └──────┬───┬───┬───┬───┬───┬───────────────────────────┘
+                          │   │   │   │   │   │
+        ┌─────────────────┘   │   │   │   │   └──────────────────┐
+        │                     │   │   │   │                       │
+        ▼                     ▼   ▼   ▼   ▼                       ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Stream-      │  │ Supervisor-  │  │ Generation-  │  │ Critic-      │  │ Debate-      │  │ Synthesis-   │
+│ Lifecycle    │  │ Service      │  │ Service      │  │ Service      │  │ Service      │  │ Service      │
+│ ────────     │  │ ────────     │  │ ────────     │  │ ────────     │  │ ────────     │  │ ────────     │
+│ heartbeat    │  │ classifyIn-  │  │ distillCell  │  │ HITL set/    │  │ maybeRunDe-  │  │ buildCross-  │
+│ handoff sub  │  │ tent         │  │ Summaries    │  │ consume      │  │ bates +      │  │ Context      │
+│ OTel span    │  │ isAgent-     │  │ toParser-    │  │ emitGen-     │  │ budget gate  │  │ buildAgent-  │
+│ businessSpan │  │ Active       │  │ Evidence     │  │ Output       │  │ + per-       │  │ Avatars      │
+│ Contexts     │  │ buildCross-  │  │ applyCit-    │  │ emitAgent-   │  │ debate span  │  │ buildBMC-    │
+│              │  │ ContextProm  │  │ Parsing      │  │ Degraded     │  │              │  │ Edges        │
+│              │  │              │  │              │  │ emitRevReq   │  │              │  │              │
+└──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘
+   stream-lifecycle      supervisor-     generation-     critic-          debate-         synthesis-
+                         service.ts      service.ts      service.ts       service.ts      service.ts
+   ~180 LOC              ~150 LOC        ~120 LOC        ~180 LOC         ~160 LOC        ~190 LOC
+
+         ↓ Mention path (separate file)
+   ┌───────────────────────────────────────────────────────┐
+   │  MentionRouter (775 → 715 LOC)                        │
+   │  + mention/kb-binding-injector.ts (~100 LOC)          │
+   │     handleBmcGenerator / handleAdvisor / handleUtility│
+   │     handleDebateSide / handleDebateJudge / ...Report  │
+   └───────────────────────────────────────────────────────┘
+```
+
+每个 service 都是 ≤ 200 LOC、单一职责、独立 unit-testable。
+
+---
+
+## 0.1 P15 commit chain (Sprint 1-7)
+
+| Sprint | Commit | 内容 | 净 LOC 变化 |
+|---|---|---|---|
+| S1 | `c8a336d` | stream-lifecycle 抽出 + BUSINESS_STATE_CONTRACT | +528 / -65 |
+| S2 | `2bcf23a` | SupervisorService（classifyIntent / isAgentActive / buildCrossContextPrompt） | +166 / -69 |
+| S3 | `cf4e54d` | GenerationService（distillCellSummaries / toParserEvidence / applyCitationParsing） | +137 / -45 |
+| S4 | `88ef8af` | CriticService（HITL + 3 emit helpers） | +229 / -126 |
+| S5 | `29c11fc` | DebateService（maybeRunDebates） | +176 / -100 |
+| S6 | `98e4d07` | SynthesisService（buildCrossContext / Avatars / BMCEdges + computeBMCEdgesForCells 移入） | +264 / -142 |
+| S7 | `784491c` | mention/kb-binding-injector.ts（mention-router 解耦） | +106 / -60 |
+| S8 | (本 commit) | service 单元测试 + agent-layer.md 同步 | TBD |
+
+**总：6 个新 service 模块 + 1 个 mention helper · 16 unit tests · BLG 主类减 ~600 LOC · 测试 288 → 310（+22）**。
 
 ---
 
