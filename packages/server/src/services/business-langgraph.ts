@@ -1610,7 +1610,34 @@ ${snippets}
       (d) => d.agent_id === agentId
     )
 
-    const subgraph = descriptor.buildSubgraph() as {
+    // 2.8 · runtime type check on the compiled subgraph. Without this,
+    // a misconfigured agent (e.g. graph.ts that registers an uncompiled
+    // StateGraph instead of compile()'d) would fail later at `subgraph
+    // .invoke is not a function` deep inside the LangGraph machinery,
+    // burying the root cause. Fail fast at the entry point with the
+    // agentId in the message.
+    const rawSubgraph = descriptor.buildSubgraph() as unknown
+    if (
+      !rawSubgraph ||
+      typeof (rawSubgraph as { invoke?: unknown }).invoke !== 'function'
+    ) {
+      auditLogger.error({
+        action: 'business-langgraph.invokeRegisteredAgent.invalid-subgraph',
+        userId: state.userId,
+        workflowId: state.workspaceId,
+        requestId: state.traceId,
+        metadata: {
+          agentId,
+          subgraphType: rawSubgraph && typeof rawSubgraph === 'object'
+            ? Object.keys(rawSubgraph as object).slice(0, 6)
+            : typeof rawSubgraph
+        }
+      })
+      throw new Error(
+        `invokeRegisteredAgent: descriptor.buildSubgraph() for "${agentId}" did not return a compiled subgraph (no .invoke fn). Check agents/${agentId}/graph.ts is calling .compile() before registering.`
+      )
+    }
+    const subgraph = rawSubgraph as {
       invoke: (
         input: Record<string, unknown>,
         config?: Record<string, unknown>
