@@ -156,6 +156,7 @@ import {
 } from './business-langgraph/stream-lifecycle.js'
 import { SupervisorService } from './business-langgraph/supervisor-service.js'
 import { GenerationService } from './business-langgraph/generation-service.js'
+import { CriticService } from './business-langgraph/critic-service.js'
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph')
 
@@ -228,8 +229,9 @@ export class BusinessLangGraphService {
    * fallback. setHitl writes BOTH; consumeHitl checks Map first, then
    * DB. This survives gateway crashes between the user's
    * approveDecision mutation and the LangGraph stream resume.
-   */
-  private readonly hitlResumeDirectives = new Map<string, HitlResumeDirective>()
+   *
+   * P15 S4 · the Map now lives inside CriticService — this class
+   * delegates set/consume via this.criticService. */
 
   /**
    * P11.5 / B3 · lazy-init LLMClient for the post-generator cell-summarizer
@@ -273,6 +275,11 @@ export class BusinessLangGraphService {
    *  in this class for now. */
   private readonly generationService: GenerationService
 
+  /** P15 S4 · Critic service (HITL directive set/consume + handoff
+   *  emission for generation-output / agent-degraded / revision-request).
+   *  Heavy runCritic stays in this class. */
+  private readonly criticService: CriticService
+
   constructor(
     model: BusinessModel | null = createLLMModel(),
     options: {
@@ -291,61 +298,17 @@ export class BusinessLangGraphService {
       buildWorkspaceContextPrompt: (s) => this.buildWorkspaceContextPrompt(s)
     })
     this.generationService = new GenerationService()
+    this.criticService = new CriticService(this.conversationMemoryStore)
   }
 
-  /**
-   * Phase 2.6 / P11.16 · publish a HITL resume directive. Writes to BOTH
-   * in-memory Map (fast path) AND conversation_sessions.hitl_directive
-   * (durable fallback for cross-process recovery). Returns the in-memory
-   * write's promise so callers can await durable persistence if needed.
-   */
+  /** P15 S4 · setHitlResumeDirective delegated to CriticService. */
   async setHitlResumeDirective(traceId: string, directive: HitlResumeDirective): Promise<void> {
-    if (!traceId) return
-    this.hitlResumeDirectives.set(traceId, directive)
-    try {
-      await this.conversationMemoryStore.setHitlDirective(
-        traceId,
-        directive as unknown as Record<string, unknown>
-      )
-    } catch (err) {
-      auditLogger.warn({
-        action: 'business-langgraph.setHitlResumeDirective.persist-failed',
-        requestId: traceId,
-        metadata: { err: err instanceof Error ? err.message : String(err) }
-      })
-    }
+    return this.criticService.setHitlResumeDirective(traceId, directive)
   }
 
-  /**
-   * Phase 2.6 / P11.16 · consume the HITL resume directive. Tries Map
-   * first (same-process hot path); on miss falls back to PG read+clear
-   * so a directive set in process A is consumable by process B after
-   * a gateway restart.
-   */
+  /** P15 S4 · consumeHitlResumeDirective delegated to CriticService. */
   async consumeHitlResumeDirective(traceId: string): Promise<HitlResumeDirective | null> {
-    if (!traceId) return null
-    const cached = this.hitlResumeDirectives.get(traceId)
-    if (cached) {
-      this.hitlResumeDirectives.delete(traceId)
-      // Best-effort clear of DB row too so a future restart doesn't
-      // re-apply the same directive.
-      this.conversationMemoryStore
-        .consumeHitlDirective(traceId)
-        .catch(() => {/* tolerated — DB may be down; in-memory was authoritative for this read */})
-      return cached
-    }
-    try {
-      const persisted = await this.conversationMemoryStore.consumeHitlDirective(traceId)
-      if (!persisted) return null
-      return persisted as unknown as HitlResumeDirective
-    } catch (err) {
-      auditLogger.warn({
-        action: 'business-langgraph.consumeHitlResumeDirective.read-failed',
-        requestId: traceId,
-        metadata: { err: err instanceof Error ? err.message : String(err) }
-      })
-      return null
-    }
+    return this.criticService.consumeHitlResumeDirective(traceId)
   }
 
   private logTrace(params: {
@@ -1866,34 +1829,14 @@ ${snippets}
 
   // ============== Phase 3.1 · handoff emission helpers ==============
 
+  /** P15 S4 · emitGenerationOutput delegated to CriticService. */
   private emitGenerationOutput(
     state: BusinessStateType,
     agentNodeName: string,
     nodes: MacraNodeData[],
     usage?: Record<string, number> | undefined
   ): void {
-    const payload: GenerationOutputPayload = {
-      nodeCount: nodes.length,
-      nodeIds: nodes.map((n) => n.id),
-      tokensUsed: usage?.['totalTokens'] ?? usage?.['total_tokens']
-    }
-    getHandoffLogger(state.traceId).record({
-      from: agentNodeName,
-      to: 'synthesizer',
-      kind: 'generation-output',
-      payload: payload as unknown as Record<string, unknown>,
-      meta: {
-        round: state.roundNumber,
-        threadId: state.traceId,
-        traceId: state.traceId
-      }
-    })
-    trace.getActiveSpan()?.addEvent('handoff', {
-      kind: 'generation-output',
-      from: agentNodeName,
-      to: 'synthesizer',
-      'starlink.node_count': nodes.length
-    })
+    this.criticService.emitGenerationOutput(state, agentNodeName, nodes, usage)
   }
 
   /**
@@ -1906,71 +1849,22 @@ ${snippets}
    * up as "agent ran slightly slower than usual" which is not
    * actionable.
    */
+  /** P15 S4 · emitAgentDegraded delegated to CriticService. */
   private emitAgentDegraded(
     state: BusinessStateType,
     agentId: string,
     error: unknown,
     fallback: 'legacy-inline-llm' | 'rule-based' | 'noop' | 'legacy-supervisor'
   ): void {
-    const message = error instanceof Error ? error.message : String(error)
-    getHandoffLogger(state.traceId).record({
-      from: agentId,
-      to: '_system',
-      kind: 'agent-degraded',
-      payload: {
-        agentId,
-        error: message,
-        fallback
-      },
-      meta: {
-        round: state.roundNumber,
-        threadId: state.traceId,
-        traceId: state.traceId
-      }
-    })
-    trace.getActiveSpan()?.addEvent('agent-degraded', {
-      'starlink.agent_id': agentId,
-      'starlink.fallback': fallback,
-      'starlink.error': message.slice(0, 200)
-    })
+    this.criticService.emitAgentDegraded(state, agentId, error, fallback)
   }
 
+  /** P15 S4 · emitRevisionRequests delegated to CriticService. */
   private emitRevisionRequests(
     state: BusinessStateType,
     conflicts: CriticConflict[]
   ): void {
-    if (conflicts.length === 0) return
-    const logger = getHandoffLogger(state.traceId)
-    for (const conflict of conflicts) {
-      const targets = conflict.relatedAgents ?? []
-      for (const target of targets) {
-        const payload: RevisionRequestPayload = {
-          conflictId: conflict.id,
-          severity: conflict.severity ?? 'medium',
-          conflictType: conflict.conflictType ?? 'other',
-          summary: conflict.label,
-          suggestedChange: conflict.content.split('\n')[0]
-        }
-        logger.record({
-          from: 'critic-agent',
-          to: target,
-          kind: 'revision-request',
-          payload: payload as unknown as Record<string, unknown>,
-          meta: {
-            round: state.roundNumber,
-            threadId: state.traceId,
-            traceId: state.traceId
-          }
-        })
-        trace.getActiveSpan()?.addEvent('handoff', {
-          kind: 'revision-request',
-          from: 'critic-agent',
-          to: target,
-          'starlink.conflict_id': conflict.id,
-          'starlink.severity': conflict.severity ?? 'medium'
-        })
-      }
-    }
+    this.criticService.emitRevisionRequests(state, conflicts)
   }
 
   private getRevisionSuffix(state: BusinessStateType): string {
