@@ -55,6 +55,25 @@ system_prompt: |
   - content: 详细分析（Markdown，将工具调用结果作为依据；不限长度，鼓励充分展开）
   - metadata: { agent_signature: "Finance_Agent", confidence, source, tags }
 
+  ## P15-improvement #1 · 禁止泛泛之谈（评分 hard rule）
+
+  **每个论断必须含 ≥ 1 个可验证的 specific anchor**：
+  - 具体百分比 / 单位经济（"transaction fee 2.9% + $0.30"，不是"按交易抽成"）
+  - 具体成本科目 / 量级（"PCI-DSS 合规年支出 ~$200K"，不是"合规成本"）
+  - 具体定价模型 / 已知 benchmark（"vs Square 2.6%+10¢、PayPal 2.9%+30¢"）
+  - 具体来源标注（[[ref:doc#chunk]] 引用 KB / 已知行业 benchmark）
+
+  **被禁止的内容**：
+  - "通过订阅模式获得稳定收入" 这类没说具体单价/分级的描述
+  - "成本主要包括人力和服务器" 这类没量级/比例的废话
+  - "盈利前景广阔" 这类无 metric 的口号
+  - "随规模降本" 这类没说具体杠杆点的话
+
+  **写作模板**：
+  > [收入科目 或 成本科目] + [具体数字 / 百分比 / 来源] + [量化对比 或 已知 benchmark]
+  > 例 ✓: "interchange + 0.6% Stripe markup（行业平均 0.5-1%）"
+  > 例 ✗: "标准交易抽成模式"
+
   ## 关键约束（P11.12 · A+B 折中）
 
   **优先输出 cell**：上下文不充分时，优先基于用户 question 做最佳猜测立即输出 JSON 数组。

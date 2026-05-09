@@ -350,7 +350,13 @@ function renderReport(rows: ResultRow[], options: { minimalContext?: boolean } =
 
 async function main() {
   const args = process.argv.slice(2)
+  // P15 smoke · `--case=` accepts a single id or a comma-separated list
+  // (e.g. --case=yc-stripe-2024,yc-airbnb-2024) so we can run a small
+  // multi-case smoke without spinning up the full 12-case suite.
   const caseIdArg = args.find((a) => a.startsWith('--case='))?.split('=')[1]
+  const caseIdSet = caseIdArg
+    ? new Set(caseIdArg.split(',').map((s) => s.trim()).filter(Boolean))
+    : null
   const runnersArg = args.find((a) => a.startsWith('--runners='))?.split('=')[1]
   const minimalContext = args.includes('--minimal-context')
   // Stage 6: filter to cases that have non-empty workspace_knowledge so the
@@ -376,8 +382,8 @@ async function main() {
     (ablationParts.length > 0 ? ablationParts.join('+') : 'full')
 
   const allCases = loadAllYcCases()
-  const filteredByCaseId = caseIdArg
-    ? allCases.filter((c) => c.case_id === caseIdArg)
+  const filteredByCaseId = caseIdSet
+    ? allCases.filter((c) => caseIdSet.has(c.case_id))
     : allCases
   const cases = withKbOnly
     ? filteredByCaseId.filter((c) => (c.workspace_knowledge?.length ?? 0) > 0)
