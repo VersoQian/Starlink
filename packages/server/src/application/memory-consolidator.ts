@@ -36,6 +36,8 @@
 import { ConversationMemoryStore } from './conversation-memory-store.js'
 import { UserSkillExtractor } from '../services/user-skill-extractor.js'
 import { UserSkillConsolidator } from '../services/user-skill-consolidator.js'
+import { ChatHistoryDistiller } from './chat-history-distiller.js'
+import { MemoryCaptureService } from './memory-capture.js'
 import { pool } from '../infrastructure/db/pool.js'
 
 export type ConsolidationResult = {
@@ -48,11 +50,21 @@ export type ConsolidationResult = {
 }
 
 export class MemoryConsolidator {
+  private readonly distiller: ChatHistoryDistiller
+
   constructor(
     private readonly memoryStore: ConversationMemoryStore,
     private readonly userSkillExtractor: UserSkillExtractor,
-    private readonly userSkillConsolidator: UserSkillConsolidator
-  ) {}
+    private readonly userSkillConsolidator: UserSkillConsolidator,
+    /** P14 Item 2 · captureService is optional — when present,
+     *  consolidateRunEnd uses it to persist the L1→L2 chat-history
+     *  distillation as a bmc-summary memory_item. Without it, chat
+     *  distillation is skipped (but user-skill extraction still runs). */
+    private readonly captureService?: MemoryCaptureService,
+    distiller?: ChatHistoryDistiller
+  ) {
+    this.distiller = distiller ?? new ChatHistoryDistiller()
+  }
 
   /**
    * Run-end trigger: a LangGraph stream just completed. Optionally extract
@@ -67,6 +79,8 @@ export class MemoryConsolidator {
     runId: string
     workspaceId: string
     userId: string
+    /** P14 Item 2 · pass conversationId to enable chat-history distillation. */
+    conversationId?: string
   }): Promise<ConsolidationResult> {
     if (!args.userId) {
       return { trigger: 'run-end', rowsAffected: 0, summary: 'no userId; skipped' }
@@ -81,10 +95,49 @@ export class MemoryConsolidator {
       console.warn('[memory-consolidator] extractUserSkills failed', { runId: args.runId, error: String(err) })
       return 0
     })
+
+    // P14 Item 2 · L1→L2 chat-history distillation. Pull the run's
+    // chat messages, condense via LLM, and persist as a bmc-summary L2
+    // row. Best-effort: skips silently if no captureService, conversationId,
+    // too few user turns, or LLM fails.
+    let distilledRows = 0
+    if (this.captureService && args.conversationId) {
+      try {
+        const messages = await this.memoryStore.listMessages(args.conversationId, 30)
+        const distilled = await this.distiller.distill(messages)
+        if (distilled) {
+          await this.captureService.captureBmcSummary({
+            workspaceId: args.workspaceId,
+            userId: args.userId,
+            runId: args.runId,
+            sourceTraceId: `${args.runId}-chat-history`,
+            title: '会话回顾',
+            content: distilled,
+            importance: 0.55,
+            confidence: 0.7,
+            tags: ['chat-history', 'distilled'],
+            metadata: {
+              source: 'chat-history-distillation',
+              conversationId: args.conversationId,
+              userTurns: messages.filter((m) => m.role === 'user').length
+            }
+          })
+          distilledRows = 1
+        }
+      } catch (err) {
+        console.warn('[memory-consolidator] chat-history distillation failed', {
+          runId: args.runId, error: String(err)
+        })
+      }
+    }
+
+    const total = extracted + distilledRows
     return {
       trigger: 'run-end',
-      rowsAffected: extracted,
-      summary: extracted > 0 ? `${extracted} user-skill rows refreshed` : 'extractor skipped (throttled or no signal)'
+      rowsAffected: total,
+      summary: total > 0
+        ? `${extracted} user-skill rows; ${distilledRows} chat-history summary`
+        : 'consolidator skipped (throttled / no signal / not enough turns)'
     }
   }
 

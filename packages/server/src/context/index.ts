@@ -102,7 +102,10 @@ export const sharedUserSkillConsolidator = new UserSkillConsolidator({
 export const sharedMemoryConsolidator = new MemoryConsolidator(
   sharedConversationMemoryStore,
   sharedUserSkillExtractor,
-  sharedUserSkillConsolidator
+  sharedUserSkillConsolidator,
+  // P14 Item 2 · pass capture service so consolidateRunEnd can persist
+  // the LLM-distilled chat-history summary as an L2 bmc-summary row.
+  sharedMemoryCaptureService
 )
 
 // P14 P7 · MemoryReaper — TTL maintenance. Layer-specific archival rules:
