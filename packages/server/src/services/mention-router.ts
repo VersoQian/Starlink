@@ -34,7 +34,7 @@ import {
 } from './business-langgraph.js'
 import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
 import { LLMClient } from './llm-client.js'
-import { listKbBindingsForAgent, searchKnowledgeBase } from './kb-task-service.js'
+import { injectKbBindingEvidence } from './mention/kb-binding-injector.js'
 import { makeProfileGetter } from '../capabilities/profile-loader.js'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -209,69 +209,13 @@ export class MentionRouter {
    * Errors are logged and swallowed — a KB outage shouldn't block
    * the agent invocation; the agent just runs without that source.
    */
+  /** P15 S7 · KB-binding evidence injection delegated to
+   *  mention/kb-binding-injector.ts. */
   private async injectAgentKbEvidence(
     input: MentionInput,
     agentId: string
   ): Promise<MentionInput> {
-    try {
-      const bindings = await listKbBindingsForAgent(input.workspaceId, agentId, {
-        onlyAutoSearch: true
-      })
-      if (bindings.length === 0) return input
-
-      // Cap total injected chunks so a heavily-bound agent doesn't blow
-      // out the prompt window. Top-3 per binding × max 5 bindings = 15.
-      const perBindingTopK = 3
-      const maxBindings = 5
-      const targets = bindings.slice(0, maxBindings)
-
-      const fetched = await Promise.all(
-        targets.map((b) =>
-          searchKnowledgeBase(
-            input.workspaceId,
-            b.kbId,
-            input.message,
-            perBindingTopK,
-            input.userId
-          ).catch((err) => {
-            auditLogger.warn({
-              action: 'mention-router.kb-binding-search-failed',
-              workflowId: input.workspaceId,
-              userId: input.userId,
-              metadata: {
-                agentId,
-                kbId: b.kbId,
-                error: err instanceof Error ? err.message : String(err)
-              }
-            })
-            return [] as KnowledgeEvidence[]
-          })
-        )
-      )
-      const merged: KnowledgeEvidence[] = [
-        ...(input.knowledgeEvidence ?? []),
-        ...fetched.flat()
-      ]
-      auditLogger.info({
-        action: 'mention-router.kb-binding-injected',
-        workflowId: input.workspaceId,
-        userId: input.userId,
-        metadata: {
-          agentId,
-          bindingCount: targets.length,
-          chunkCount: merged.length - (input.knowledgeEvidence?.length ?? 0)
-        }
-      })
-      return { ...input, knowledgeEvidence: merged }
-    } catch (err) {
-      auditLogger.warn({
-        action: 'mention-router.kb-binding-fetch-failed',
-        workflowId: input.workspaceId,
-        userId: input.userId,
-        metadata: { agentId, error: err instanceof Error ? err.message : String(err) }
-      })
-      return input
-    }
+    return injectKbBindingEvidence(input, agentId)
   }
 
   // ── handlers ─────────────────────────────────────────────────────────────
