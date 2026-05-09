@@ -2,6 +2,7 @@ import type { ExpressContextFunctionArgument } from '@apollo/server/express4'
 import { GraphQLError } from 'graphql'
 import { ConversationStore } from '../application/conversation-store.js'
 import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
+import { MemoryCaptureService } from '../application/memory-capture.js'
 import { TaskEventStore } from '../application/task-event-store.js'
 import { createConversationEventBus } from '../application/conversation-event-bus.js'
 import { createConversationRuntimeRepository } from '../application/conversation-runtime-repository.js'
@@ -63,6 +64,13 @@ const sharedConversationMemoryStore = new ConversationMemoryStore()
 setWorkspaceMemoryStore(
   createWorkspaceMemoryStore({ conversationMemoryStore: sharedConversationMemoryStore })
 )
+
+// P14 P4 · MemoryCaptureService — singleton facade for the unified write API.
+// Currently a thin wrapper around ConversationMemoryStore + the legacy
+// captureConversationOutcome path; new code (mention router, business-langgraph,
+// etc.) should call this instead of upsertMemory / appendMessage / record
+// directly. Old call sites continue to work during the deprecation window.
+export const sharedMemoryCaptureService = new MemoryCaptureService(sharedConversationMemoryStore)
 
 // P3 · Single shared UserSkillExtractor instance (per process). The
 // extractor's call counter (Map<userId, count>) is in-memory; a single
