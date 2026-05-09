@@ -228,6 +228,31 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
               evidence_needed: 'EVIDENCE · 待求证',
               meta: 'META · 反思',
             }
+            // P12 · server-side persistence warning. Surfaces silent
+            // canvas_graphs / memory_items write failures as a
+            // non-blocking yellow ⚠ alert so the user knows they may
+            // need to reload/retry without aborting the conversation.
+            if (m.source === 'persistence-warning') {
+              return (
+                <div key={idx} className="flex gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-white font-body text-[10px] font-bold"
+                  >
+                    ⚠
+                  </span>
+                  <div className="max-w-[88%] rounded-md bg-amber-50 border border-amber-300 p-3 shadow-sm">
+                    <span className="inline-flex items-center gap-1 rounded bg-amber-200 px-2 py-0.5 font-body text-[9px] font-bold uppercase tracking-[0.18em] text-amber-900 mb-2">
+                      PERSISTENCE · 持久化提示
+                    </span>
+                    <p className="font-body text-[12px] leading-[1.55] text-amber-900 whitespace-pre-wrap break-words">
+                      {msg.content}
+                    </p>
+                  </div>
+                </div>
+              )
+            }
+
             // Meta-check renders as a special "graduate" card (AI 自评
             // 探索完整度) with a "✦ 开始生成 BMC" CTA. The latest one
             // (highest idx) is the actionable one; older ones become

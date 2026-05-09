@@ -285,7 +285,7 @@ export class ConversationStore {
         record.graph = currentGraph
         await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph)
         await this.sessionStore.updateConversation(id, record)
-        await this.graphStore.persistGraph(currentGraph)
+        await this.persistGraphWithWarning(workspaceId, id, currentGraph)
         const baseEvent: ConversationEvent = {
           type: 'graph/appended',
           conversationId: id,
@@ -734,7 +734,14 @@ export class ConversationStore {
         edges: [...baseGraph.edges.filter((e) => !newEdgeIds.has(e.id)), ...newEdges]
       }
       await this.graphStore.setWorkspaceGraph(workspaceId, updatedGraph)
-      await this.graphStore.persistGraph(updatedGraph)
+      // P12 · Use warning helper when we have a conversation context
+      // (mention came from an active chat); otherwise let it throw so
+      // the GraphQL mutation surfaces the error to the caller.
+      if (input.conversationId) {
+        await this.persistGraphWithWarning(workspaceId, input.conversationId, updatedGraph)
+      } else {
+        await this.graphStore.persistGraph(updatedGraph)
+      }
 
       const conversations = await this.sessionStore.getConversationsByWorkspace(workspaceId)
       for (const item of conversations) {
@@ -949,7 +956,7 @@ export class ConversationStore {
           currentGraph = update.graph
           record.graph = currentGraph
           await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph)
-          await this.graphStore.persistGraph(currentGraph)
+          await this.persistGraphWithWarning(workspaceId, conversationId, currentGraph)
           record.knowledgeEvidence = update.knowledgeEvidence ?? []
           await this.sessionStore.updateConversation(conversationId, record)
           if (!initialized) {
@@ -977,7 +984,7 @@ export class ConversationStore {
           record.graph = currentGraph
           await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph)
           await this.sessionStore.updateConversation(conversationId, record)
-          await this.graphStore.persistGraph(currentGraph)
+          await this.persistGraphWithWarning(workspaceId, conversationId, currentGraph)
 
           const event: ConversationEvent = initialized
             ? {
@@ -1041,6 +1048,24 @@ export class ConversationStore {
         }
 
         if (update.type === 'status') {
+          continue
+        }
+
+        if (update.type === 'persistence-warning') {
+          // P12 · Persistence visibility passthrough. The stream raised
+          // a warning (e.g. writeConversationSummary memory_items insert
+          // failed) — translate to a 'persistence/warning' ConversationEvent
+          // and publish so the front-end chat dock renders a yellow ⚠
+          // bubble. The conversation itself is unaffected.
+          await publishEvent({
+            type: 'persistence/warning',
+            conversationId,
+            payload: {
+              severity: update.severity ?? 'warning',
+              source: update.source,
+              message: update.message
+            }
+          } as ConversationEvent)
           continue
         }
 
@@ -1172,19 +1197,21 @@ export class ConversationStore {
         })
       }
 
-      const completeEvent: ConversationEvent = {
-        type: 'status',
-        conversationId,
-        status: 'completed'
-      }
-      await publishEvent(completeEvent)
-
       record.metadata = {
         ...record.metadata,
         status: 'completed',
         updatedAt: new Date()
       }
       await this.sessionStore.updateConversation(conversationId, record)
+
+      // P12 race fix · run persistConversationCompletion BEFORE emitting
+      // status='completed'. The frontend conversation-sync-engine cancels
+      // the WS subscription as soon as status='completed' arrives, so any
+      // 'persistence/warning' event emitted after the completion event
+      // would be invisible to live subscribers (still saved to the ring
+      // buffer, but the user would only see it after a separate reconnect
+      // — which doesn't happen for a finished conversation). Order below
+      // ensures the warning rides ahead of completion.
       await this.persistConversationCompletion({
         workspaceId,
         userId,
@@ -1193,6 +1220,13 @@ export class ConversationStore {
         graph: currentGraph,
         decision: latestDecision
       })
+
+      const completeEvent: ConversationEvent = {
+        type: 'status',
+        conversationId,
+        status: 'completed'
+      }
+      await publishEvent(completeEvent)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const stack = error instanceof Error ? error.stack : undefined
@@ -1200,6 +1234,23 @@ export class ConversationStore {
       if (stack) {
         console.error('Stack trace:', stack)
       }
+      record.metadata = {
+        ...record.metadata,
+        status: 'failed',
+        updatedAt: new Date()
+      }
+      await this.sessionStore.updateConversation(conversationId, record)
+
+      // P12 race fix · same reasoning as the success path: persistence
+      // warning must fire before status='failed' so live subscribers
+      // receive both events before unsubscribing.
+      await this.persistConversationFailure({
+        workspaceId,
+        userId,
+        conversationId,
+        message
+      })
+
       const failedEvent: ConversationEvent = {
         type: 'status',
         conversationId,
@@ -1207,19 +1258,6 @@ export class ConversationStore {
         message
       }
       await publishEvent(failedEvent)
-
-      record.metadata = {
-        ...record.metadata,
-        status: 'failed',
-        updatedAt: new Date()
-      }
-      await this.sessionStore.updateConversation(conversationId, record)
-      await this.persistConversationFailure({
-        workspaceId,
-        userId,
-        conversationId,
-        message
-      })
     }
   }
 
@@ -1284,7 +1322,25 @@ export class ConversationStore {
         evidenceCount: options.record.knowledgeEvidence.length
       })
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       console.error('[conversation-store] failed to persist conversation completion memory', error)
+      // P12 · Surface to user. The conversation itself is already
+      // marked completed in-memory; only the durable summary write
+      // failed (memory_items / session status / outcome). User can
+      // continue but cross-session memory is missing this round.
+      try {
+        await this.publishEvent(options.workspaceId, {
+          type: 'persistence/warning',
+          conversationId: options.conversationId,
+          payload: {
+            severity: 'warning',
+            source: 'conversation-completion',
+            message: `本次会话总结持久化失败：${message}（不影响当前画布；下次跨会话记忆可能缺这一轮）`
+          }
+        })
+      } catch (publishErr) {
+        console.error('[conversation-store] failed to publish completion warning', publishErr)
+      }
     }
   }
 
@@ -1308,7 +1364,64 @@ export class ConversationStore {
         }
       })
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       console.error('[conversation-store] failed to persist conversation failure memory', error)
+      try {
+        await this.publishEvent(options.workspaceId, {
+          type: 'persistence/warning',
+          conversationId: options.conversationId,
+          payload: {
+            severity: 'warning',
+            source: 'conversation-completion',
+            message: `失败状态持久化失败：${message}（重启后恢复机制可能识别为 stale）`
+          }
+        })
+      } catch (publishErr) {
+        console.error('[conversation-store] failed to publish failure warning', publishErr)
+      }
+    }
+  }
+
+  /**
+   * P12 · Persist canvas graph + surface failures as 'persistence/warning'
+   * events. Replaces the old silent `try { persistCanvasGraph } catch
+   * console.error` swallow in WorkspaceGraphStore. Caller no longer has
+   * to choose between "keep going on error" (data loss invisible to UI)
+   * vs "throw and abort the whole stream" — the stream continues with a
+   * yellow ⚠ bubble in the chat dock telling the user the canvas may
+   * not have been saved this round.
+   *
+   * Uses 'warning' severity by default: in-memory graph state is still
+   * coherent, only the canvas_graphs UPSERT failed. User can reload
+   * later to verify; for the active session, the in-memory graph is
+   * authoritative.
+   */
+  private async persistGraphWithWarning(
+    workspaceId: string,
+    conversationId: string | null,
+    graph: CanvasGraph
+  ): Promise<void> {
+    try {
+      await this.graphStore.persistGraph(graph)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('[conversation-store] canvas_graphs persist failed', error)
+      if (conversationId) {
+        const event: ConversationEvent = {
+          type: 'persistence/warning',
+          conversationId,
+          payload: {
+            severity: 'warning',
+            source: 'canvas-graph',
+            message: `画布快照保存失败：${message}（会话可继续，状态以本次内存为准）`
+          }
+        }
+        try {
+          await this.publishEvent(workspaceId, event)
+        } catch (publishErr) {
+          console.error('[conversation-store] failed to publish persistence warning', publishErr)
+        }
+      }
     }
   }
 
@@ -1490,6 +1603,10 @@ function shouldPersistRuntimeEvent(event: ConversationEvent) {
     || event.type === 'seminar.turn.completed'
     || event.type === 'seminar.decision.made'
     || event.type === 'seminar.decision.requested'
+    // P12 · Persist persistence-warning events to the ring buffer so a
+    // client reconnecting after a transient drop replays the warning
+    // and learns about silent persistence failures it missed.
+    || event.type === 'persistence/warning'
 }
 
 function buildConversationTitle(question: string) {

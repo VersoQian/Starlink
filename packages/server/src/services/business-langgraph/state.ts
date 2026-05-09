@@ -295,3 +295,22 @@ export type BusinessStreamUpdate =
       nodeName: string
       payloadKeys: string[]
     }
+  /**
+   * P12 · Persistence-visibility passthrough. Emitted by streamConversation
+   * when a persistence call inside the stream (e.g. writeConversationSummary)
+   * fails. Conversation-store translates this into a ConversationEvent
+   * of type 'persistence/warning' and publishes to subscribers, so the
+   * front-end chat dock can render a yellow ⚠ bubble. The conversation
+   * itself continues — this is NOT a terminal failure.
+   *
+   * `source` identifies the failing persistence call site for log-grep:
+   * - 'canvas-graph': WorkspaceGraphStore.persistGraph (canvas_graphs upsert)
+   * - 'conversation-summary': writeConversationSummary (memory_items)
+   * - 'conversation-completion': persistConversationCompletion
+   */
+  | {
+      type: 'persistence-warning'
+      severity?: 'warning' | 'error'
+      source: 'canvas-graph' | 'conversation-summary' | 'conversation-completion'
+      message: string
+    }

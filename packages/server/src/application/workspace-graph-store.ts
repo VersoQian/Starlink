@@ -17,11 +17,15 @@ export class WorkspaceGraphStore {
     return loadPersistedGraph(workspaceId)
   }
 
-  async persistGraph(graph: CanvasGraph) {
-    try {
-      await persistCanvasGraph(graph)
-    } catch (error) {
-      console.error('Failed to persist canvas graph', error)
-    }
+  /**
+   * P12 · Surfaced persistence — let the caller decide how to react to a
+   * canvas_graphs upsert failure (publish a warning event, retry, etc).
+   * Previously this swallowed all errors into console.error, which hid
+   * silent data loss from the UI. Callers in conversation-store.ts wrap
+   * this in `persistGraphWithWarning(...)` to publish a 'persistence/warning'
+   * event the frontend renders as a yellow ⚠ bubble.
+   */
+  async persistGraph(graph: CanvasGraph): Promise<void> {
+    await persistCanvasGraph(graph)
   }
 }

@@ -24,6 +24,17 @@ export type ConversationProgressEvent = {
      * like "market-agent is calling web-search…" between phase changes.
      */
     | 'agent/subagent-progress'
+    /**
+     * P12 · Server-side persistence failure. Emitted by conversation-store
+     * when a durable write (canvas_graphs upsert, memory_items conversation
+     * summary, conversation completion memory) fails but the conversation
+     * itself continues. Payload shape:
+     *   { severity: 'warning' | 'error', source: 'canvas-graph' |
+     *     'conversation-summary' | 'conversation-completion',
+     *     message: string }
+     * Frontend renders a yellow ⚠ chat bubble — non-fatal, informational.
+     */
+    | 'persistence/warning'
   conversationId: string
   status?: 'idle' | 'running' | 'failed' | 'completed'
   message?: string | null
@@ -56,6 +67,14 @@ type WatchConversationOptions = {
   onEvidence?: (payload: unknown) => void
   onCardCited?: (payload: unknown) => void
   onEvent?: (event: ConversationProgressEvent) => void
+  /** P12 · server-side persistence failure visibility. Fires on
+   *  'persistence/warning' events so the front-end can render a
+   *  yellow ⚠ chat bubble (canvas saved-but-not-persisted etc). */
+  onPersistenceWarning?: (payload: {
+    severity?: 'warning' | 'error'
+    source: string
+    message: string
+  }) => void
   loadLatestGraph?: () => Promise<unknown>
 }
 
@@ -278,6 +297,22 @@ export function watchConversation(options: WatchConversationOptions) {
 
       if (event.type === 'card/cited' && event.payload) {
         options.onCardCited?.(event.payload)
+      }
+
+      // P12 · Persistence visibility passthrough.
+      if (event.type === 'persistence/warning' && event.payload) {
+        const payload = event.payload as {
+          severity?: 'warning' | 'error'
+          source?: string
+          message?: string
+        }
+        if (payload.message) {
+          options.onPersistenceWarning?.({
+            severity: payload.severity ?? 'warning',
+            source: payload.source ?? 'unknown',
+            message: payload.message
+          })
+        }
       }
 
       if (event.type === 'status') {

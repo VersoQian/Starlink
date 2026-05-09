@@ -25,8 +25,12 @@ type ChatMessage = {
   /** Set on assistant turns produced by the Socratic coach (reflectOnIdeation).
    *  Empty / undefined for plain BMC-generator responses. */
   scaffold?: ChatScaffold
-  /** llm / scripted / error — provenance from the coach pipeline. */
-  source?: 'llm' | 'scripted' | 'error'
+  /** llm / scripted / error — provenance from the coach pipeline.
+   *  P12 · 'persistence-warning' is emitted by the server when a
+   *  durable write (canvas_graphs / memory_items / completion summary)
+   *  failed but the conversation continues. Rendered as a yellow ⚠
+   *  bubble in the chat dock — non-fatal, informational. */
+  source?: 'llm' | 'scripted' | 'error' | 'persistence-warning'
   /** True for meta-check turns (auto-fired every N user messages). The
    *  chat-dock renders these with a "graduate to BMC" CTA so the user
    *  can transition from exploration → generation when AI deems the
@@ -456,6 +460,18 @@ interface MacraState {
   subAgentActivity: { parentNode: string; nodeName: string; ts: number } | null
   setSubAgentActivity: (next: { parentNode: string; nodeName: string; ts: number } | null) => void
 
+  /** P13 · most recent SeminarPhase from `phase.changed` events. Drives
+   *  the canvas stage strip's per-stage running/done determination
+   *  alongside macraNodes counts. null on a fresh canvas / before the
+   *  first stream tick. */
+  lastPhase: 'planning' | 'execution' | 'review' | 'decision' | null
+  setLastPhase: (phase: 'planning' | 'execution' | 'review' | 'decision' | null) => void
+  /** P13 · stream emitted a status='failed' event during the current run.
+   *  Stage strip uses this to show a red ⚠ on the active stage. Reset to
+   *  false at the start of every new stream. */
+  hasStreamFailed: boolean
+  setHasStreamFailed: (failed: boolean) => void
+
   // Cell-level citations (Stage 3 创新核心 UI)
   citations: Record<string /* cardId */, CardCitation[]>
   setCardCitation: (cardId: string, citation: CardCitation) => void
@@ -650,6 +666,13 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   knowledgeEvidence: [],
   subAgentActivity: null,
   setSubAgentActivity: (next) => set({ subAgentActivity: next }),
+  // P13 · stage-strip drivers. lastPhase is set by the conversation event
+  // handler when 'phase.changed' arrives; hasStreamFailed reset at every
+  // stream start.
+  lastPhase: null,
+  setLastPhase: (phase) => set({ lastPhase: phase }),
+  hasStreamFailed: false,
+  setHasStreamFailed: (failed) => set({ hasStreamFailed: failed }),
   citations: {},
   evidenceDrawer: {
     isOpen: false,
@@ -978,7 +1001,13 @@ ${firstStep.description}${draftHint}
       // node in the now-emptied nodes[] array).
       detailPanel: { isOpen: false, nodeId: null },
       focusedConflictId: null,
-      pendingInterrupt: null
+      pendingInterrupt: null,
+      // P13 · archive marks the canvas as "starting a fresh session" —
+      // clear stage-strip drivers so the strip doesn't carry the previous
+      // pipeline's phase / failure into the wizard graduation flow.
+      lastPhase: null,
+      hasStreamFailed: false,
+      subAgentActivity: null
     })
     // Keep editor & selection state out of the way.
     void nodes
@@ -1590,6 +1619,11 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
     set((state) => ({
       isOrchestratorProcessing: true,
       citations: {},
+      // P13 · reset stage-strip drivers at every new stream so the
+      // pipeline status starts clean (no stale phase / failure carrying
+      // over from the previous run).
+      lastPhase: null,
+      hasStreamFailed: false,
       workflowMeta: {
         ...state.workflowMeta,
         lastError: null
@@ -1843,18 +1877,42 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             get().setCardCitation(data.cardId, data.citation)
           }
         },
-        // P11.14 · wire-panel data feed. Catch the lightweight
-        // subagent-progress events emitted by the BMC ReAct subgraph's
-        // internal nodes (call-llm, tools, parse) and stash the latest
-        // in store.subAgentActivity for the floating wire widget.
+        // P11.14 + P13 · stream event router. Branches:
+        //   - agent/subagent-progress → wire-panel + stage-strip currentAction
+        //   - phase.changed           → stage-strip lastPhase pivot
+        //   - status === 'failed'     → stage-strip hasStreamFailed flag
+        // Other event types are handled by their dedicated callbacks above.
         onEvent: (event) => {
-          if (event.type !== 'agent/subagent-progress') return
-          const payload = event.payload as
-            | { ns?: string[]; nodeName?: string; payloadKeys?: string[] }
-            | undefined
-          if (!payload || !Array.isArray(payload.ns) || typeof payload.nodeName !== 'string') return
-          const parentNode = (payload.ns[0] ?? '').split(':')[0] || '_unknown_'
-          set({ subAgentActivity: { parentNode, nodeName: payload.nodeName, ts: Date.now() } })
+          if (event.type === 'agent/subagent-progress') {
+            const payload = event.payload as
+              | { ns?: string[]; nodeName?: string; payloadKeys?: string[] }
+              | undefined
+            if (!payload || !Array.isArray(payload.ns) || typeof payload.nodeName !== 'string') return
+            const parentNode = (payload.ns[0] ?? '').split(':')[0] || '_unknown_'
+            set({ subAgentActivity: { parentNode, nodeName: payload.nodeName, ts: Date.now() } })
+            return
+          }
+          if (event.type === 'phase.changed') {
+            const payload = event.payload as { phase?: string } | undefined
+            const phase = payload?.phase
+            if (phase === 'planning' || phase === 'execution' || phase === 'review' || phase === 'decision') {
+              set({ lastPhase: phase })
+            }
+            return
+          }
+          if (event.type === 'status' && event.status === 'failed') {
+            set({ hasStreamFailed: true })
+          }
+        },
+        // P12 · server-side persistence failures (canvas_graphs upsert /
+        // memory_items conversation summary / completion memory) surfaced
+        // as yellow ⚠ chat bubbles instead of silent console.error.
+        onPersistenceWarning: ({ severity, source, message }) => {
+          get().appendChatMessage({
+            role: 'assistant',
+            content: `⚠ 持久化提示（${source}）：${message}`,
+            source: severity === 'error' ? 'error' : 'persistence-warning'
+          })
         },
         loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId)
       })
@@ -2226,6 +2284,16 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             get().setCardCitation(data.cardId, data.citation)
           }
         },
+        // P12 · same surfacing as the active-stream watcher above —
+        // reattach watcher also picks up persistence warnings replayed
+        // from the runtime-events ring buffer after a reconnect.
+        onPersistenceWarning: ({ severity, source, message }) => {
+          get().appendChatMessage({
+            role: 'assistant',
+            content: `⚠ 持久化提示（${source}）：${message}`,
+            source: severity === 'error' ? 'error' : 'persistence-warning'
+          })
+        },
         loadLatestGraph: async () => fetchWorkspaceGraphSnapshot(workspaceId),
       })
 
@@ -2299,6 +2367,12 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         currentAgent: null,
         pendingInterrupt: null,
         lastCompletionAt: Date.now(),
+        // P13 · clear stage-strip drivers so the next run starts clean
+        // (otherwise the previous run's phase / failure would leak into
+        // the next strip derivation).
+        lastPhase: null,
+        hasStreamFailed: false,
+        subAgentActivity: null,
       }))
       return ok
     } catch (err) {
@@ -2872,6 +2946,11 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       lastDeltaAt: null,
       knowledgeEvidence: [],
       citations: {},
+      // P13 · workspace-switch full reset: clear stage-strip drivers so
+      // the new workspace doesn't show stale phase / failure / breadcrumb.
+      lastPhase: null,
+      hasStreamFailed: false,
+      subAgentActivity: null,
       evidenceDrawer: {
         isOpen: false,
         focusedEvidenceId: null,

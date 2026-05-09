@@ -92,11 +92,11 @@ export function CanvasHeader({
           right-cluster layout intact. */}
       <Link
         href="/chat"
-        className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 mr-1 -ml-1 border-[0.5px] border-stratum-line bg-stratum-surface-low text-stratum-muted hover:bg-stratum-surface hover:text-stratum-navy hover:border-stratum-navy/40 font-instr text-[10px] uppercase tracking-kicker transition-colors shrink-0"
+        className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 border-[0.5px] border-stratum-line bg-stratum-surface-low text-stratum-muted hover:bg-stratum-surface hover:text-stratum-navy hover:border-stratum-navy/40 font-instr text-[9px] uppercase tracking-kicker transition-colors shrink-0"
         aria-label="返回 Chat 首页"
         title="返回 Chat 首页"
       >
-        <ArrowLeft className="h-3 w-3" strokeWidth={1.75} />
+        <ArrowLeft className="h-2.5 w-2.5" strokeWidth={1.75} />
         Chat
       </Link>
 
@@ -104,23 +104,23 @@ export function CanvasHeader({
           Logo generated via nano-banana / gemini-3-pro-image (P11.16),
           paper-white square with 3 dots in triangle constellation, apex
           press-red. */}
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/starlink-icon.png"
           alt="starlink"
           // P11.16 · max-w-none escapes Tailwind preflight's
           // `img,video { max-width: 100% }` which would clamp the
-          // 32px logo to 0 when the parent flex column collapses
+          // logo to 0 when the parent flex column collapses
           // under min-w-0 + truncating siblings.
-          className="h-8 w-8 max-w-none rounded-[2px] object-cover shrink-0 border-[0.5px] border-stratum-line"
+          className="h-6 w-6 max-w-none rounded-[2px] object-cover shrink-0 border-[0.5px] border-stratum-line"
         />
         <div className="flex flex-col leading-tight min-w-0">
-          <h1 className="font-display font-[700] text-stratum-navy text-[17px] tracking-tight leading-tight truncate">
+          <h1 className="font-display font-[700] text-stratum-navy text-[14px] tracking-tight leading-tight truncate">
             starlink · 智绘画布
           </h1>
-          <p className="font-body text-[10px] font-semibold uppercase tracking-[0.18em] text-stratum-blue truncate">
-            STRATEGY CANVAS · MACRA SYSTEM
+          <p className="hidden lg:block font-body text-[9px] font-semibold uppercase tracking-[0.16em] text-stratum-blue truncate">
+            STRATEGY CANVAS · MACRA
           </p>
         </div>
       </div>

@@ -799,7 +799,7 @@ export class BusinessLangGraphService {
       // (the bmcNodeCount/conflictCount tracked through the stream tell us
       // how far we got before failing).
       try {
-        await this.writeConversationSummary({
+        const summaryResult = await this.writeConversationSummary({
           workspaceId: context.workspaceId,
           userId: context.userId,
           traceId,
@@ -811,8 +811,22 @@ export class BusinessLangGraphService {
           handoffCount: handoffLogger.size,
           knowledgeEvidence: context.knowledgeEvidence
         })
+        // P12 · Surface persistence failure to the front-end. The
+        // conversation itself already yielded its terminal status above
+        // (completed / failed); this warning rides on top so the user
+        // knows the durable summary write didn't make it.
+        if (!summaryResult.ok && summaryResult.warning) {
+          yield {
+            type: 'persistence-warning',
+            severity: 'warning',
+            source: 'conversation-summary',
+            message: `跨会话记忆持久化失败：${summaryResult.warning}（不影响本轮画布）`
+          }
+        }
       } catch {
-        // writeConversationSummary already swallows; redundant guard.
+        // writeConversationSummary already returns ok:false instead of
+        // throwing in the common failure path; this catch only catches
+        // unexpected programmer errors. Intentionally silent.
       }
       // Stop heartbeat timer — session is no longer active. The status
       // update below ('completed' / 'failed') is the canonical signal
@@ -1736,8 +1750,8 @@ ${snippets}
      * they originally seeded the conversation with (context.knowledgeEvidence).
      */
     knowledgeEvidence?: KnowledgeEvidence[]
-  }): Promise<void> {
-    if (!isMemoryWriteEnabled()) return
+  }): Promise<{ ok: boolean; warning?: string }> {
+    if (!isMemoryWriteEnabled()) return { ok: true }
     try {
       const store = getWorkspaceMemoryStore()
       const tags = deriveBmcSummaryTags({
@@ -1790,10 +1804,25 @@ ${snippets}
         }
       })
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
       auditLogger.warn({
         action: 'business-langgraph.writeConversationSummary.failed',
-        metadata: { traceId: args.traceId, error: String(err) }
+        metadata: { traceId: args.traceId, error: message }
       })
+      // P12 · Surface to caller. The caller (streamConversation finally
+      // block) yields a 'persistence-warning' BusinessStreamUpdate which
+      // conversation-store translates into a 'persistence/warning'
+      // ConversationEvent the front-end renders as a yellow ⚠ bubble.
+      // User-skill extraction is still attempted below since it's
+      // a separate code path with its own error swallow.
+      if (args.userId && isMemoryWriteEnabled()) {
+        void this.userSkillExtractor.extractUserSkills({
+          userId: args.userId,
+          workspaceId: args.workspaceId,
+          traceId: args.traceId
+        })
+      }
+      return { ok: false, warning: message }
     }
 
     // Fire-and-forget user-skill extraction (Layer-1 self-evolution).
@@ -1807,6 +1836,7 @@ ${snippets}
         traceId: args.traceId
       })
     }
+    return { ok: true }
   }
 
   // ============== Phase 4.1 · Debate B trigger ==============

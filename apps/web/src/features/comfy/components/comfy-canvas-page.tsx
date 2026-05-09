@@ -22,6 +22,7 @@ import { CanvasPromptDialog } from './canvas-prompt-dialog'
 import { CanvasThinkingOverlay } from './canvas-thinking-overlay'
 import { EvidenceDrawer } from './evidence-drawer'
 import { KbUploadModal } from './kb-upload-modal'
+import { CanvasStageStrip } from './canvas-stage-strip'
 import { WorkspaceShell } from './workspace-shell'
 import type { PendingDecisionRequest } from './workspace-shell-context'
 import './panels/register-default-panels'
@@ -772,6 +773,9 @@ export function CanvasPage({
           onRecalculate={handleRunCritic}
           isRecalculating={isOrchestratorProcessing}
         />
+        {/* P13 · pipeline 5-stage progress strip — auto-hides 10s after
+            terminal; renders nothing when canvas is fresh (all pending). */}
+        <CanvasStageStrip />
         <div className="flex-1 relative flex flex-col min-h-0">
           {viewMode === 'freeform' ? freeformContent : bmcGridContent}
           {viewMode === 'freeform' ? (
