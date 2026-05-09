@@ -214,7 +214,13 @@ async function evalOneRunner(
   return {
     case_id: yc.case_id,
     company_name: yc.company_name,
-    runner: runnerName,
+    // Bug fix · use run.runner (which carries the ablation variant tag,
+    // e.g. 'starlink-no-critic') instead of the type-level runnerName
+    // ('starlink'). Without this every variant rendered as 'starlink' in
+    // the aggregate table — the variant tag was correctly computed but
+    // erased before ResultRow construction, so compile-ablation-comparison
+    // could never separate variants.
+    runner: run.runner ?? runnerName,
     run,
     evaluation,
     candidateLengthChars,
