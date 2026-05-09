@@ -156,7 +156,7 @@ export class InMemoryConversationMemoryStore {
       ? this.rows.findIndex((r) => r.id === input.id)
       : input.sourceId
       ? this.rows.findIndex(
-          (r) => r.sourceId === input.sourceId && r.kind === (input.kind ?? 'insight')
+          (r) => r.sourceId === input.sourceId && r.kind === (input.kind ?? 'summary')
         )
       : -1
 
@@ -184,7 +184,7 @@ export class InMemoryConversationMemoryStore {
       workspaceId: input.workspaceId,
       userId: input.userId ?? null,
       scope: input.scope ?? 'workspace',
-      kind: input.kind ?? 'insight',
+      kind: input.kind ?? 'summary',
       title: input.title,
       content: input.content,
       sourceType: input.sourceType ?? 'benchmark-coaching',

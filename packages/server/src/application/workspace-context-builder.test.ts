@@ -38,7 +38,7 @@ test('WorkspaceContextBuilder combines canvas, session messages and long-term me
     workspaceId: 'ws-memory',
     userId: 'user-1',
     scope: 'workspace',
-    kind: 'preference',
+    kind: 'user-skill',  // P14 P2 · was 'preference' (dead enum); fixture updated
     title: 'Canvas 优先',
     content: '用户希望 canvas 是主载体，@ 命令只负责唤起工具。',
     sourceType: 'manual',

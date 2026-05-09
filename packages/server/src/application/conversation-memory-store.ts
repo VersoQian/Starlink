@@ -124,12 +124,17 @@ function legacyKindFromCanonical(canonical: {
   if (c === 'canvas-snapshot') return 'canvas'
   if (c === 'decision') return 'decision'
   if (c === 'user-skill') return 'user-skill'
-  if (c === 'user-preference') return 'preference'
-  if (c === 'workspace-fact') return 'insight'
-  if (c === 'user-constraint') return 'constraint'
+  // P14 P2 · `preference` / `insight` / `constraint` legacy kinds dropped
+  // from the live enum. user-preference / workspace-fact / user-constraint
+  // categories now back-map to the closest still-living kind so the
+  // legacy `kind` column stays parseable; the canonical view (facet +
+  // category) carries the precise classification.
+  if (c === 'user-preference') return 'user-skill'
+  if (c === 'workspace-fact') return 'summary'
+  if (c === 'user-constraint') return 'user-skill'
   // Unknown / extension category — fall back to facet-driven default so
   // legacy enum constraint isn't violated.
-  return canonical.facet === 'episodic' ? 'summary' : 'insight'
+  return canonical.facet === 'episodic' ? 'summary' : 'user-skill'
 }
 
 type MemorySearchOptions = {

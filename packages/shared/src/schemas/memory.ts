@@ -50,22 +50,24 @@ export const KNOWN_MEMORY_CATEGORIES = [
 export const memoryCategorySchema = z.string().min(1).max(64)
 
 // Legacy axes (deprecated — DO NOT use in new code).
-/** @deprecated Use {@link memoryLayerSchema} (workspace/user → layer). */
-export const memoryScopeSchema = z.enum(['workspace', 'user', 'agent'])
 /**
- * @deprecated Use {@link memoryFacetSchema} + {@link memoryCategorySchema}
+ * @deprecated P14 · use {@link memoryLayerSchema} instead. The 'agent' value
+ * was never written by any code path (audited 2026-05-09, 0 references) and
+ * has been dropped from the live enum.
+ */
+export const memoryScopeSchema = z.enum(['workspace', 'user'])
+/**
+ * @deprecated P14 · use {@link memoryFacetSchema} + {@link memoryCategorySchema}
  * combined. Old `kind` mixed two orthogonal axes (content type vs lifecycle).
  *
- * Mapping for backfill (see migration 016_memory_facet_category.sql):
- *   summary    → episodic + bmc-summary
- *   canvas     → episodic + canvas-snapshot
- *   decision   → episodic + decision
- *   user-skill → semantic + user-skill
- *   preference → semantic + user-preference
- *   insight    → semantic + workspace-fact
- *   constraint → semantic + user-constraint
+ * Live values: only `summary` / `decision` / `canvas` / `user-skill` are
+ * actually written by current code. The dead values `preference` / `insight`
+ * / `constraint` (audited 2026-05-09, 0 production write call sites) have
+ * been dropped to prevent new dead writes; legacy DB rows containing those
+ * values still parse via permissive runtime fallback in conversation-memory-
+ * store.ts (their `category` was already backfilled in migration 016).
  */
-export const memoryKindSchema = z.enum(['preference', 'decision', 'insight', 'constraint', 'summary', 'canvas', 'user-skill'])
+export const memoryKindSchema = z.enum(['decision', 'summary', 'canvas', 'user-skill'])
 
 export const conversationSessionSchema = z.object({
   id: z.string(),

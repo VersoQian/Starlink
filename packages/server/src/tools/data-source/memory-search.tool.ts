@@ -32,13 +32,13 @@ export default class MemorySearchTool extends BaseTool {
         },
         scope: {
           type: 'string',
-          description: '记忆范围，可选 workspace/user/agent',
-          enum: ['workspace', 'user', 'agent'],
+          description: '记忆范围，可选 workspace/user',
+          enum: ['workspace', 'user'],
         },
         kind: {
           type: 'string',
-          description: '记忆类型，可选 preference/decision/insight/constraint/summary/canvas',
-          enum: ['preference', 'decision', 'insight', 'constraint', 'summary', 'canvas'],
+          description: '记忆类型，可选 summary/decision/canvas/user-skill',
+          enum: ['summary', 'decision', 'canvas', 'user-skill'],
         },
         topK: {
           type: 'number',
@@ -116,20 +116,20 @@ export default class MemorySearchTool extends BaseTool {
 }
 
 function parseScope(scope: string | undefined) {
-  if (scope === 'workspace' || scope === 'user' || scope === 'agent') return scope
+  if (scope === 'workspace' || scope === 'user') return scope
+  // P14 P2 · `agent` was a dead enum value; coerce silently for any
+  // legacy LLM tool-call input that still emits it.
+  if (scope === 'agent') return 'workspace'
   return undefined
 }
 
 function parseKind(kind: string | undefined) {
-  if (
-    kind === 'preference' ||
-    kind === 'decision' ||
-    kind === 'insight' ||
-    kind === 'constraint' ||
-    kind === 'summary' ||
-    kind === 'canvas'
-  ) {
+  if (kind === 'decision' || kind === 'summary' || kind === 'canvas' || kind === 'user-skill') {
     return kind
   }
+  // P14 P2 · `preference` / `insight` / `constraint` dropped from live
+  // enum. Coerce to closest equivalent so tool calls degrade gracefully.
+  if (kind === 'preference' || kind === 'constraint') return 'user-skill'
+  if (kind === 'insight') return 'summary'
   return undefined
 }

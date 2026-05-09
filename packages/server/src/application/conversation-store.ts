@@ -443,7 +443,12 @@ export class ConversationStore {
       ...input,
       userId: input.userId ?? userId,
       scope: parseMemoryScope(input.scope) ?? 'workspace',
-      kind: parseMemoryKind(input.kind) ?? 'insight',
+      // P14 P2 · `insight` legacy default replaced with `summary`. Old
+      // 'insight' write path was used as a generic fallback; new code
+      // should specify (facet, category) explicitly via upsertMemory's
+      // canonical axes — this default only fires when callers omit kind
+      // entirely (rare).
+      kind: parseMemoryKind(input.kind) ?? 'summary',
       sourceType: input.sourceType ?? 'manual'
     })
   }
@@ -1647,23 +1652,25 @@ function parseMessageRole(role: string): ConversationMessage['role'] {
 
 function parseMemoryScope(scope?: string | null): MemoryScope | undefined {
   if (!scope) return undefined
-  if (scope === 'workspace' || scope === 'user' || scope === 'agent') return scope
+  if (scope === 'workspace' || scope === 'user') return scope
+  // P14 P2 · `agent` was a dead enum value (0 production writes audited
+  // 2026-05-09). Coerce to 'workspace' instead of erroring so any legacy
+  // GraphQL input that still sends 'agent' degrades gracefully.
+  if (scope === 'agent') return 'workspace'
   throw new Error(`INVALID_MEMORY_SCOPE:${scope}`)
 }
 
 function parseMemoryKind(kind?: string | null): MemoryKind | undefined {
   if (!kind) return undefined
-  if (
-    kind === 'preference'
-    || kind === 'decision'
-    || kind === 'insight'
-    || kind === 'constraint'
-    || kind === 'summary'
-    || kind === 'canvas'
-    || kind === 'user-skill'
-  ) {
+  if (kind === 'decision' || kind === 'summary' || kind === 'canvas' || kind === 'user-skill') {
     return kind
   }
+  // P14 P2 · `preference` / `insight` / `constraint` dropped from live
+  // enum (0 production writes audited 2026-05-09). Coerce to the closest
+  // semantic equivalent so any legacy input degrades gracefully — new
+  // code should pass facet/category via the canonical upsertMemory path.
+  if (kind === 'preference' || kind === 'constraint') return 'user-skill'
+  if (kind === 'insight') return 'summary'
   throw new Error(`INVALID_MEMORY_KIND:${kind}`)
 }
 
