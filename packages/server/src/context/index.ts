@@ -4,6 +4,8 @@ import { ConversationStore } from '../application/conversation-store.js'
 import { ConversationMemoryStore } from '../application/conversation-memory-store.js'
 import { MemoryCaptureService } from '../application/memory-capture.js'
 import { MemoryRetrievalService } from '../application/memory-retrieval.js'
+import { MemoryConsolidator } from '../application/memory-consolidator.js'
+import { UserSkillConsolidator } from '../services/user-skill-consolidator.js'
 import { TaskEventStore } from '../application/task-event-store.js'
 import { createConversationEventBus } from '../application/conversation-event-bus.js'
 import { createConversationRuntimeRepository } from '../application/conversation-runtime-repository.js'
@@ -88,6 +90,19 @@ export const sharedMemoryRetrievalService = new MemoryRetrievalService(sharedCon
 const sharedUserSkillExtractor = new UserSkillExtractor({
   memoryStore: sharedConversationMemoryStore
 })
+
+// P14 P6 · MemoryConsolidator — facade over UserSkillExtractor +
+// UserSkillConsolidator + decay cron. Provides 4 trigger entry points
+// (run-end / user-patterns / cross-workspace / decay) so callers don't
+// need to know which underlying service handles which promotion.
+export const sharedUserSkillConsolidator = new UserSkillConsolidator({
+  memoryStore: sharedConversationMemoryStore
+})
+export const sharedMemoryConsolidator = new MemoryConsolidator(
+  sharedConversationMemoryStore,
+  sharedUserSkillExtractor,
+  sharedUserSkillConsolidator
+)
 
 // Sprint 1.1 · single shared WizardPrefillService. The LLM client picks
 // up the same env config used by the Socratic coach (DEEPSEEK_API_KEY /
