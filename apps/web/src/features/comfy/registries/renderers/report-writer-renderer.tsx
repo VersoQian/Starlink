@@ -24,8 +24,10 @@ import remarkGfm from 'remark-gfm'
 import { useComfyStore } from '../../store'
 import { EditorialProse } from './editorial-prose'
 import type { AgentOutputRenderer, AgentOutputContext } from '../agent-output-renderer-registry'
-
-const TOKEN_RE = /\[\[(?:ref:([^\]#]+?)#([^\]]+?)|bmc:([^\]]+?)|critic:([^\]]+?)|insight:([^\]]+?)|no-ref)\]\]/g
+import {
+  tokenizeInlineCitations,
+  type CitationHandlers
+} from '../../lib/render-inline-citations'
 
 function shouldHandle(ctx: AgentOutputContext): boolean {
   if (ctx.agentId === 'report-writer') return true
@@ -62,97 +64,15 @@ function splitSections(markdown: string): { preamble: string; sections: Section[
   return { preamble, sections }
 }
 
-interface TokenizeHandlers {
-  onRef: (id: string) => void
-  onBmc: (dim: string) => void
-  onCritic: (id: string) => void
-  onInsight: (nodeId: string) => void
-}
+// P15 frontend · Tokenize + chip rendering moved to shared helper
+// (`apps/web/src/features/comfy/lib/render-inline-citations.tsx`).
+// Local `TokenizeHandlers` aliased to the shared `CitationHandlers` so
+// downstream code in this file (tokenizeChildren etc.) keeps the same
+// shape without touching every call site.
+type TokenizeHandlers = Required<CitationHandlers>
 
-/** Tokenize a string segment, replacing inline citation marks with chips. */
-function tokenize(
-  text: string,
-  h: TokenizeHandlers,
-): ReactNode[] {
-  const out: ReactNode[] = []
-  let lastIdx = 0
-  let key = 0
-  TOKEN_RE.lastIndex = 0
-  let m: RegExpExecArray | null
-  while ((m = TOKEN_RE.exec(text)) !== null) {
-    if (m.index > lastIdx) out.push(text.slice(lastIdx, m.index))
-    if (m[0] === '[[no-ref]]') {
-      out.push(
-        <span
-          key={`nr-${key++}`}
-          className="inline-flex items-center px-1.5 py-0 mx-0.5 font-mono text-[9px] tabular-nums uppercase tracking-[0.12em] bg-stratum-surface-low text-stratum-muted border border-stratum-line opacity-60"
-          title="该论断无证据"
-        >
-          无引用
-        </span>
-      )
-    } else if (m[1] && m[2]) {
-      const docId = m[1]
-      const snippetId = m[2]
-      const compoundId = `${docId}#${snippetId}`
-      out.push(
-        <button
-          key={`ref-${key++}`}
-          type="button"
-          onClick={() => h.onRef(compoundId)}
-          className="inline-flex items-center px-1.5 py-0 mx-0.5 font-mono text-[9px] tabular-nums uppercase tracking-[0.12em] bg-white text-stratum-blue border border-stratum-blue/40 hover:bg-stratum-blue/10 transition-colors"
-          title={`证据: ${compoundId}`}
-        >
-          {docId.length > 12 ? docId.slice(0, 11) + '…' : docId}
-        </button>
-      )
-    } else if (m[3]) {
-      const dim = m[3]
-      out.push(
-        <button
-          key={`bmc-${key++}`}
-          type="button"
-          onClick={() => h.onBmc(dim)}
-          className="inline-flex items-center px-1.5 py-0 mx-0.5 font-mono text-[9px] tabular-nums uppercase tracking-[0.12em] bg-byline-product/10 text-byline-product border border-byline-product/40 hover:bg-byline-product/20 transition-colors"
-          title={`画布: ${dim}`}
-        >
-          BMC · {dim}
-        </button>
-      )
-    } else if (m[4]) {
-      const cid = m[4]
-      out.push(
-        <button
-          key={`crit-${key++}`}
-          type="button"
-          onClick={() => h.onCritic(cid)}
-          className="inline-flex items-center px-1.5 py-0 mx-0.5 font-mono text-[9px] tabular-nums uppercase tracking-[0.12em] bg-stratum-danger/10 text-stratum-danger border border-stratum-danger/40 hover:bg-stratum-danger/20 transition-colors"
-          title={`冲突: ${cid}`}
-        >
-          冲突
-        </button>
-      )
-    } else if (m[5]) {
-      const nodeId = m[5]
-      // Trim a long nodeId to a glyph + last 4 chars for chip width
-      const display = nodeId.length > 10 ? `${nodeId.slice(0, 6)}…${nodeId.slice(-3)}` : nodeId
-      out.push(
-        <button
-          key={`ins-${key++}`}
-          type="button"
-          onClick={() => h.onInsight(nodeId)}
-          className="inline-flex items-center px-1.5 py-0 mx-0.5 font-mono text-[9px] tabular-nums uppercase tracking-[0.12em] bg-byline-synthesizer/10 text-byline-synthesizer border border-byline-synthesizer/40 hover:bg-byline-synthesizer/20 transition-colors"
-          title={`洞察: ${nodeId}`}
-        >
-          洞察 · {display}
-        </button>
-      )
-    }
-    lastIdx = TOKEN_RE.lastIndex
-  }
-  if (lastIdx < text.length) out.push(text.slice(lastIdx))
-  return out
-}
+const tokenize = (text: string, h: TokenizeHandlers): ReactNode[] =>
+  tokenizeInlineCitations(text, h)
 
 function tokenizeChildren(children: ReactNode, h: TokenizeHandlers): ReactNode {
   if (typeof children === 'string') return tokenize(children, h)

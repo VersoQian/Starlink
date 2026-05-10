@@ -33,6 +33,11 @@ import {
   type MemoryLayerKey,
   type MemoryFacetKey
 } from '../registries/memory-kind-registry'
+import {
+  tokenizeInlineCitations,
+  hasInlineCitations
+} from '../lib/render-inline-citations'
+import { useComfyStore } from '../store'
 
 interface MemoryDrawerProps {
   open: boolean
@@ -224,6 +229,34 @@ function MemoryListTab(props: {
   error: unknown
   emptyHint: string
 }) {
+  const [layerFilter, setLayerFilter] = useState<MemoryLayerKey | 'all'>('all')
+  const [facetFilter, setFacetFilter] = useState<MemoryFacetKey | 'all'>('all')
+  const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
+
+  // Derive option counts from current data so users see how many rows
+  // each filter would produce. Empty data → empty maps → no chips render.
+  const { layerCounts, facetCounts, categoryCounts } = useMemo(() => {
+    const layers: Record<string, number> = {}
+    const facets: Record<string, number> = {}
+    const cats: Record<string, number> = {}
+    for (const item of props.data ?? []) {
+      if (item.layer) layers[item.layer] = (layers[item.layer] ?? 0) + 1
+      if (item.facet) facets[item.facet] = (facets[item.facet] ?? 0) + 1
+      if (item.category) cats[item.category] = (cats[item.category] ?? 0) + 1
+    }
+    return { layerCounts: layers, facetCounts: facets, categoryCounts: cats }
+  }, [props.data])
+
+  const filtered = useMemo(() => {
+    if (!props.data) return undefined
+    return props.data.filter((item) => {
+      if (layerFilter !== 'all' && item.layer !== layerFilter) return false
+      if (facetFilter !== 'all' && item.facet !== facetFilter) return false
+      if (categoryFilter !== 'all' && item.category !== categoryFilter) return false
+      return true
+    })
+  }, [props.data, layerFilter, facetFilter, categoryFilter])
+
   if (props.isLoading) {
     return <p className="font-body text-[13px] text-stratum-muted py-6">加载中…</p>
   }
@@ -243,20 +276,133 @@ function MemoryListTab(props: {
       </p>
     )
   }
+
+  const hasAnyFilter = layerFilter !== 'all' || facetFilter !== 'all' || categoryFilter !== 'all'
+  const totalRows = props.data.length
+  const visibleRows = filtered?.length ?? totalRows
+
   return (
-    <ul className="space-y-4">
-      {props.data.map((item) => (
-        <MemoryItemCard key={item.id} item={item} />
+    <div className="space-y-4">
+      {/* Filter row — only render axes that have ≥ 2 distinct values
+          (single-value axes don't help filter; hiding them keeps the
+          UI lean for memory tabs that currently have just bmc-summary). */}
+      <div className="space-y-2 border-b border-stratum-line/60 pb-4">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-stratum-muted">
+            FILTER
+          </span>
+          <span className="font-mono text-[10px] tabular-nums text-stratum-muted">
+            {hasAnyFilter ? `${visibleRows} / ${totalRows}` : `${totalRows} 条`}
+          </span>
+        </div>
+
+        {Object.keys(layerCounts).length >= 2 ? (
+          <FilterAxis
+            label="层"
+            value={layerFilter}
+            onChange={(v) => setLayerFilter(v as MemoryLayerKey | 'all')}
+            options={Object.entries(layerCounts).map(([key, n]) => ({
+              key,
+              label: MEMORY_LAYER_REGISTRY[key as MemoryLayerKey]?.label ?? key,
+              count: n
+            }))}
+          />
+        ) : null}
+
+        {Object.keys(facetCounts).length >= 2 ? (
+          <FilterAxis
+            label="facet"
+            value={facetFilter}
+            onChange={(v) => setFacetFilter(v as MemoryFacetKey | 'all')}
+            options={Object.entries(facetCounts).map(([key, n]) => ({
+              key,
+              label: MEMORY_FACET_REGISTRY[key as MemoryFacetKey]?.label ?? key,
+              count: n
+            }))}
+          />
+        ) : null}
+
+        {Object.keys(categoryCounts).length >= 2 ? (
+          <FilterAxis
+            label="类别"
+            value={categoryFilter}
+            onChange={(v) => setCategoryFilter(v)}
+            options={Object.entries(categoryCounts)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 6) // cap at 6 most-common categories
+              .map(([key, n]) => ({ key, label: key, count: n }))}
+          />
+        ) : null}
+      </div>
+
+      <ul className="space-y-4">
+        {(filtered ?? []).map((item) => (
+          <MemoryItemCard key={item.id} item={item} />
+        ))}
+        {filtered && filtered.length === 0 ? (
+          <li className="font-body text-[13px] text-stratum-muted py-6 text-center italic">
+            当前筛选条件下没有匹配的记忆。
+          </li>
+        ) : null}
+      </ul>
+    </div>
+  )
+}
+
+/** Single-axis filter chip row. Renders an "all" pill + one pill per
+ *  option, with row counts. Click toggles the filter. */
+function FilterAxis(props: {
+  label: string
+  value: string
+  onChange: (next: string) => void
+  options: Array<{ key: string; label: string; count: number }>
+}) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-stratum-muted shrink-0 w-12">
+        {props.label}
+      </span>
+      <button
+        type="button"
+        onClick={() => props.onChange('all')}
+        className={`font-mono text-[10px] uppercase tracking-[0.12em] px-2 py-0.5 border-[0.5px] transition-colors ${
+          props.value === 'all'
+            ? 'bg-stratum-navy text-white border-stratum-navy'
+            : 'bg-white border-stratum-line text-stratum-muted hover:border-stratum-navy/40 hover:text-stratum-navy'
+        }`}
+      >
+        全部
+      </button>
+      {props.options.map((opt) => (
+        <button
+          key={opt.key}
+          type="button"
+          onClick={() => props.onChange(opt.key)}
+          className={`font-mono text-[10px] tabular-nums uppercase tracking-[0.12em] px-2 py-0.5 border-[0.5px] transition-colors ${
+            props.value === opt.key
+              ? 'bg-stratum-navy text-white border-stratum-navy'
+              : 'bg-white border-stratum-line text-stratum-muted hover:border-stratum-navy/40 hover:text-stratum-navy'
+          }`}
+        >
+          {opt.label} <span className="opacity-70">{opt.count}</span>
+        </button>
       ))}
-    </ul>
+    </div>
   )
 }
 
 function MemoryItemCard({ item }: { item: MemoryItem }) {
   const correct = useCorrectMemoryItem()
+  const openEvidenceDrawer = useComfyStore((s) => s.openEvidenceDrawer)
   const evidence = Array.isArray(item.tags) ? item.tags : []
   const confidencePct = Math.round((item.confidence ?? 0) * 100)
   const importancePct = Math.round((item.importance ?? 0) * 100)
+  // P15-FE · if the memory body still carries raw [[ref:doc#chunk]]
+  // tokens (mostly legacy rows pre-dating applyCitationParsing), we
+  // render them as clickable chips. Most rows post-P15 have tokens
+  // already stripped + moved to metadata.citations, so this branch is
+  // an empty no-op for new content.
+  const contentHasCitations = hasInlineCitations(item.content)
 
   const handleArchive = () => {
     if (!window.confirm(`确认删除 "${item.title}"? 此操作不可撤销，但会让 AI 不再用此推断。`)) return
@@ -342,7 +488,19 @@ function MemoryItemCard({ item }: { item: MemoryItem }) {
         </div>
       </header>
       <div className="font-body text-[12.5px] leading-[1.65] text-stratum-ink">
-        <EditorialProse content={item.content} density="compact" />
+        {contentHasCitations ? (
+          // Token-aware path: replace [[ref:]] / [[no-ref]] / [[bmc:]]
+          // tokens with clickable chips inline. Loses markdown rendering
+          // for this block — acceptable because rows with raw tokens
+          // are mostly short narrative summaries, not full markdown.
+          <p className="whitespace-pre-wrap">
+            {tokenizeInlineCitations(item.content, {
+              onRef: (compoundId) => openEvidenceDrawer(compoundId)
+            })}
+          </p>
+        ) : (
+          <EditorialProse content={item.content} density="compact" />
+        )}
       </div>
       {evidence.length > 0 ? (
         <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t-[0.5px] border-stratum-line">
