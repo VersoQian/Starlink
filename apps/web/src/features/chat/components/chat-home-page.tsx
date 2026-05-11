@@ -134,7 +134,11 @@ export function ChatHomePage() {
       // sessionStorage (not localStorage) so refresh on /canvas without
       // a stashed seed = stale conversation, not infinite re-fire.
       window.sessionStorage.setItem('starlink_pending_seed', trimmed)
-      window.location.href = `/canvas/${encodeURIComponent(DEFAULT_WORKSPACE_ID)}`
+      // Navigate to the NEW conversation's canvas (not the default
+      // workspace) so each submit gets its own isolated canvas state.
+      // Previously hard-coded to DEFAULT_WORKSPACE_ID → every submit
+      // overwrote proj-001's canvas.
+      window.location.href = `/canvas/${encodeURIComponent(fresh.id)}`
     }
   }, [input, bucket, submitting])
 
