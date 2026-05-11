@@ -186,9 +186,15 @@ function makeDetectConflictsNode(model: BusinessModel | null, systemPrompt: stri
     }
 
     try {
+      // 2026-05-11 · DeepSeek API stopped accepting `response_format:
+      // { type: 'json_schema' }` (`400 This response_format type is
+      // unavailable now`), so `strict: true` fully breaks the LLM
+      // path and every mention falls through to rule-fallback. Use
+      // `method: 'jsonMode'` (response_format: json_object) which is
+      // universally supported; we still get Zod parse on our side.
       const structured = model.withStructuredOutput(CriticOutputSchema, {
         name: 'ConflictAnalysis',
-        strict: true
+        method: 'jsonMode'
       })
 
       const sections: string[] = [
@@ -210,7 +216,12 @@ function makeDetectConflictsNode(model: BusinessModel | null, systemPrompt: stri
         )
       }
       sections.push(
-        '\n\n如果没有发现冲突，返回空数组 conflicts=[]。不要制造不存在的冲突。'
+        '\n\n## 输出前最后一道自检（不可跳过）\n' +
+          '在返回 conflicts=[] 之前，确认你已经：\n' +
+          '1. 把 cost-structure 中的人数/月薪/月度固定成本年化，跟 revenue-streams 的 Year-1 收入做减法\n' +
+          '2. 如果 user question 里明示了"X 和 Y 矛盾吗 / 我注意到 X" 类怀疑，已对那两项做了量化核验\n' +
+          '3. 如果上面 1 或 2 中任何一处年化成本 ≥ 1.5 × Year-1 收入，emit severity=high 的 resource-goal conflict\n' +
+          '只有在自检通过后，才能返回 conflicts=[]。不要制造不存在的冲突，但也不能跳过应有的冲突。'
       )
       const prompt = sections.join('')
 
