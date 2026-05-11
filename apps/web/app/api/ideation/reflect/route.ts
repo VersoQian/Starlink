@@ -46,33 +46,47 @@ const TIMEOUT_MS = 12_000
 // Fallback (graceful degradation when LLM is unavailable)
 // =============================================================================
 
+/**
+ * Server-side fallback when the coach LLM call fails (timeout / 5xx).
+ *
+ * Kept in sync with the canonical fallback in
+ * `packages/server/src/services/ideation-coach-service.ts` — both
+ * surface a degraded-mode banner + an event-anchored body so users
+ * don't see a generic "已有节点的关系" template that ignores context.
+ */
 function fallbackReflection(input: ReflectionRequest, latencyMs: number): ReflectionResponse {
-  // Mirrors a tiny subset of features/ideation/conversation/coach-engine.ts
-  // KIND_PROMPTS so the user still gets a useful question. Full local
-  // engine runs on the FRONTEND fallback path; this server-side fallback is
-  // only used when the orchestrator forgot to handle a 5xx.
-  const fallbackByEvent: Record<string, { content: string; scaffold: ScaffoldKind }> = {
-    'node-added': {
-      scaffold: 'why',
-      content:
-        '记下这个节点了 ✓\n\n你打算怎么解释它和你已有节点的关系？尝试用一句话写清"为什么"。'
-    },
-    'node-linked': {
-      scaffold: 'why',
-      content: '你把两个节点连起来了 — 这条连线代表"导致"、"支撑"还是"包含"？'
-    },
-    'meta-check': {
-      scaffold: 'meta',
-      content:
-        '你的画布到了一个节点 — 退一步看：当前最薄弱的环节是什么？哪个节点你最不确定？'
+  const banner = '_(AI 教练暂时不可达，以下是脚本回复。点 重试 可再试一次。)_\n\n'
+  const event = input.event
+  let scaffold: ScaffoldKind = 'why'
+  let body: string
+  switch (event.type) {
+    case 'node-added': {
+      const label = (event.label ?? '').trim().slice(0, 40)
+      body = label
+        ? `刚加了 "${label}" (${event.kind})。用一句话说说：为什么是这个，而不是其他类似选项？`
+        : `刚加了一个 ${event.kind} 节点。为什么是这个？`
+      break
+    }
+    case 'node-linked': {
+      body = `你把 ${event.fromKind} → ${event.toKind} 连起来了。这条连线代表 "导致" / "支撑" / "包含" 中哪一种？`
+      break
+    }
+    case 'meta-check': {
+      scaffold = 'meta'
+      const counts = Object.entries(input.canvas?.nodeCountByKind ?? {})
+        .filter(([, n]) => n > 0)
+        .map(([k, n]) => `${k}=${n}`)
+        .join(', ')
+      body = counts
+        ? `当前画布: ${counts}。退一步看：哪个维度最不确定 / 最需要补证据？`
+        : '退一步看你的画布：当前最薄弱的环节是什么？'
+      break
+    }
+    default: {
+      body = '能再具体一点吗 — 这是基于什么观察 / 数据 / 经历？'
     }
   }
-  const f = fallbackByEvent[input.event.type] ?? fallbackByEvent['node-added']
-  return {
-    ...f,
-    source: 'error',
-    latencyMs
-  }
+  return { scaffold, content: banner + body, source: 'error', latencyMs }
 }
 
 // =============================================================================

@@ -91,28 +91,69 @@ async function callDeepSeek<T>(
 // Coach reflection
 // =============================================================================
 
+/**
+ * Fallback when the coach LLM call fails (network error / timeout / parse).
+ *
+ * Each branch:
+ *   - References the actual event payload (node label / from-to kinds) so
+ *     the reply is at least anchored to what just happened, not a generic
+ *     "已有节点的关系".
+ *   - Tells the user the AI is in degraded mode so they know the response
+ *     is scripted (not blamed on LLM quality).
+ *   - Suggests a concrete next action they can take without LLM help.
+ *
+ * Source field stays 'error' so the chat dock bubble can render a
+ * "重试" affordance and a warning tint.
+ */
 function reflectionFallback(
   request: ReflectionRequest,
   latencyMs: number
 ): ReflectionResponse {
-  const fallbackByEvent: Record<string, { content: string; scaffold: ScaffoldKind }> = {
-    'node-added': {
-      scaffold: 'why',
-      content:
-        '记下这个节点了 ✓\n\n你打算怎么解释它和你已有节点的关系？尝试用一句话写清"为什么"。'
-    },
-    'node-linked': {
-      scaffold: 'why',
-      content: '你把两个节点连起来了 — 这条连线代表"导致"、"支撑"还是"包含"？'
-    },
-    'meta-check': {
-      scaffold: 'meta',
-      content:
-        '你的画布到了一个节点 — 退一步看：当前最薄弱的环节是什么？哪个节点你最不确定？'
+  const banner = '_(AI 教练暂时不可达，以下是脚本回复。点 重试 可再试一次。)_\n\n'
+  const event = request.event
+  let scaffold: ScaffoldKind = 'why'
+  let body: string
+
+  switch (event.type) {
+    case 'node-added': {
+      scaffold = 'why'
+      const label = (event.label ?? '').trim().slice(0, 40)
+      const kind = event.kind
+      body = label
+        ? `刚加了 "${label}" (${kind})。用一句话说说：为什么是这个，而不是其他类似选项？`
+        : `刚加了一个 ${kind} 节点。用一句话说说为什么是这个，而不是其他类似选项？`
+      break
+    }
+    case 'node-linked': {
+      scaffold = 'why'
+      body = `你把 ${event.fromKind} → ${event.toKind} 连起来了。这条连线代表 "导致" / "支撑" / "包含" 中哪一种？`
+      break
+    }
+    case 'meta-check': {
+      scaffold = 'meta'
+      const counts = Object.entries(request.canvas?.nodeCountByKind ?? {})
+        .filter(([, n]) => n > 0)
+        .map(([k, n]) => `${k}=${n}`)
+        .join(', ')
+      body = counts
+        ? `当前画布: ${counts}。退一步看：哪个维度最不确定 / 最需要补证据？`
+        : '退一步看你的画布：当前最薄弱的环节是什么？哪个节点你最不确定？'
+      break
+    }
+    case 'user-message': {
+      scaffold = 'why'
+      const said = (event.label ?? '').trim().slice(0, 60)
+      body = said
+        ? `你刚说："${said}"。能再具体一点吗 — 这是基于什么观察 / 数据 / 经历？`
+        : '你刚发了一条消息，但 AI 教练暂时无法理解上下文。能用一句话再说一次你的核心问题吗？'
+      break
+    }
+    default: {
+      scaffold = 'why'
+      body = '退一步看你的画布：当前最薄弱的环节是什么？'
     }
   }
-  const f = fallbackByEvent[request.event.type] ?? fallbackByEvent['node-added']
-  return { ...f, source: 'error', latencyMs }
+  return { scaffold, content: banner + body, source: 'error', latencyMs }
 }
 
 /**
