@@ -1830,11 +1830,20 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             }
           })
 
+          // P15 · apply BMC 9-grid layout on every streaming delta so
+          // cells land in their canonical 3x3 positions IMMEDIATELY,
+          // not just after a page-reload hydrate. Previously the
+          // streaming path skipped applyCanvasLayout, leaving cells in
+          // the server-emitted default (single column) until the page
+          // refreshed and re-routed through the workspace-graph fetch.
+          // First-time generations looked like a stacked list.
+          const mergedNodes = mergeById(
+            removedNodeSet ? state.nodes.filter((node) => !removedNodeSet.has(node.id)) : state.nodes,
+            nodeUpdates
+          )
+          const laidOutNodes = applyCanvasLayout('bmc-9-grid', mergedNodes)
           return {
-            nodes: mergeById(
-              removedNodeSet ? state.nodes.filter((node) => !removedNodeSet.has(node.id)) : state.nodes,
-              nodeUpdates
-            ),
+            nodes: laidOutNodes,
             edges: mergeById(
               removedEdgeSet ? state.edges.filter((edge) => !removedEdgeSet.has(edge.id)) : state.edges,
               edgeUpdates
