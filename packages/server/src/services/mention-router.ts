@@ -182,6 +182,42 @@ export class MentionRouter {
     return `## 用户先前在本对话里说过的话\n${lines.join('\n')}`
   }
 
+  // Exported as a free function below (assessBmcSeedDepth) so unit
+  // tests don't have to instantiate MentionRouter.
+  private assessSeedDepth(input: MentionInput) {
+    return assessBmcSeedDepth(input)
+  }
+
+  /**
+   * P15 · Discovery-depth gate for BMC generators (legacy doc — see
+   * exported `assessBmcSeedDepth` below for the real implementation).
+   *
+   * After the priorContext fix landed, a 28-char seed like
+   * "为社区医生开发的 AI 病历摘要工具,本地部署 + 按机构月费"
+   * happily produces 9/9 BMC cells — but the agent is fabricating
+   * specifics (Year-1 收入预测 / NPS 目标 / CAC 上限) with zero
+   * user-provided evidence. That defeats the purpose of the multi-
+   * agent pipeline; it's just slop dressed up as analysis.
+   *
+   * This gate enforces a minimum context floor BEFORE letting BMC
+   * generators run. The thresholds are deliberately mild — the goal
+   * is "talk to your coach first, then generate", not "write an essay
+   * before we touch the canvas":
+   *
+   *   - Total user-content chars (priorChat + current message,
+   *     excluding pure @-mention lines) ≥ 120
+   *   - At least 2 distinct user turns OR ≥ 1 explicit detail
+   *     marker (number / percent / "月费 X 元" / "目标客群是 X")
+   *
+   * Below the floor → refuse with a clear path back: "聊几轮" or
+   * "/wizard 7 步引导". Caller gets a structured refusal so the
+   * chat dock can render the action buttons.
+   *
+   * Exported as a top-level function (assessBmcSeedDepth below) so
+   * unit tests can assert the thresholds without spinning up the
+   * MentionRouter class.
+   */
+
   async mention(input: MentionInput): Promise<MentionResult> {
     const entry = AGENT_TABLE[input.agentId]
     if (!entry) {
@@ -290,6 +326,41 @@ export class MentionRouter {
 
   private async handleBmcGenerator(input: MentionInput, entry: ServerAgentEntry): Promise<MentionResult> {
     if (!entry.bmcSelf) return refuse(entry.id, 'BMC generator 缺少 bmcSelf 配置')
+
+    // P15 · discovery-depth gate. Block BMC generation when the user
+    // hasn't provided enough context to ground the analysis. Without
+    // this, agents fabricate specifics (CAC, ARR, team size) from a
+    // 28-char seed.
+    const depth = this.assessSeedDepth(input)
+    if (!depth.sufficient) {
+      auditLogger.info({
+        action: 'mention-router.bmc-gate.refused',
+        requestId: input.conversationId,
+        workflowId: input.workspaceId,
+        userId: input.userId,
+        metadata: {
+          agentId: entry.id,
+          reason: depth.reason,
+          userChars: depth.userChars,
+          userTurns: depth.userTurns
+        }
+      })
+      const friendly =
+        `先别急着生成 BMC。你目前给的信息还很浅 (${depth.reason})。\n\n` +
+        `BMC agent 需要扎实的 idea 描述才能给出有据可依的分析,否则就是在凭空编 CAC / 收入预测 / 团队规模。两条推荐路径:\n\n` +
+        `1. **跟 coach 多聊几轮** — 直接在 chat dock 描述你的产品、目标客户、定价直觉、最担心的假设。3-5 轮后再 @ ${entry.id}。\n` +
+        `2. **走 /wizard 7 步引导** — 点画布右上角"快速入门",每步聚焦一个维度,产出结构化答案,再让 agent 整合成 BMC。\n\n` +
+        `📝 提示: 把"为社区医生开发的 AI 病历摘要工具,本地部署 + 按机构月费" 补到 200 字以上,加上具体客群(一线/县级)、月费水平、团队规模、3 个最不确定的假设。`
+      return {
+        agentId: entry.id,
+        reply: friendly,
+        refused: true,
+        refusalReason: '画布上下文不足,请先深挖再生成',
+        appendedNodes: [],
+        appendedEdges: []
+      }
+    }
+
     const seed = collectSeedFromCanvas(input.canvasNodes, input.canvasEdges)
     const traceId = nanoid()
     const { nodes, chatFallback } = await this.business.invokeBmcGeneratorForMention(entry.bmcSelf, {
@@ -788,5 +859,56 @@ function macraToCanvasData(m: MacraNodeData): unknown {
       fullContent: (m as { fullContent?: string }).fullContent ?? '',
       metadata: m.metadata ?? {}
     }
+  }
+}
+
+/**
+ * P15 · BMC seed-depth assessment. See `MentionRouter.assessSeedDepth`
+ * docstring for design rationale.
+ */
+export function assessBmcSeedDepth(
+  input: Pick<MentionInput, 'priorContext' | 'message'>
+): { sufficient: true } | { sufficient: false; reason: string; userChars: number; userTurns: number } {
+  const isMentionLine = (s: string): boolean =>
+    /^\s*@\w[-\w]*\s+/.test(s) && s.length <= 80
+  const userTexts: string[] = []
+  if (input.priorContext) {
+    // priorContext format: "## 用户先前... \n[原始 idea] X\n[近期补充 1] Y"
+    const lines = input.priorContext.split('\n').slice(1)
+    for (const line of lines) {
+      const m = line.match(/^\[.+?\]\s*(.+)$/)
+      if (m && m[1] && !isMentionLine(m[1])) userTexts.push(m[1].trim())
+    }
+  }
+  if (input.message && !isMentionLine(input.message)) {
+    userTexts.push(input.message.trim())
+  }
+  const userChars = userTexts.reduce((a, t) => a + t.length, 0)
+  const userTurns = userTexts.length
+  const hasConcreteDetail = userTexts.some((t) =>
+    /\d/.test(t) || /目标客群是|月费|每月|每年|预算|融资|团队\s*\d|\d\s*人/.test(t)
+  )
+  // Three OR-paths to pass — any one is enough:
+  //   A. ≥100 chars AND has concrete detail (numbers / 月费 / 客群)
+  //   B. ≥3 distinct user turns (depth via dialogue)
+  //   C. ≥200 chars total (one dense paragraph)
+  // None → refuse.
+  const passByDetail = userChars >= 100 && hasConcreteDetail
+  const passByTurns = userTurns >= 3
+  const passByLength = userChars >= 200
+  if (passByDetail || passByTurns || passByLength) {
+    return { sufficient: true }
+  }
+  const why: string[] = []
+  if (userChars < 100) why.push(`总用户输入仅 ${userChars} 字符`)
+  if (userChars >= 100 && !hasConcreteDetail) {
+    why.push('描述里没有具体数字/客群/月费/团队规模/预算等细节')
+  }
+  if (userTurns < 3) why.push(`只有 ${userTurns} 轮用户表达,深度不够`)
+  return {
+    sufficient: false,
+    reason: why.join('; '),
+    userChars,
+    userTurns
   }
 }
