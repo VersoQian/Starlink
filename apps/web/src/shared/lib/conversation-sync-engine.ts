@@ -124,13 +124,27 @@ class ConversationSyncEngine {
       // P11.18 · log silent disconnects so support can diagnose
       // why a client stopped receiving events.
       closed: (event) => {
-        if (typeof event === 'object' && event && 'code' in event) {
-          const code = (event as { code?: number }).code
-          // 1000 = normal close, 1001 = going away (page reload). Anything
-          // else is worth surfacing.
-          if (code !== undefined && code !== 1000 && code !== 1001) {
-            console.warn('[conversation-sync] ws closed unexpectedly', { code })
-          }
+        // Older code logged `{ code }` which the browser stringified to
+        // `[object Object]` in console, hiding the close code from devs.
+        // Pull code + reason out as primitives so the log line is
+        // self-describing.
+        let code: number | undefined
+        let reason: string | undefined
+        let wasClean: boolean | undefined
+        if (typeof event === 'object' && event) {
+          code = (event as { code?: number }).code
+          reason = (event as { reason?: string }).reason
+          wasClean = (event as { wasClean?: boolean }).wasClean
+        }
+        // 1000 = normal close, 1001 = going away (page reload). Anything
+        // else is worth surfacing — log primitives so the close code
+        // shows in console instead of [object Object].
+        if (code !== undefined && code !== 1000 && code !== 1001) {
+          console.warn(
+            `[conversation-sync] ws closed unexpectedly · code=${code}` +
+              (reason ? ` reason="${reason.slice(0, 80)}"` : '') +
+              (wasClean === false ? ' (not-clean)' : '')
+          )
         }
       }
     }
