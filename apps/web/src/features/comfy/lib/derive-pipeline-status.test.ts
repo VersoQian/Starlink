@@ -216,6 +216,52 @@ test('report-card present → report done', () => {
   assert.equal(r.count, 1)
 })
 
+test('P15-fix #8 · mention-only report → earlier pending stages become skipped', () => {
+  // Direct @report-writer mention produces a report-card without going
+  // through the seminar pipeline (no phase.changed events fire). Without
+  // this cascade, input/generate/review/synthesize would stay 'pending'
+  // forever, making the strip look stuck.
+  const stages = derivePipelineStatus(
+    baseInput({
+      isOrchestratorProcessing: false,
+      lastPhase: null,
+      macraNodes: makeNodes([
+        { id: 'report-2026-05-11', type: 'report-card' }
+      ]) as DerivePipelineInput['macraNodes']
+    })
+  )
+  assert.equal(statusOf(stages, 'report'), 'done')
+  // All four earlier stages must be 'skipped' (they were 'pending' and
+  // the report-done cascade flips them).
+  assert.equal(statusOf(stages, 'input'), 'skipped')
+  assert.equal(statusOf(stages, 'generate'), 'skipped')
+  assert.equal(statusOf(stages, 'review'), 'skipped')
+  assert.equal(statusOf(stages, 'synthesize'), 'skipped')
+})
+
+test('P15-fix #8 · mention-only cascade does NOT override done/running stages', () => {
+  // Full pipeline + then a mention-only report shouldn't downgrade
+  // genuinely-completed stages to 'skipped'.
+  const stages = derivePipelineStatus(
+    baseInput({
+      isOrchestratorProcessing: false,
+      lastPhase: 'decision',
+      macraNodes: makeNodes([
+        { id: 'market-cs-1', type: 'cc-bmc-card' },
+        { id: 'product-vp-1', type: 'cc-bmc-card' },
+        { id: 'insight-1', type: 'insight-note' },
+        { id: 'report-2026-05-11', type: 'report-card' }
+      ]) as DerivePipelineInput['macraNodes']
+    })
+  )
+  assert.equal(statusOf(stages, 'report'), 'done')
+  // The full-pipeline cascade upgraded these to done; mention cascade
+  // must NOT touch non-pending stages.
+  assert.notEqual(statusOf(stages, 'generate'), 'skipped')
+  assert.notEqual(statusOf(stages, 'review'), 'skipped')
+  assert.notEqual(statusOf(stages, 'synthesize'), 'skipped')
+})
+
 test('no report-card during processing → report pending; not skipped', () => {
   const stages = derivePipelineStatus(
     baseInput({
