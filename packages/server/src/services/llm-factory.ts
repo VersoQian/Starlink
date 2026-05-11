@@ -134,20 +134,29 @@ function cacheKeyFor(profile: AgentProfile, family: string, baseURL: string | un
  */
 const AGENT_MAX_TOKENS_CEILING = Number(process.env.AGENT_MAX_TOKENS_CEILING ?? 10000)
 
-function clampMaxTokens(profile: AgentProfile): number | undefined {
+/**
+ * Exported for unit testing — production callers should use the
+ * single-arg signature which reads `AGENT_MAX_TOKENS_CEILING` from env.
+ * Pass an explicit `ceiling` only from tests that need to assert the
+ * clamp + audit-log behaviour without monkey-patching env.
+ */
+export function clampMaxTokens(
+  profile: AgentProfile,
+  ceiling: number = AGENT_MAX_TOKENS_CEILING
+): number | undefined {
   const declared = profile.max_tokens
   if (declared == null) return undefined
-  if (declared <= AGENT_MAX_TOKENS_CEILING) return declared
+  if (declared <= ceiling) return declared
   auditLogger.warn({
     action: 'llm-factory.max-tokens-clamped',
     metadata: {
       agentId: profile.id,
       model: profile.model,
       declared,
-      capped: AGENT_MAX_TOKENS_CEILING
+      capped: ceiling
     }
   })
-  return AGENT_MAX_TOKENS_CEILING
+  return ceiling
 }
 
 export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {

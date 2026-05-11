@@ -105,7 +105,7 @@ async function callDeepSeek<T>(
  * Source field stays 'error' so the chat dock bubble can render a
  * "重试" affordance and a warning tint.
  */
-function reflectionFallback(
+export function reflectionFallback(
   request: ReflectionRequest,
   latencyMs: number
 ): ReflectionResponse {

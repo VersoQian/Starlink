@@ -176,12 +176,23 @@ async function start() {
   // P11.18 · /health/agents — per-agent SLO snapshot. Returns latency
   // p50/p95, error rate, fallback rate, plus a degraded boolean when
   // error rate breaches AGENT_SLO_DEGRADED_THRESHOLD (default 30%).
-  app.get('/health/agents', (_req, res) => {
+  app.get('/health/agents', async (_req, res) => {
     const snapshots = getAllAgentSloSnapshots()
     const anyDegraded = snapshots.some((s) => s.degraded)
+    // P15-fix #6 · surface cell-summarizer retry telemetry alongside
+    // the per-agent SLO. Module imported lazily so the route handler
+    // doesn't pin the summarizer module at server boot.
+    let cellSummarizer: unknown = null
+    try {
+      const mod = await import('./agents/shared/cell-summarizer.js')
+      cellSummarizer = mod.getCellSummarizerSnapshot()
+    } catch {
+      // never break /health on a missing telemetry hook
+    }
     res.status(anyDegraded ? 503 : 200).json({
       degradedCount: snapshots.filter((s) => s.degraded).length,
-      agents: snapshots
+      agents: snapshots,
+      cellSummarizer
     })
   })
 
