@@ -35,7 +35,10 @@ type KbTaskStatus = {
 
 const graphqlEndpoint = 'http://localhost:4000/graphql'
 
-test.describe('Knowledge workspace', () => {
+// FIXME: targets removed `/workspace/[id]/knowledge` task center (deleted
+// in 2190dec). Standalone knowledge page now lives at `/knowledge`; the
+// in-canvas KB modal handles the upload flow. Rewrite is follow-up.
+test.describe.fixme('Knowledge workspace', () => {
   test('@kb-flow supports kb creation and import flow in task center', async ({ page }) => {
     const now = new Date().toISOString()
     const workspaceId = 'demo'

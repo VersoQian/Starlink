@@ -105,7 +105,10 @@ const initialGraph: GraphState = {
 
 const graphqlEndpoint = 'http://localhost:4000/graphql'
 
-test.describe('Canvas workspace', () => {
+// FIXME: targets removed `/workspace/[id]/canvas` route (deleted in 2190dec).
+// Standalone canvas now lives at `/canvas/[workspaceId]`; rewriting these
+// against the new shell is follow-up work.
+test.describe.fixme('Canvas workspace', () => {
   test.beforeEach(async ({ page }) => {
     let graph = clone(initialGraph)
 
@@ -199,7 +202,8 @@ test.describe('Canvas workspace', () => {
   })
 })
 
-test.describe('Canvas error handling', () => {
+// FIXME: same as above — targets `/workspace/[id]` route removed in 2190dec.
+test.describe.fixme('Canvas error handling', () => {
   test('shows error state and allows retry on graph load failure', async ({ page }) => {
     let requestCount = 0
 

@@ -44,7 +44,11 @@ const graph: GraphState = {
   edges: []
 }
 
-test.describe('Runtime subscription scope', () => {
+// FIXME: targets removed `/workspace/[id]/agents` page (deleted in 2190dec).
+// Runtime subscription behaviour now lives in the canvas WS pipeline at
+// `/canvas/[workspaceId]`; the smoke is covered by smoke:access-subscriptions
+// on the server side. UI-level e2e needs a rewrite.
+test.describe.fixme('Runtime subscription scope', () => {
   test('sends scoped subscription variables, propagates viewer identity, and refetches runtime history after reconnect', async ({ page }) => {
     let runtimeRequestCount = 0
 
