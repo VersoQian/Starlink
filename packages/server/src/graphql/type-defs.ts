@@ -594,6 +594,14 @@ export const typeDefs = gql`
     conversationId: ID
     agentId: String!
     message: String!
+    """
+    P15 · Optional client-supplied prior user messages (the /chat seed
+    plus any follow-ups in the chat dock). Without this, the first
+    @-mention on a fresh canvas has no idea what the user's pitch was
+    — agents refuse and force the user to repeat. Each entry is one
+    user utterance, oldest first. Server caps the effective context.
+    """
+    priorChat: [String!]
   }
 
   type MentionAgentPayload {

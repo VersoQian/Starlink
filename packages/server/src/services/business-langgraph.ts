@@ -1787,7 +1787,17 @@ ${snippets}
      */
     userSkillPrompt: string
   ) {
-    const contextPrompt = this.buildWorkspaceContextPrompt(state)
+    // P15 · prepend "用户先前在本对话里说过的话" block (from
+    // state.contextPrompt, populated by mention path) to the workspace
+    // context. Without this, the first @-mention on a fresh canvas
+    // would never see the /chat seed pitch — workspace context only
+    // contains memory/conversation summaries, which are empty for a
+    // brand-new canvas.
+    const workspaceContext = this.buildWorkspaceContextPrompt(state)
+    const priorContext = state.contextPrompt?.trim()
+    const contextPrompt = priorContext
+      ? (workspaceContext ? `${priorContext}\n\n${workspaceContext}` : priorContext)
+      : workspaceContext
     const crossContextPrompt = this.buildCrossContextPrompt(state, self)
     const directive = state.supervisorDirective
     const supervisorDirectivePrompt = directive?.guidance
@@ -3062,6 +3072,16 @@ ${workspaceContext}
     question: string
     knowledgeEvidence?: KnowledgeEvidence[]
     seed?: typeof EMPTY_SEEDED_STATE
+    /**
+     * P15 · "用户先前在本对话里说过的话" block built by
+     * MentionRouter.buildPriorContext from conversation_messages.
+     * Lands in state.contextPrompt so the agent's system-prompt
+     * builder (buildSystemPrompt) renders it as recent-history
+     * context. Without this, the first @-mention on a fresh canvas
+     * has no idea what the user's /chat seed pitch was, forcing
+     * them to repeat themselves.
+     */
+    priorContext?: string
   }): BusinessStateType {
     const seed = args.seed ?? EMPTY_SEEDED_STATE
     return {
@@ -3069,7 +3089,7 @@ ${workspaceContext}
       workspaceId: args.workspaceId,
       userId: args.userId,
       question: args.question,
-      contextPrompt: '',
+      contextPrompt: args.priorContext ?? '',
       intent: null,
       roundNumber: 1,
       supervisorDirective: null,
@@ -3102,15 +3122,9 @@ ${workspaceContext}
       userId: string
       question: string
       seed?: typeof EMPTY_SEEDED_STATE
-      /**
-       * P11.18 fix · KB chunks injected by mention-router's
-       * injectAgentKbEvidence. Without this, BMC mentions ignored
-       * KB bindings and produced citation-less output even when the
-       * agent had a KB attached. Forward into BusinessState so
-       * buildKnowledgePrompt can render the [[ref:]] block into the
-       * agent's system prompt.
-       */
       knowledgeEvidence?: KnowledgeEvidence[]
+      /** P15 · "用户先前在本对话里说过的话" block — see buildMentionState. */
+      priorContext?: string
     }
   ): Promise<{ nodes: MacraNodeData[]; chatFallback: string }> {
     const agentId = `${self}-agent`
@@ -3146,6 +3160,7 @@ ${workspaceContext}
     userId: string
     question: string
     seed: typeof EMPTY_SEEDED_STATE
+    priorContext?: string
   }): Promise<CriticConflict[]> {
     const state = this.buildMentionState(args)
     const projected = await this.invokeRegisteredAgent(
@@ -3178,6 +3193,7 @@ ${workspaceContext}
     userId: string
     question: string
     seed: typeof EMPTY_SEEDED_STATE
+    priorContext?: string
   }): Promise<{ insights: string[]; suggestedEdges: Array<{ from: string; to: string; label: string }> }> {
     const state = this.buildMentionState(args)
     let insights: string[] = []
@@ -3214,6 +3230,7 @@ ${workspaceContext}
       userId: string
       question: string
       knowledgeEvidence?: KnowledgeEvidence[]
+      priorContext?: string
     }
   ): Promise<MacraNodeData[]> {
     const state = this.buildMentionState(args)
@@ -3257,6 +3274,7 @@ ${workspaceContext}
      *  cites these as `[[insight:nodeId]]` to attribute claims. */
     insightNotes?: MacraNodeData[]
     knowledgeEvidence?: KnowledgeEvidence[]
+    priorContext?: string
   }): Promise<MacraNodeData | null> {
     const state = this.buildMentionState(args)
 

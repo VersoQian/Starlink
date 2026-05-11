@@ -1270,6 +1270,7 @@ export const resolvers = {
           conversationId?: string | null
           agentId: string
           message: string
+          priorChat?: string[] | null
         }
       },
       ctx: GraphQLContext
@@ -1281,13 +1282,17 @@ export const resolvers = {
             extensions: { code: 'BAD_USER_INPUT' }
           })
         }
+        const priorChat = Array.isArray(args.input.priorChat)
+          ? args.input.priorChat.filter((s) => typeof s === 'string' && s.trim().length > 0).slice(0, 10)
+          : undefined
         const result = await ctx.conversationStore.mentionAgent(
           args.input.workspaceId,
           ctx.userId,
           {
             agentId: args.input.agentId,
             message: trimmedMessage,
-            conversationId: args.input.conversationId ?? undefined
+            conversationId: args.input.conversationId ?? undefined,
+            priorChat
           }
         )
         return result

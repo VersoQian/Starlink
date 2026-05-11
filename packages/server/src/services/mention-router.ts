@@ -96,6 +96,13 @@ export type MentionInput = {
   canvasEdges: CanvasEdge[]
   /** Optional KB evidence to feed the agent. */
   knowledgeEvidence?: KnowledgeEvidence[]
+  /**
+   * Internal · built by MentionRouter.buildPriorContext from
+   * conversation history. Handlers forward this to BusinessLangGraphService
+   * which renders it as state.contextPrompt. Callers should NOT set this
+   * — it's populated by the mention pipeline.
+   */
+  priorContext?: string
 }
 
 export type MentionAppendedNode = {
@@ -118,11 +125,62 @@ export type MentionResult = {
 // Mention router
 // ============================================================================
 
+/**
+ * Optional callback the host (ConversationStore) hands to MentionRouter so
+ * mentions can pull the conversation's prior user-messages as agent
+ * context. Without this, first-@-mention on a fresh canvas has zero idea
+ * what the user wanted (the /chat seed lives in conversation_messages, not
+ * in canvas nodes), so agents refuse and ask the user to paste their pitch
+ * a second time.
+ *
+ * The fetcher returns oldest-first so the seed (first user message) is
+ * always the first entry. Caller is responsible for any workspace/user
+ * permission checks BEFORE calling — by the time MentionRouter invokes
+ * this, the GraphQL resolver has already authorized.
+ */
+export type MentionMessageFetcher = (
+  conversationId: string,
+  limit: number
+) => Promise<Array<{ role: 'user' | 'ai' | 'system'; content: string; createdAt?: string }>>
+
 export class MentionRouter {
   constructor(
     private readonly business: BusinessLangGraphService,
-    private readonly llmClient: LLMClient = new LLMClient()
+    private readonly llmClient: LLMClient = new LLMClient(),
+    private readonly messageFetcher: MentionMessageFetcher | null = null
   ) {}
+
+  /**
+   * Build a "prior user said" context block from conversation history.
+   * Returns '' if no fetcher / no conversationId / no user-role messages.
+   *
+   * Strategy: include the FIRST user message verbatim (the seed defines
+   * the idea), plus up to 2 most-recent user messages that ISN'T just an
+   * @-mention command. Keeps the block compact (~3 entries max) so we
+   * don't blow the agent's prompt budget.
+   */
+  private async buildPriorContext(input: MentionInput): Promise<string> {
+    if (!this.messageFetcher || !input.conversationId) return ''
+    let messages: Array<{ role: string; content: string }>
+    try {
+      messages = await this.messageFetcher(input.conversationId, 20)
+    } catch {
+      return ''
+    }
+    const userMsgs = messages
+      .filter((m) => m.role === 'user' && m.content.trim().length > 0)
+      // Drop pure @-mention commands so the context isn't just a chain
+      // of '@market-agent ...' messages with no actual idea content.
+      .map((m) => m.content.trim())
+      .filter((c) => !/^\s*@\w[-\w]*\s+/.test(c) || c.length > 80)
+    if (userMsgs.length === 0) return ''
+    // Pick: first (seed) + up to 2 most-recent distinct messages.
+    const seed = userMsgs[0]
+    const tail = userMsgs.slice(1).slice(-2)
+    const unique = [seed, ...tail.filter((m) => m !== seed)]
+    const lines = unique.map((m, i) => `[${i === 0 ? '原始 idea' : `近期补充 ${i}`}] ${m.slice(0, 400)}`)
+    return `## 用户先前在本对话里说过的话\n${lines.join('\n')}`
+  }
 
   async mention(input: MentionInput): Promise<MentionResult> {
     const entry = AGENT_TABLE[input.agentId]
@@ -158,7 +216,17 @@ export class MentionRouter {
       // We don't replace any caller-provided knowledgeEvidence — we APPEND.
       // This lets the user pass an explicit kbId (single-shot one-off
       // research) on top of the agent's standing bindings.
-      const enrichedInput = await this.injectAgentKbEvidence(input, entry.id)
+      const kbEnrichedInput = await this.injectAgentKbEvidence(input, entry.id)
+      // P15 · "用户先前说过" context block. Prefer caller-supplied
+      // priorContext (built by ConversationStore.mentionAgent from the
+      // GraphQL priorChat field — the chat dock's user messages). Fall
+      // back to the server-side messageFetcher if caller didn't supply
+      // anything (legacy mention path, no chat dock history).
+      const priorContext =
+        kbEnrichedInput.priorContext && kbEnrichedInput.priorContext.trim().length > 0
+          ? kbEnrichedInput.priorContext
+          : await this.buildPriorContext(input)
+      const enrichedInput: MentionInput = { ...kbEnrichedInput, priorContext }
 
       switch (entry.callability) {
         case 'standalone-bmc-generator':
@@ -229,6 +297,7 @@ export class MentionRouter {
       workspaceId: input.workspaceId,
       userId: input.userId,
       question: input.message,
+      priorContext: input.priorContext,
       seed,
       // P11.18 fix · forward KB chunks injected by injectAgentKbEvidence.
       // Previously this was dropped on the floor → BMC mentions ignored
@@ -336,6 +405,7 @@ export class MentionRouter {
         workspaceId: input.workspaceId,
         userId: input.userId,
         question: input.message,
+      priorContext: input.priorContext,
         seed
       })
       const reply =
@@ -366,6 +436,7 @@ export class MentionRouter {
       workspaceId: input.workspaceId,
       userId: input.userId,
       question: input.message,
+      priorContext: input.priorContext,
       seed
     })
     const reply =
@@ -412,6 +483,7 @@ export class MentionRouter {
       workspaceId: input.workspaceId,
       userId: input.userId,
       question: input.message,
+      priorContext: input.priorContext,
       knowledgeEvidence: input.knowledgeEvidence ?? []
     })
     const reply =
@@ -553,6 +625,7 @@ export class MentionRouter {
       workspaceId: input.workspaceId,
       userId: input.userId,
       question: input.message,
+      priorContext: input.priorContext,
       seed,
       // Pass the richer canvas context so the report-writer can weave
       // every agent's voice into the final document — synthesizer's

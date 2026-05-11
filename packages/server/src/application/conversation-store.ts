@@ -171,7 +171,6 @@ export class ConversationStore {
     this.eventBus = eventBus
     this.runtimeRepository = runtimeRepository
     this.businessLangGraphService = businessLangGraphService
-    this.mentionRouter = new MentionRouter(businessLangGraphService)
     this.toolRegistry = toolRegistry ?? null
     this.bmcFlowAdapter = bmcFlowAdapter ?? (toolRegistry ? new BmcFlowAdapter(toolRegistry) : null)
     this.bmcFlowRuntime = bmcFlowRuntime
@@ -180,6 +179,26 @@ export class ConversationStore {
     this.assetStore = new WorkspaceAssetStore(runtimeRepository)
     this.eventStore = new RuntimeEventStore(runtimeRepository, eventBus)
     this.memoryStore = new ConversationMemoryStore()
+    // P15 · pass a message-fetcher closure so MentionRouter can pull
+    // prior user messages (the /chat seed) as agent context. Without
+    // this, the first @-mention on a fresh canvas has no idea what the
+    // user's pitch was — agents refuse and force a re-paste.
+    const memStore = this.memoryStore
+    this.mentionRouter = new MentionRouter(
+      businessLangGraphService,
+      undefined,
+      async (conversationId, limit) => {
+        const rows = await memStore.listMessages(conversationId, limit)
+        return rows.map((m) => ({
+          role: (m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'ai') as
+            | 'user'
+            | 'ai'
+            | 'system',
+          content: m.content,
+          createdAt: typeof m.createdAt === 'string' ? m.createdAt : String(m.createdAt)
+        }))
+      }
+    )
     this.contextBuilder = new WorkspaceContextBuilder(this.memoryStore)
     this.hitlApprovalStore = hitlApprovalStore === undefined
       ? (this.hitlEnabled ? new HitlApprovalStore() : null)
@@ -694,10 +713,28 @@ export class ConversationStore {
   async mentionAgent(
     workspaceId: string,
     userId: string,
-    input: { agentId: string; message: string; conversationId?: string }
+    input: { agentId: string; message: string; conversationId?: string; priorChat?: string[] }
   ): Promise<MentionResult> {
     await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write')
     const baseGraph = await this.getGraph(workspaceId)
+    // P15 · build priorContext from client-supplied chat history. The
+    // /chat homepage stores its seed in localStorage and the chat dock
+    // never persists user messages to conversation_messages, so the
+    // server-side fetcher comes up empty on first @-mention. Trust
+    // the client for context (it's just text, not state).
+    const priorContext = (() => {
+      if (!input.priorChat || input.priorChat.length === 0) return undefined
+      const useful = input.priorChat
+        .map((m) => m.trim())
+        .filter((m) => m.length > 0)
+        .filter((m) => !/^\s*@\w[-\w]*\s+/.test(m) || m.length > 80)
+      if (useful.length === 0) return undefined
+      const seed = useful[0]
+      const tail = useful.slice(1).slice(-2)
+      const unique = [seed, ...tail.filter((m) => m !== seed)]
+      const lines = unique.map((m, i) => `[${i === 0 ? '原始 idea' : `近期补充 ${i}`}] ${m.slice(0, 400)}`)
+      return `## 用户先前在本对话里说过的话\n${lines.join('\n')}`
+    })()
     const result = await this.mentionRouter.mention({
       workspaceId,
       userId,
@@ -706,7 +743,8 @@ export class ConversationStore {
       message: input.message,
       canvasNodes: baseGraph.nodes,
       canvasEdges: baseGraph.edges,
-      knowledgeEvidence: []
+      knowledgeEvidence: [],
+      priorContext
     })
 
     if (!result.refused && (result.appendedNodes.length > 0 || result.appendedEdges.length > 0)) {

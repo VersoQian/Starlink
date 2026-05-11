@@ -2589,6 +2589,21 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
     ])
     set({ chatReflecting: true })
 
+    // P15 · pull user-role messages from current chat state to send as
+    // priorChat. Without this, the first @-mention on a fresh canvas
+    // has no idea what the user's pitch was (the /chat seed lives in
+    // localStorage + chat dock, NOT in conversation_messages on the
+    // server). Strip @-mention commands so context is the actual idea
+    // content, not a chain of `@market-agent ...` lines.
+    const priorChatUserMessages = (): string[] => {
+      const msgs = get().chatMessages
+      return msgs
+        .filter((m) => m.role === 'user' && m.content.trim().length > 0)
+        .map((m) => m.content.trim())
+        .filter((c) => !/^\s*@\w[-\w]*\s+/.test(c) || c.length > 80)
+        .slice(0, 10)
+    }
+
     try {
       const client = getGraphQLClient()
       const data = await client.request<{
@@ -2601,7 +2616,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           appendedEdges: Array<{ id: string }>
         }
       }>(MENTION_AGENT_MUTATION, {
-        input: { workspaceId, agentId, message: trimmed }
+        input: { workspaceId, agentId, message: trimmed, priorChat: priorChatUserMessages() }
       })
 
       const m = data.mentionAgent
@@ -2737,6 +2752,11 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           workspaceId,
           agentId: 'critic-agent',
           message: '基于当前画布的所有 BMC 节点检测跨维度逻辑冲突 / 资源-目标冲突 / 合规-业务冲突。',
+          priorChat: get().chatMessages
+            .filter((m) => m.role === 'user' && m.content.trim().length > 0)
+            .map((m) => m.content.trim())
+            .filter((c) => !/^\s*@\w[-\w]*\s+/.test(c) || c.length > 80)
+            .slice(0, 10),
         },
       })
 
