@@ -72,7 +72,23 @@ When multiple DISTINCT durable traits are observable across the summaries
 (e.g. domain background + thinking style + a recurring blind spot all
 showing up in 2+ conversations each), surface them as separate \`creates\`
 entries rather than collapsing into one. Aim for 1-5 creates when evidence
-supports them; the goal is coverage of orthogonal traits, not minimalism.`
+supports them; the goal is coverage of orthogonal traits, not minimalism.
+
+ORTHOGONALITY RULE (hard constraint):
+- Each skill row must carry ONE trait, not a bundle. The downstream coach
+  ranks and renders top-K rows; a bundled row hides traits that should be
+  surfaced independently.
+- The four orthogonal axes are: \`domain\` (what they know), \`style\`
+  (how they think), \`blind-spot\` (what they avoid), \`constraint\` (what
+  they cannot do / resource limits). NEVER merge two axes into one row.
+- Bad: "硬件极客思维 + 极低预算约束" (mixes style + constraint).
+- Good: TWO rows — "硬件极客思维" (style) AND "业余 + 极低预算" (constraint).
+- When the evidence across summaries reveals ≥ 4 distinct traits spanning
+  multiple axes, emit ≥ 4 \`creates\`. Collapsing them into 2-3 bundled
+  rows is a quality failure.
+- The trait must NOT be reconstructable as "trait-A 同时也 trait-B" — if
+  the content would naturally use "和 / 同时 / 另外" to connect two
+  orthogonal claims, split into two rows.`
 
 /**
  * Build the per-extraction user message. Pairs with USER_SKILL_SYSTEM_PROMPT.

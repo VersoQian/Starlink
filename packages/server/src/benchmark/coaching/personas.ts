@@ -1,6 +1,6 @@
 /**
  * Hand-authored ground-truth personas for the coaching-mode benchmark
- * (2026-04-28).
+ * (2026-04-28; expanded 2026-05-11 to 5 personas × 5 workspaces for stress test).
  *
  * Each persona declares the durable traits we EXPECT the UserSkillExtractor
  * to surface from synthetic conversation summaries. After running the
@@ -91,6 +91,16 @@ export const personaB2BSaasPM: BenchmarkPersona = {
       workspaceId: 'ws-coach-eval-saaspm-003',
       ideaName: '分销商 portal',
       ideaPitch: 'B2B SaaS 公司用来管理分销伙伴 + 分账 + leads 共享的 SaaS'
+    },
+    {
+      workspaceId: 'ws-coach-eval-saaspm-004',
+      ideaName: 'NPS 自动化平台',
+      ideaPitch: '把 B2B SaaS 客户的 NPS 调研 + 跟进流程做成自动化触达 SaaS'
+    },
+    {
+      workspaceId: 'ws-coach-eval-saaspm-005',
+      ideaName: 'Onboarding 检查清单',
+      ideaPitch: '帮中型 SaaS 公司客户成功团队跟踪新客户激活步骤的轻量工具'
     }
   ]
 }
@@ -146,8 +156,222 @@ export const personaIndieHardware: BenchmarkPersona = {
       workspaceId: 'ws-coach-eval-hw-003',
       ideaName: '3D 打印工具盒',
       ideaPitch: '为 maker 社区设计的可定制工具收纳盒生成器（参数化模型 + 在线下载）'
+    },
+    {
+      workspaceId: 'ws-coach-eval-hw-004',
+      ideaName: 'DIY 智能灌溉控制器',
+      ideaPitch: 'ESP8266 + 土壤湿度传感器的阳台园艺自动浇水模块'
+    },
+    {
+      workspaceId: 'ws-coach-eval-hw-005',
+      ideaName: 'NFC 钥匙扣门禁',
+      ideaPitch: '小公司用的 NFC 门禁系统，硬件 + 简单管理后台'
     }
   ]
 }
 
-export const ALL_PERSONAS: BenchmarkPersona[] = [personaB2BSaasPM, personaIndieHardware]
+export const personaConsumerBrand: BenchmarkPersona = {
+  id: 'persona-consumer-brand',
+  name: 'Consumer Brand Founder',
+  bio: '一位有 8 年快消 + 美妆品牌运营经验的创始人，做过两个 to-C 品牌。'
+    + '说话偏好讲故事、用感性语言描述用户场景，对量化指标（CAC、LTV）反应慢。'
+    + '坚信品牌叙事是护城河，倾向把所有问题归结为"品牌不够强"。'
+    + '已有外部投资人对接，明确希望融资。',
+  traits: [
+    {
+      id: 'trait-consumer-domain',
+      category: 'domain',
+      label: '快消 / 美妆品牌经验',
+      description: '8 年 to-C 品牌运营 + 渠道经验，熟悉电商 + 线下铺货',
+      keywords: ['品牌', '快消', '美妆', 'to-C', '电商', '渠道']
+    },
+    {
+      id: 'trait-style-narrative',
+      category: 'style',
+      label: '故事化叙述',
+      description: '喜欢用故事 + 感性语言描述用户场景，不爱数据驱动框架',
+      keywords: ['故事', '叙事', '感性', '场景', '不爱数据']
+    },
+    {
+      id: 'trait-blindspot-unit-econ',
+      category: 'blind-spot',
+      label: '忽视单位经济',
+      description: '回避 CAC / LTV / 毛利 等量化拷问；归因到"品牌不够强"',
+      keywords: ['CAC', 'LTV', '单位经济', '毛利', '回避数据']
+    },
+    {
+      id: 'trait-constraint-funding',
+      category: 'constraint',
+      label: '主动寻求融资',
+      description: '明确希望融资扩张，已对接投资人；策略要适配融资节奏',
+      keywords: ['融资', '投资人', '估值', '扩张', '天使轮']
+    }
+  ],
+  ideaWorkspaces: [
+    {
+      workspaceId: 'ws-coach-eval-brand-001',
+      ideaName: '小众香水品牌',
+      ideaPitch: '主打"东方调"的小众沙龙香水，DTC 电商 + 限量发售'
+    },
+    {
+      workspaceId: 'ws-coach-eval-brand-002',
+      ideaName: '功效护肤胶囊',
+      ideaPitch: '单次精华胶囊形态的轻奢护肤品，主打都市白领便携场景'
+    },
+    {
+      workspaceId: 'ws-coach-eval-brand-003',
+      ideaName: '宠物精品零食',
+      ideaPitch: '高端宠物零食 DTC 品牌，主打成分透明 + 包装设计感'
+    },
+    {
+      workspaceId: 'ws-coach-eval-brand-004',
+      ideaName: '可持续家清品牌',
+      ideaPitch: '主打可补充装 + 环保叙事的家用清洁剂品牌'
+    },
+    {
+      workspaceId: 'ws-coach-eval-brand-005',
+      ideaName: '健康茶饮订阅',
+      ideaPitch: '月订阅模式的功能性花草茶包，主打都市女性场景化叙事'
+    }
+  ]
+}
+
+export const personaAcademicResearcher: BenchmarkPersona = {
+  id: 'persona-academic-researcher',
+  name: 'Academic Researcher',
+  bio: '一位在某 985 高校做 NLP 方向的青年教师，发过 ACL / EMNLP，最近想把'
+    + '论文里的方法工程化。说话喜欢精确定义术语 + 引文献，反感粗略说法。'
+    + '严重低估 go-to-market 难度，认为"算法好用户就会来"。'
+    + '只有横向经费可用，月度可投入 ≤ ¥10000，不能全职。',
+  traits: [
+    {
+      id: 'trait-academic-domain',
+      category: 'domain',
+      label: 'NLP 学术背景',
+      description: 'NLP 研究员，发表过 ACL/EMNLP，深谙模型与算法',
+      keywords: ['NLP', 'ACL', 'EMNLP', '论文', '算法', '研究']
+    },
+    {
+      id: 'trait-style-academic',
+      category: 'style',
+      label: '术语精确 + 引文献',
+      description: '说话要求精确定义，常引用文献，反感 hand-wavy 解释',
+      keywords: ['术语', '定义', '文献', '严谨', '精确']
+    },
+    {
+      id: 'trait-blindspot-gtm',
+      category: 'blind-spot',
+      label: '低估 GTM 难度',
+      description: '默认"算法好用户就来"，不重视渠道 / 销售 / 品牌',
+      keywords: ['GTM', '获客', '销售', '渠道', '"酒香不怕巷子深"']
+    },
+    {
+      id: 'trait-constraint-parttime',
+      category: 'constraint',
+      label: '横向经费 + 兼职',
+      description: '只有横向经费可用，月度 ≤ ¥10000，不能离开高校',
+      keywords: ['横向', '经费', '兼职', '不离职', '高校']
+    }
+  ],
+  ideaWorkspaces: [
+    {
+      workspaceId: 'ws-coach-eval-acad-001',
+      ideaName: '法律文书摘要工具',
+      ideaPitch: '基于 LLM 的法律文书自动摘要 + 关键条款抽取工具，面向律所'
+    },
+    {
+      workspaceId: 'ws-coach-eval-acad-002',
+      ideaName: '中文学术翻译',
+      ideaPitch: '面向博士生的中英学术论文翻译辅助工具，强调术语一致性'
+    },
+    {
+      workspaceId: 'ws-coach-eval-acad-003',
+      ideaName: '科研文献 RAG',
+      ideaPitch: '为科研人员构建私域文献 RAG 系统，支持精准引用与对比'
+    },
+    {
+      workspaceId: 'ws-coach-eval-acad-004',
+      ideaName: '医学问答助手',
+      ideaPitch: '基于专业医学语料的医生辅助问答工具，强调可解释引文'
+    },
+    {
+      workspaceId: 'ws-coach-eval-acad-005',
+      ideaName: '中文教学评估',
+      ideaPitch: '面向 K12 教师的中文作文自动评分 + 反馈生成工具'
+    }
+  ]
+}
+
+export const personaServiceFreelancer: BenchmarkPersona = {
+  id: 'persona-service-freelancer',
+  name: 'Agency Freelancer',
+  bio: '一位独立设计 / 营销 freelancer，做了 6 年甲方项目，想把外包业务'
+    + '产品化。说话简短直接、commercial-first，看重短期现金流。'
+    + '严重忽视技术可行性 / 工程债，反感"先打磨产品再卖"的论调。'
+    + '只有 1 人，月度营收必须 ≥ ¥20000 才能持续。',
+  traits: [
+    {
+      id: 'trait-freelancer-domain',
+      category: 'domain',
+      label: 'Agency / 外包经验',
+      description: '6 年设计 + 营销 freelancer，熟悉外包接单 + 甲方沟通',
+      keywords: ['freelancer', '外包', '设计', '营销', '甲方', '接单']
+    },
+    {
+      id: 'trait-style-commercial',
+      category: 'style',
+      label: '现金流优先',
+      description: '说话直接、commercial-first，看重短期收入，对长期投资回报不敏感',
+      keywords: ['现金流', '短期', '快收钱', 'commercial', '直接']
+    },
+    {
+      id: 'trait-blindspot-tech',
+      category: 'blind-spot',
+      label: '忽视技术债',
+      description: '默认"先卖了再说"，技术可行性 / 工程债不在视野',
+      keywords: ['技术债', '工程', '不懂技术', '反感打磨', '先卖再说']
+    },
+    {
+      id: 'trait-constraint-monthly',
+      category: 'constraint',
+      label: '月度现金流硬约束',
+      description: '1 人 freelancer，月度营收 ≥ ¥20000 才可持续，无缓冲',
+      keywords: ['月度营收', '一个人', '无积蓄', '现金流硬约束', '¥20000']
+    }
+  ],
+  ideaWorkspaces: [
+    {
+      workspaceId: 'ws-coach-eval-svc-001',
+      ideaName: '小红书代运营套餐',
+      ideaPitch: '把现有甲方小红书代运营经验产品化成"基础套餐 / 增值套餐"'
+    },
+    {
+      workspaceId: 'ws-coach-eval-svc-002',
+      ideaName: 'LOGO 设计 SaaS',
+      ideaPitch: '在线生成创业公司 LOGO 的轻量工具，订阅或一次买断'
+    },
+    {
+      workspaceId: 'ws-coach-eval-svc-003',
+      ideaName: '甲方 brief 模板',
+      ideaPitch: '把设计师跟甲方沟通的 brief 流程做成模板包售卖'
+    },
+    {
+      workspaceId: 'ws-coach-eval-svc-004',
+      ideaName: 'Notion 营销模板',
+      ideaPitch: '面向小团队的 Notion 营销 SOP 模板包，付费下载'
+    },
+    {
+      workspaceId: 'ws-coach-eval-svc-005',
+      ideaName: '出海素材产线',
+      ideaPitch: '帮跨境电商小卖家批量生产广告素材的外包 + 模板服务'
+    }
+  ]
+}
+
+export const ALL_PERSONAS: BenchmarkPersona[] = [
+  personaB2BSaasPM,
+  personaIndieHardware,
+  personaConsumerBrand,
+  personaAcademicResearcher,
+  personaServiceFreelancer
+]

@@ -40,6 +40,8 @@ export interface TraitRecallEntry {
   /** Best matching skill content + score; null = trait missed. */
   bestMatch: { skillId: string; skillTitle: string; skillContent: string; score: number } | null
   hit: boolean
+  /** When LLM judge is used: reasoning + judge-assigned score 0..1. */
+  judge?: { score: number; rationale: string; matchedSkillId: string | null }
 }
 
 export interface SkillPrecisionEntry {
@@ -87,6 +89,13 @@ export interface PersonaEvalResult {
     traits: TraitRecallEntry[]
     fraction: number /* 0..1 */
   }
+  /** LLM-judge recall (preferred over the harsh lexical recall above).
+   *  null only when LLM client unavailable. */
+  judgeRecall: {
+    traits: TraitRecallEntry[]
+    fraction: number /* 0..1 */
+    judgeFailed: number /* how many traits fell back to lexical */
+  } | null
   precision: {
     skills: SkillPrecisionEntry[]
     fraction: number /* 0..1, 0 if no skills */
@@ -142,6 +151,142 @@ function scoreRecall(
   })
   const hits = entries.filter((e) => e.hit).length
   return { traits: entries, fraction: traits.length > 0 ? hits / traits.length : 0 }
+}
+
+// ============================================================================
+// LLM-judge recall (semantic; replaces the harsh 0.25-keyword cutoff)
+// ============================================================================
+
+/**
+ * Ask the LLM whether any of the extracted skills semantically expresses the
+ * given persona trait. Returns null on LLM/parse failure — callers should
+ * then fall back to lexical scoring.
+ *
+ * Why an LLM judge: the keyword-density cutoff at 0.25 is brittle. A skill
+ * titled "硬件极客思维" semantically covers "嵌入式 + 3D 打印背景" (the GT
+ * trait) but its content may not contain the literal keyword "嵌入式". The
+ * LLM can read both and decide if the trait is captured.
+ */
+async function judgeRecallForTrait(
+  trait: PersonaTrait,
+  skills: MemoryItem[],
+  llm: LLMClient
+): Promise<TraitRecallEntry['judge'] | null> {
+  if (skills.length === 0) {
+    return { score: 0, rationale: '没有任何 extracted skill 可供判定', matchedSkillId: null }
+  }
+  const skillsBlock = skills
+    .map(
+      (s, i) =>
+        `[${i + 1}] id=${s.id}\n    title: ${s.title}\n    content: ${s.content.replace(/\n+/g, ' ').slice(0, 300)}`
+    )
+    .join('\n')
+  const sys = `你是一个判官，判断某个 ground-truth 特质 (GT trait) 是否已经被一组 user-skill 行覆盖。
+
+判断标准：
+- 语义上覆盖即可，不要求字面包含关键词。
+- 部分覆盖 (0.4-0.6)、明显覆盖 (0.7-0.9)、完美对应 (1.0)、未覆盖 (0)。
+- 一个 skill 可以同时覆盖多个 GT trait（但每次判定只针对单个 GT trait）。
+- 输出 JSON，不带 markdown 围栏。`
+  const usr = `GT TRAIT:
+- id: ${trait.id}
+- 类别 (axis): ${trait.category}
+- 标签: ${trait.label}
+- 完整描述: ${trait.description}
+- 期望关键词 (仅供语义参考): ${trait.keywords.join(', ')}
+
+EXTRACTED SKILLS (候选):
+${skillsBlock}
+
+判断哪一个 skill 最能覆盖这个 GT trait。输出 JSON:
+{"score": <0..1>, "matchedSkillId": "<id 或 null>", "rationale": "<≤60 字中文理由>"}`
+
+  try {
+    const resp = await llm.chat({
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: usr }
+      ],
+      temperature: 0.0,
+      maxTokens: 300
+    })
+    const raw = (resp.content ?? '').trim()
+    // Strip code fences if the model added them
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+    const parsed = JSON.parse(cleaned) as {
+      score?: number
+      matchedSkillId?: string | null
+      rationale?: string
+    }
+    const score = Math.max(0, Math.min(1, Number(parsed.score) || 0))
+    return {
+      score,
+      rationale: String(parsed.rationale ?? '').slice(0, 200),
+      matchedSkillId:
+        typeof parsed.matchedSkillId === 'string' && parsed.matchedSkillId.trim().length > 0
+          ? parsed.matchedSkillId
+          : null
+    }
+  } catch (err) {
+    void err
+    return null
+  }
+}
+
+async function judgeRecallAll(
+  traits: PersonaTrait[],
+  skills: MemoryItem[],
+  llm: LLMClient
+): Promise<{ traits: TraitRecallEntry[]; fraction: number; judgeFailed: number }> {
+  // Threshold: LLM judge score >= 0.6 counts as a hit (matches the natural
+  // 0.7-0.9 "明显覆盖" range, with a small buffer for borderline cases).
+  const HIT_THRESHOLD = 0.6
+  let judgeFailed = 0
+  const entries: TraitRecallEntry[] = []
+  for (const trait of traits) {
+    const judge = await judgeRecallForTrait(trait, skills, llm)
+    if (!judge) {
+      judgeFailed++
+      // Fallback to lexical
+      let best: TraitRecallEntry['bestMatch'] = null
+      for (const s of skills) {
+        const hits = keywordHitCount(`${s.title}\n${s.content}`, trait.keywords)
+        const score = trait.keywords.length > 0 ? hits / trait.keywords.length : 0
+        if (score > 0 && (!best || score > best.score)) {
+          best = { skillId: s.id, skillTitle: s.title, skillContent: s.content, score }
+        }
+      }
+      entries.push({
+        trait,
+        bestMatch: best,
+        hit: !!best && best.score >= 0.25
+      })
+      continue
+    }
+    const matched = judge.matchedSkillId
+      ? skills.find((s) => s.id === judge.matchedSkillId)
+      : null
+    const best: TraitRecallEntry['bestMatch'] = matched
+      ? {
+          skillId: matched.id,
+          skillTitle: matched.title,
+          skillContent: matched.content,
+          score: judge.score
+        }
+      : null
+    entries.push({
+      trait,
+      bestMatch: best,
+      hit: judge.score >= HIT_THRESHOLD,
+      judge
+    })
+  }
+  const hits = entries.filter((e) => e.hit).length
+  return {
+    traits: entries,
+    fraction: traits.length > 0 ? hits / traits.length : 0,
+    judgeFailed
+  }
 }
 
 function scorePrecision(
@@ -338,9 +483,17 @@ export async function evaluatePersona(
     }
   }
 
-  // 5. Recall + precision
+  // 5. Recall + precision (lexical) + LLM-judge recall (semantic)
   const recall = scoreRecall(persona.traits, allSkills)
   const precision = scorePrecision(persona.traits, allSkills)
+  let judgeRecall: PersonaEvalResult['judgeRecall'] = null
+  try {
+    judgeRecall = await judgeRecallAll(persona.traits, allSkills, llm)
+  } catch (err) {
+    errors.push(
+      `llm-judge recall failed entirely: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
 
   // 6. Render skill block + measure keyword saturation
   const blockInput = allSkills.slice(0, 5).map((s) => ({
@@ -403,6 +556,7 @@ export async function evaluatePersona(
     summaries,
     extractedSkills: allSkills,
     recall,
+    judgeRecall,
     precision,
     blockRender,
     abCoachComparison: ab,

@@ -120,6 +120,36 @@ function cacheKeyFor(profile: AgentProfile, family: string, baseURL: string | un
   ].join('|')
 }
 
+/**
+ * P15-fix #7 · Global per-invocation max_tokens ceiling.
+ *
+ * Each agent.yaml sets its own `max_tokens` (e.g. report-writer 8000,
+ * BMC generator 4000). With ReAct multi-turn loops accumulating context
+ * across iterations, a runaway loop could push token usage far above
+ * what we ever intend to pay for. This ceiling clamps the *declared*
+ * max_tokens at instantiation time — agent YAMLs above the cap get
+ * silently capped + audit-logged so the misconfig is visible.
+ *
+ * Override via env: AGENT_MAX_TOKENS_CEILING=12000 (default 10000).
+ */
+const AGENT_MAX_TOKENS_CEILING = Number(process.env.AGENT_MAX_TOKENS_CEILING ?? 10000)
+
+function clampMaxTokens(profile: AgentProfile): number | undefined {
+  const declared = profile.max_tokens
+  if (declared == null) return undefined
+  if (declared <= AGENT_MAX_TOKENS_CEILING) return declared
+  auditLogger.warn({
+    action: 'llm-factory.max-tokens-clamped',
+    metadata: {
+      agentId: profile.id,
+      model: profile.model,
+      declared,
+      capped: AGENT_MAX_TOKENS_CEILING
+    }
+  })
+  return AGENT_MAX_TOKENS_CEILING
+}
+
 export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
   const family = detectFamily(profile.model)
   const cfg = readFamilyConfig(family)
@@ -142,6 +172,7 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
 
   const configuration = cfg.baseURL ? { baseURL: cfg.baseURL } : undefined
   const modelKwargs = buildModelKwargs(profile.model)
+  const cappedMaxTokens = clampMaxTokens(profile)
   auditLogger.info({
     action: 'llm-factory.created',
     metadata: {
@@ -150,7 +181,8 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
       family,
       source: cfg.source,
       hasBaseURL: Boolean(cfg.baseURL),
-      hasThinking: Boolean(modelKwargs)
+      hasThinking: Boolean(modelKwargs),
+      maxTokens: cappedMaxTokens ?? null
     }
   })
 
@@ -158,7 +190,7 @@ export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
     apiKey: cfg.apiKey,
     model: profile.model,
     temperature: profile.temperature,
-    maxTokens: profile.max_tokens,
+    maxTokens: cappedMaxTokens,
     configuration,
     ...(modelKwargs ? { modelKwargs } : {})
   })

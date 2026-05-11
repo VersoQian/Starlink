@@ -312,6 +312,110 @@ async function callDeepSeekJudge(
  * the dimension's canonical id (helps the LLM stay in scope, especially
  * for adjacent-but-not-identical dims like CUSTOMER_SEGMENTS vs CR).
  */
+/**
+ * P15-fix #2 · Multi-judge ensemble (opt-in).
+ *
+ * Single-judge runs swing ±2-3 points across the 27-point yc benchmark
+ * just from LLM temperature variance, blocking us from telling apart real
+ * agent changes (P15 BMC prompt tweaks) vs noise.
+ *
+ * Ensemble: call the same judge K times with different temperatures
+ * (0.0 / 0.3 / 0.6) in parallel, take the median score, and report
+ * disagreement (max - min). Costs 3× tokens but only run when explicitly
+ * opted-in (JUDGE_ENSEMBLE_SIZE=3).
+ *
+ * Why median (not mean): scores are integer 0-3, so a mean smears resolution.
+ * Median with K=3 → exact integer + robust to one outlier voter.
+ */
+const ENSEMBLE_TEMPS = [0.0, 0.3, 0.6] as const
+
+function medianScore(raws: RawJudgeOutput[]): RawJudgeOutput {
+  const sorted = [...raws].sort((a, b) => a.score - b.score)
+  return sorted[Math.floor(sorted.length / 2)]
+}
+
+async function callDeepSeekJudgeWithTemp(
+  rubric: JudgeRubric,
+  dimensionId: BmcDimensionId,
+  temperature: number
+): Promise<RawJudgeOutput> {
+  if (!DEEPSEEK_KEY) {
+    throw new Error('JUDGE: no DEEPSEEK_API_KEY / LLM_API_KEY configured')
+  }
+  const ac = new AbortController()
+  const timeoutId = setTimeout(() => ac.abort(), JUDGE_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${DEEPSEEK_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK_KEY}`
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: JUDGE_SYSTEM_PROMPT },
+          { role: 'user', content: buildJudgeUserMessage(rubric, dimensionId) }
+        ],
+        response_format: { type: 'json_object' },
+        temperature,
+        max_tokens: 400
+      }),
+      signal: ac.signal
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`DeepSeek HTTP ${res.status}: ${text.slice(0, 200)}`)
+    }
+    const json = (await res.json()) as DeepSeekResp
+    if (json.error) throw new Error(`DeepSeek error: ${json.error.message ?? 'unknown'}`)
+    const content = json.choices?.[0]?.message?.content?.trim()
+    if (!content) throw new Error('DeepSeek returned empty content')
+    const stripped = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
+    const parsed = JSON.parse(stripped) as Record<string, unknown>
+    const score = typeof parsed.score === 'number' ? parsed.score : Number(parsed.score)
+    if (!Number.isInteger(score) || score < 0 || score > 3) {
+      throw new Error(`Judge score out of range: ${parsed.score}`)
+    }
+    return {
+      score,
+      rationale: typeof parsed.rationale === 'string' ? parsed.rationale.slice(0, 400) : 'no rationale',
+      covered: Array.isArray(parsed.covered) ? parsed.covered.filter((t) => typeof t === 'string') : [],
+      missed: Array.isArray(parsed.missed) ? parsed.missed.filter((t) => typeof t === 'string') : [],
+      violations: Array.isArray(parsed.violations) ? parsed.violations.filter((t) => typeof t === 'string') : []
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+async function runJudgeEnsemble(
+  rubric: JudgeRubric,
+  dimensionId: BmcDimensionId,
+  ensembleSize: number
+): Promise<JudgeScore> {
+  const temps = ENSEMBLE_TEMPS.slice(0, Math.min(ensembleSize, ENSEMBLE_TEMPS.length))
+  const results = await Promise.allSettled(
+    temps.map((t) => callDeepSeekJudgeWithTemp(rubric, dimensionId, t))
+  )
+  const successes = results
+    .filter((r): r is PromiseFulfilledResult<RawJudgeOutput> => r.status === 'fulfilled')
+    .map((r) => r.value)
+  if (successes.length === 0) {
+    throw new Error('all ensemble judges failed')
+  }
+  const median = medianScore(successes)
+  const scores = successes.map((s) => s.score)
+  const disagreement = Math.max(...scores) - Math.min(...scores)
+  return {
+    score: median.score as 0 | 1 | 2 | 3,
+    rationale: `[ensemble n=${successes.length} med=${median.score} disagree=${disagreement}] ${median.rationale}`,
+    covered: median.covered ?? [],
+    missed: median.missed ?? [],
+    violations: median.violations ?? []
+  }
+}
+
 export async function runJudge(
   rubric: JudgeRubric,
   dimensionId: BmcDimensionId
@@ -320,7 +424,11 @@ export async function runJudge(
   if (heuristicMode || !DEEPSEEK_KEY) {
     return heuristicScore(rubric)
   }
+  const ensembleSize = Number(process.env.JUDGE_ENSEMBLE_SIZE) || 1
   try {
+    if (ensembleSize > 1) {
+      return await runJudgeEnsemble(rubric, dimensionId, ensembleSize)
+    }
     const raw = await callDeepSeekJudge(rubric, dimensionId)
     return {
       score: raw.score as 0 | 1 | 2 | 3,

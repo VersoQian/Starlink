@@ -320,6 +320,18 @@ export function derivePipelineStatus(input: DerivePipelineInput): PipelineStage[
     if (generateStage.status === 'pending') generateStage.status = 'done'
   }
 
+  // Mention-only cascade · @report-writer can produce a report-card without
+  // going through the seminar pipeline (no phase.changed events). In that
+  // case reportStage flips to 'done' but earlier stages stay 'pending',
+  // which looks like the strip is stuck. Mark the earlier-pending stages
+  // as 'skipped' to clearly signal "this was a direct mention, not a
+  // full BMC run".
+  if (reportStage.status === 'done' && !isOrchestratorProcessing) {
+    for (const s of [inputStage, generateStage, reviewStage, synthesizeStage]) {
+      if (s.status === 'pending') s.status = 'skipped'
+    }
+  }
+
   // P13 Bug fix · failure cascade. When the stream failed at stage X,
   // every stage AFTER X is 'skipped' (we'll never get to it), not
   // 'pending' (which would imply we're still queued). Without this,

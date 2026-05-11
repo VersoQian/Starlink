@@ -154,10 +154,13 @@ export async function summarizeCellMarkdown(
 
   let raw = await callLLM(1)
   let summary = postProcess(raw)
+  let retried = false
 
   // Retry once if first attempt is empty / too short — these are the
   // hallmarks of an LLM flake (provider-side timeout, garbled stream).
   if (!summary || summary.length < MIN_SUMMARY_CHARS) {
+    retried = true
+    cellSummarizerTelemetry.retries++
     auditLogger.info({
       action: 'cell-summarizer.distill.retry',
       requestId: opts.traceId,
@@ -172,6 +175,10 @@ export async function summarizeCellMarkdown(
     })
     raw = await callLLM(2)
     summary = postProcess(raw)
+  }
+  cellSummarizerTelemetry.invocations++
+  if (retried && summary && summary.length >= MIN_SUMMARY_CHARS) {
+    cellSummarizerTelemetry.retriesRecovered++
   }
 
   if (!summary) {
@@ -200,6 +207,42 @@ export async function summarizeCellMarkdown(
   })
 
   return summary
+}
+
+/**
+ * Process-local cell-summarizer telemetry. Reset by `resetCellSummarizerTelemetry`
+ * (test only). Exposed for the agent-slo-tracker / health snapshot, so the
+ * frontend health chip can show "0.3% retry rate" alongside the SLO chips.
+ */
+export const cellSummarizerTelemetry = {
+  invocations: 0,
+  retries: 0,
+  retriesRecovered: 0
+}
+
+export function getCellSummarizerSnapshot(): {
+  invocations: number
+  retries: number
+  retriesRecovered: number
+  retryRate: number /* retries / max(1, invocations), 0..1 */
+  recoveryRate: number /* retriesRecovered / max(1, retries), 0..1 */
+} {
+  const inv = cellSummarizerTelemetry.invocations
+  const ret = cellSummarizerTelemetry.retries
+  const rec = cellSummarizerTelemetry.retriesRecovered
+  return {
+    invocations: inv,
+    retries: ret,
+    retriesRecovered: rec,
+    retryRate: inv > 0 ? ret / inv : 0,
+    recoveryRate: ret > 0 ? rec / ret : 0
+  }
+}
+
+export function resetCellSummarizerTelemetry(): void {
+  cellSummarizerTelemetry.invocations = 0
+  cellSummarizerTelemetry.retries = 0
+  cellSummarizerTelemetry.retriesRecovered = 0
 }
 
 /**

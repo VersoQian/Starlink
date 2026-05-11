@@ -27,6 +27,7 @@
     "smoke:report-stream": "pnpm run build && node --env-file=.env dist/scripts/smoke-report-writer-stream.js",
     "smoke:canvas-mutations": "pnpm run build && node --env-file=.env dist/scripts/smoke-canvas-mutations.js",
     "smoke:hitl-pg-cross-instance": "pnpm run build && node --env-file=.env dist/scripts/smoke-hitl-pg-cross-instance.js",
+    "smoke:hitl-restart-concurrent": "pnpm run build && node --env-file=.env dist/scripts/smoke-hitl-restart-concurrent.js",
     "validate:agents": "pnpm run build && node --env-file=.env dist/scripts/validate-agents.js",
     "kb:reembed": "pnpm run build && node --env-file=.env dist/scripts/reembed-kb-chunks.js",
     "kb:seed-bench": "pnpm run build && node --env-file=.env dist/scripts/seed-rag-benchmark-kbs.js",

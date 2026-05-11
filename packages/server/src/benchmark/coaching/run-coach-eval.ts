@@ -36,30 +36,46 @@ function renderReport(results: PersonaEvalResult[]): string {
   lines.push('')
   lines.push('## TL;DR')
   lines.push('')
-  lines.push('| persona | trait recall | skill precision | block kw hits | persona pickup | discovery avoid | sentinel drop |')
+  lines.push('| persona | judge recall | lexical recall | precision | block kw hits | persona pickup | discovery avoid |')
   lines.push('| --- | --- | --- | --- | --- | --- | --- |')
   for (const r of results) {
-    const noSkill = r.abCoachComparison.find((c) => c.scenario === 'no-skill-block')
-    const withSkill = r.abCoachComparison.find((c) => c.scenario === 'with-skill-block')
-    const sentinelDrop =
-      noSkill && withSkill
-        ? `${noSkill.sentinelHits.length} → ${withSkill.sentinelHits.length}`
-        : 'n/a'
     const pickup = r.abMetrics
       ? (r.abMetrics.personaTermPickup >= 0 ? '+' : '') + r.abMetrics.personaTermPickup
       : 'n/a'
     const avoid = r.abMetrics
       ? (r.abMetrics.genericDiscoveryAvoidance >= 0 ? '+' : '') + r.abMetrics.genericDiscoveryAvoidance
       : 'n/a'
+    const judgeCell = r.judgeRecall
+      ? `${pct(r.judgeRecall.fraction)} (${r.judgeRecall.traits.filter((t) => t.hit).length}/${r.persona.traits.length})` +
+        (r.judgeRecall.judgeFailed > 0 ? ` ⚠️${r.judgeRecall.judgeFailed} fallback` : '')
+      : 'n/a'
     lines.push(
-      `| ${r.persona.id} | ${pct(r.recall.fraction)} (${r.recall.traits.filter((t) => t.hit).length}/${r.persona.traits.length}) | ${pct(r.precision.fraction)} (${r.precision.skills.filter((s) => s.justified).length}/${r.precision.skills.length}) | ${r.blockRender.keywordHits}/${r.blockRender.keywordTotal} | ${pickup} | ${avoid} | ${sentinelDrop} |`
+      `| ${r.persona.id} | **${judgeCell}** | ${pct(r.recall.fraction)} (${r.recall.traits.filter((t) => t.hit).length}/${r.persona.traits.length}) | ${pct(r.precision.fraction)} (${r.precision.skills.filter((s) => s.justified).length}/${r.precision.skills.length}) | ${r.blockRender.keywordHits}/${r.blockRender.keywordTotal} | ${pickup} | ${avoid} |`
     )
   }
   lines.push('')
+  // Aggregate across personas (when N >= 2).
+  if (results.length >= 2) {
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length)
+    const judgeRecalls = results.map((r) => r.judgeRecall?.fraction ?? 0)
+    const lexRecalls = results.map((r) => r.recall.fraction)
+    const precisions = results.map((r) => r.precision.fraction)
+    const pickups = results.map((r) => r.abMetrics?.personaTermPickup ?? 0)
+    const avoids = results.map((r) => r.abMetrics?.genericDiscoveryAvoidance ?? 0)
+    lines.push('### Aggregate (N=' + results.length + ')')
+    lines.push('')
+    lines.push(`- **mean judge recall**: ${pct(mean(judgeRecalls))}`)
+    lines.push(`- mean lexical recall: ${pct(mean(lexRecalls))}`)
+    lines.push(`- mean precision: ${pct(mean(precisions))}`)
+    lines.push(`- mean persona pickup: ${mean(pickups).toFixed(2)}`)
+    lines.push(`- mean discovery avoid: ${mean(avoids).toFixed(2)}`)
+    lines.push('')
+  }
   lines.push(
-    '> **persona pickup** = (with-block persona-keyword hits) − (baseline). Positive = personalization showed up. ' +
-      '**discovery avoid** = (baseline generic-discovery hits) − (with-block). Positive = with-block skipped basic background questions. ' +
-      '**sentinel drop** = legacy per-persona sentinel signal (kept for back-compat; rarely fires).'
+    '> **judge recall** = LLM judge (semantic, threshold 0.6) — primary signal. ' +
+      '**lexical recall** = old keyword-density ≥ 0.25 — kept for transparency. ' +
+      '**persona pickup** = (with-block persona-keyword hits) − (baseline). ' +
+      '**discovery avoid** = (baseline generic-discovery hits) − (with-block).'
   )
   lines.push('')
 
@@ -112,8 +128,28 @@ function renderReport(results: PersonaEvalResult[]): string {
     }
     lines.push('')
 
-    // Recall details
-    lines.push('### Trait recall detail')
+    // Recall details — LLM judge (primary)
+    if (r.judgeRecall) {
+      lines.push('### Trait recall — LLM judge (primary)')
+      lines.push('')
+      lines.push('| trait | hit | score | best match | rationale |')
+      lines.push('| --- | --- | --- | --- | --- |')
+      for (const e of r.judgeRecall.traits) {
+        const m = e.bestMatch
+        const skillCell = m ? `**${m.skillTitle}**` : '—'
+        const scoreCell = e.judge ? e.judge.score.toFixed(2) : 'lex'
+        const rationale = e.judge?.rationale ?? '_(fallback to lexical)_'
+        lines.push(`| ${e.trait.label} | ${e.hit ? '✅' : '❌'} | ${scoreCell} | ${skillCell} | ${rationale} |`)
+      }
+      if (r.judgeRecall.judgeFailed > 0) {
+        lines.push('')
+        lines.push(`⚠️ ${r.judgeRecall.judgeFailed} trait(s) fell back to lexical (judge call failed/parse error)`)
+      }
+      lines.push('')
+    }
+
+    // Recall details — lexical (kept for transparency)
+    lines.push('### Trait recall — lexical (legacy)')
     lines.push('')
     lines.push('| trait | hit | best match (score) |')
     lines.push('| --- | --- | --- |')
@@ -197,8 +233,9 @@ async function main() {
   for (const p of personas) {
     console.error(`  · ${p.id} ...`)
     const r = await evaluatePersona(p)
+    const judgeStr = r.judgeRecall ? pct(r.judgeRecall.fraction) : 'n/a'
     console.error(
-      `    recall=${pct(r.recall.fraction)} precision=${pct(r.precision.fraction)} block=${r.blockRender.keywordHits}/${r.blockRender.keywordTotal}`
+      `    judge-recall=${judgeStr} lex-recall=${pct(r.recall.fraction)} precision=${pct(r.precision.fraction)} block=${r.blockRender.keywordHits}/${r.blockRender.keywordTotal}`
     )
     results.push(r)
   }

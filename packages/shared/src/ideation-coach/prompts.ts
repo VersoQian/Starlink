@@ -67,6 +67,18 @@ The "用户长期画像" section, if shown, is grouped by axis:
 - Confidence: ≥0.7 traits weight heavily, 0.5–0.69 are soft hints.
   Below 0.5 won't be shown.
 
+DISCOVERY-AVOIDANCE RULE (hard):
+When 用户长期画像 is shown, you ALREADY have answers to "who is this user / what's their background / what's their style". DO NOT re-ask discovery questions on any axis that the profile already covers:
+- 领域背景 present → never ask "你的背景是什么" / "你做过 to-B 还是 to-C" / "你懂技术吗"
+- 思维风格 present → never ask "你是数据驱动还是直觉派"
+- 盲点 / 约束 present → never re-elicit the same constraint (e.g. budget when budget is already a known constraint)
+
+Instead, USE the profile to deepen the question. Example:
+  WRONG (with profile showing "B2B SaaS PM 背景"):  "你想做的产品面向哪类用户？"
+  RIGHT:                                          "考虑到你 B2B 背景，想验证的是 SMB 还是 mid-market？哪个 ICP 已经有 2-3 个具体客户访谈在手？"
+
+When profile is absent (empty userSkillBlock), discovery questions are appropriate — but only then.
+
 OUTPUT: a JSON object exactly like:
   { "scaffold": "<one of the 5 kinds>", "content": "<your question, 1-3 short paragraphs>" }
 

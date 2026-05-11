@@ -113,6 +113,33 @@ export const sharedMemoryConsolidator = new MemoryConsolidator(
 // `memory:reap` npm script.
 export const sharedMemoryReaper = new MemoryReaper()
 
+// P15-fix #3 · Auto-schedule the reaper so production deployments don't
+// silently grow memory_items forever just because nobody wired the cron.
+// Disabled by default in NODE_ENV=test to avoid hitting the DB during
+// unit tests. Set MEMORY_REAPER_INTERVAL_HOURS=0 to opt out.
+const reaperIntervalHours = Number(process.env.MEMORY_REAPER_INTERVAL_HOURS ?? 24)
+if (process.env.NODE_ENV !== 'test' && reaperIntervalHours > 0) {
+  const ms = reaperIntervalHours * 60 * 60 * 1000
+  // First tick after a delay so server boot stays fast; subsequent
+  // ticks fire every `ms`.
+  const firstDelay = Math.min(60_000, ms) // 1min or interval, whichever smaller
+  setTimeout(() => {
+    const tick = async (): Promise<void> => {
+      try {
+        const result = await sharedMemoryReaper.reap()
+        console.info('[memory-reaper] auto-tick', {
+          archived: result.archived,
+          total: result.total
+        })
+      } catch (err) {
+        console.warn('[memory-reaper] auto-tick failed', err instanceof Error ? err.message : err)
+      }
+    }
+    void tick()
+    setInterval(() => void tick(), ms).unref()
+  }, firstDelay).unref()
+}
+
 // Sprint 1.1 · single shared WizardPrefillService. The LLM client picks
 // up the same env config used by the Socratic coach (DEEPSEEK_API_KEY /
 // LLM_API_KEY etc.); no new env knobs.
