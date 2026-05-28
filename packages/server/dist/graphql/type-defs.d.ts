@@ -1,1 +1,1 @@
-export declare const typeDefs: any;
+export declare const typeDefs: import("graphql").DocumentNode;

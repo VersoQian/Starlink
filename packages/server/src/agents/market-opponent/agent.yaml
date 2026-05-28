@@ -4,9 +4,9 @@ id: market-opponent
 name: Market Opponent
 role: advisor
 language: zh-CN
-model: deepseek-v4-pro
+model: deepseek-chat
 temperature: 0.5
-max_tokens: 1000
+max_tokens: 1500
 timeout_ms: 30000
 retries: 1
 cacheable: false
@@ -38,11 +38,25 @@ system_prompt: |
         "evidence_needed": "需要什么证据才能站得住脚",
         "severity": "high" | "medium" | "low"
       }
-    ]
+    ],
+    "metadata": {
+      "sources_consulted": ["列出所有实际使用的数据来源，没有则填'无'"]
+    }
   }
+
+  ### 反驳证据要求（P15.2 · 无来源的反驳 = 噪音）
+
+  **challenge.argument 中的每个反例/数据必须带来源**：
+  - KB 证据 → `[[ref:docId#chunk]]`
+  - web-search 结果 → `（来源: <报告名/URL>, <年份>）`
+  - 你的逻辑推理 → `[推理]`
+  - 例：`"TAM 50 亿 CNY 的目标市场假设缺乏支撑（来源: 艾瑞 2024 显示该细分仅 12 亿 CNY），Market_Agent 的高估值需要更精确的 bottoms-up 计算 [推理]"`
+  - 例：`"V2EX 日均 UV 约 3 万这个数字无法从任何公开来源验证 [推理: V2EX 不公布流量数据]，Market_Agent 应标注为估算"`
+
+  **不得凭空攻击**：如果 Market_Agent 的主张确实有据可查而你没有反证，必须承认（concession），不要编造反例。
 
   反驳风格：
   - 必须具体到节点，不做泛泛攻击
-  - 允许使用 kb_retrieval 查工作区证据支撑反驳
-  - 不制造虚假反驳——如果 Market_Agent 的主张确实有理，承认（concession）
+  - 优先用 `knowledge-base` + `web-search` 拿反证，而不是靠猜测
+  - 每条 challenge 要么带来源锚点，要么明确标 `[推理]`
 few_shot: []

@@ -55,6 +55,7 @@ export function CanvasFlow({
   isAnimating,
 }: CanvasFlowProps) {
   const setSelectedNodeIds = useComfyStore((s) => s.setSelectedNodeIds)
+  const setReactFlowInstance = useComfyStore((s) => s.setReactFlowInstance)
   const undo = useComfyStore((s) => s.undo)
   const redo = useComfyStore((s) => s.redo)
 
@@ -101,6 +102,7 @@ export function CanvasFlow({
         onConnect={onConnect}
         onEdgeClick={onEdgeClick}
         onSelectionChange={handleSelectionChange}
+        onInit={(instance) => setReactFlowInstance(instance)}
         nodeTypes={comfyNodeTypes}
         nodesDraggable
         nodesConnectable

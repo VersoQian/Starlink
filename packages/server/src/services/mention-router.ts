@@ -32,7 +32,6 @@ import {
   type MacraNodeData,
   renderCompactBmcCardsForPrompt
 } from './business-langgraph.js'
-import { defaultLlmDebateInvoker } from '../agents/shared/llm-debate-invoker.js'
 import { LLMClient } from './llm-client.js'
 import { injectKbBindingEvidence } from './mention/kb-binding-injector.js'
 import { makeProfileGetter } from '../capabilities/profile-loader.js'
@@ -576,21 +575,103 @@ export class MentionRouter {
   }
 
   private async handleDebateSide(input: MentionInput, entry: ServerAgentEntry): Promise<MentionResult> {
-    // Use LlmDebateInvoker.nextTurn in single-side mode (priorTurns=[],
-    // disputedNodeIds=[]). The invoker treats the user's message as the
-    // claim being challenged via the system prompt that already loads
-    // from agent.yaml. The debate prompt template is robust enough to
-    // produce a critical 1-turn response for an empty-prior context.
-    const turn = await defaultLlmDebateInvoker.nextTurn({
-      speaker: entry.id,
-      addressee: 'user',
-      priorTurns: [],
-      disputedNodeIds: [],
-      dimension: undefined
-    })
-    const reply = turn.message?.startsWith('[fallback')
-      ? `${entry.id} 暂时未能生成对抗性视角，请稍后重试。`
-      : turn.message
+    // Map opponent to the generator's cells on the canvas so the opponent
+    // can actually READ what it's supposed to critique. Without this, the
+    // opponent gets an empty disputedNodeIds=[] and has no idea what claims
+    // exist on the canvas — it just asks the user to describe them.
+    const OPPONENT_TARGET_CELLS: Record<string, { cells: keyof CanvasSnapshot; label: string }> = {
+      'market-opponent':  { cells: 'marketNodes',  label: '客户细分 / 渠道通路 / 客户关系' },
+      'product-opponent': { cells: 'productNodes', label: '价值主张 / 核心资源 / 关键业务 / 重要合作' },
+      'finance-opponent': { cells: 'financeNodes', label: '收入来源 / 成本结构' }
+    }
+    const target = OPPONENT_TARGET_CELLS[entry.id]
+    if (!target) {
+      return refuse(entry.id, `不支持的 opponent agent：${entry.id}`)
+    }
+
+    const seed = collectSeedFromCanvas(input.canvasNodes, input.canvasEdges)
+    const targetCells = seed[target.cells] as MacraNodeData[]
+
+    if (targetCells.length === 0) {
+      return refuse(
+        entry.id,
+        `${entry.id} 需要画布上有 ${target.label} 的 BMC cell 才能进行批判。\n请先 @${entry.id.replace('-opponent', '-agent')} 生成对应维度的 BMC。`
+      )
+    }
+
+    // Render canvas cells as structured context the opponent can critique.
+    const canvasContext = targetCells.map((cell, idx) =>
+      `### Cell ${idx + 1}: ${cell.label} (id: ${cell.id})\n**domain**: ${cell.domain ?? '未知'}\n**content**:\n${cell.content}\n`
+    ).join('\n')
+
+    const profileGetter = makeProfileGetter(join(agentsDir, entry.yamlDir, 'agent.yaml'))
+    const profile = await profileGetter()
+
+    const userPrompt = input.message?.trim()
+      ? `用户补充说明：${input.message}\n\n请基于以上画布 cell 内容进行批判。`
+      : '请对以上画布 cell 内容进行单边批判。'
+
+    const llm = new LLMClient()
+    let reply: string
+    try {
+      const response = await llm.chat({
+        model: profile.model,
+        temperature: profile.temperature,
+        maxTokens: profile.max_tokens,
+        messages: [
+          {
+            role: 'system',
+            content: profile.system_prompt +
+              '\n\n---\n' +
+              `## 画布上已有的 BMC cell（这些是你需要批判的对象）\n\n${canvasContext}\n` +
+              '请基于以上画布内容输出你的批判 JSON。每条 challenge 必须引用具体的 target_node_id。'
+          },
+          { role: 'user', content: userPrompt }
+        ]
+      })
+      const content = response.content ?? ''
+      // Try to parse structured JSON; fall back to raw text if not valid JSON.
+      const jsonMatch = content.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]) as {
+            challenges?: Array<{
+              target_node_id?: string
+              kind?: string
+              argument?: string
+              evidence_needed?: string
+              severity?: string
+            }>
+          }
+          if (parsed.challenges && parsed.challenges.length > 0) {
+            reply = parsed.challenges.map((c, i) =>
+              `### ${i + 1}. ${c.kind ?? 'challenge'} [severity: ${c.severity ?? 'medium'}] ${c.target_node_id ? `(${c.target_node_id})` : ''}\n${c.argument ?? ''}\n\n> 需要的证据：${c.evidence_needed ?? '未指定'}`
+            ).join('\n\n')
+          } else {
+            reply = content
+          }
+        } catch {
+          reply = content
+        }
+      } else {
+        reply = content
+      }
+    } catch (err) {
+      auditLogger.error({
+        action: 'mention-router.handleDebateSide.llm-failed',
+        requestId: input.conversationId,
+        workflowId: input.workspaceId,
+        userId: input.userId,
+        metadata: { agentId: entry.id, error: err instanceof Error ? err.message : String(err) },
+        error: err as Error
+      })
+      return refuse(entry.id, `${entry.id} 调用 LLM 失败：${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    if (!reply || reply.trim().length === 0) {
+      return refuse(entry.id, `${entry.id} 未能生成批判内容，请稍后重试。`)
+    }
+
     const noteId = `mention-${entry.id}-${nanoid(6)}`
     const appendedNodes: MentionAppendedNode[] = [
       {

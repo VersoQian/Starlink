@@ -58,7 +58,21 @@ export declare class ConversationStore {
     }): Promise<ConversationRecord>;
     getConversation(id: string, userId?: string): Promise<ConversationRecord | null>;
     listConversationRuntimeEvents(workspaceId: string, userId: string, conversationId?: string): Promise<ConversationEvent[]>;
-    listConversationSessions(workspaceId: string, userId: string, limit?: number): Promise<ConversationSession[]>;
+    listConversationSessions(workspaceId: string, userId: string, limit?: number): Promise<{
+        status: "running" | "failed" | "completed" | "archived";
+        title: string;
+        id: string;
+        workspaceId: string;
+        createdAt: string;
+        updatedAt: string;
+        latestQuestion: string | null;
+        userId: string;
+        contextSnapshot: Record<string, unknown>;
+        completedAt: string | null;
+        heartbeatAt?: string | null | undefined;
+        ownerPid?: string | null | undefined;
+        failureReason?: string | null | undefined;
+    }[]>;
     listConversationMessages(workspaceId: string, userId: string, conversationId: string, limit?: number): Promise<ConversationMessage[]>;
     listWorkspaceMemories(workspaceId: string, userId: string, options?: {
         query?: string | null;

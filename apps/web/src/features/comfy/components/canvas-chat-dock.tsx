@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, Send, Sparkles, X, ArrowRight, Copy, RefreshCw, Check } from 'lucide-react'
+import { MessageCircle, Send, Sparkles, X, ArrowRight, Copy, RefreshCw, Check, Crosshair } from 'lucide-react'
 import { useComfyStore } from '../store'
 import { useResizableDrawer, ResizeHandle } from '@/shared/hooks/use-resizable-drawer'
 import { CanvasUserSkillChip } from './canvas-user-skill-chip'
@@ -44,10 +44,12 @@ function MessageActions({
   content,
   mentionedAgent,
   onRegen,
+  onFocus,
 }: {
   content: string
   mentionedAgent: string | undefined
   onRegen?: () => void
+  onFocus?: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const onCopy = () => {
@@ -61,6 +63,17 @@ function MessageActions({
     <div className="mt-1 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
          style={{ opacity: 0.5 }}
     >
+      {onFocus ? (
+        <button
+          type="button"
+          onClick={onFocus}
+          className="flex items-center gap-1 font-mono text-[9px] tabular-nums text-stratum-muted hover:text-stratum-blue transition-colors uppercase tracking-[0.12em]"
+          aria-label="定位到画布"
+          title="定位到画布上的相关节点"
+        >
+          <Crosshair className="h-3 w-3" strokeWidth={1.75} /> 定位
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onCopy}
@@ -86,12 +99,30 @@ function MessageActions({
   )
 }
 
+/** agentId → agent_signature mapping for canvas node matching. */
+const AGENT_SIGNATURE_MAP: Record<string, string> = {
+  'market-agent': 'Market_Agent',
+  'market-opponent': 'Market_Agent',
+  'product-agent': 'Product_Agent',
+  'product-opponent': 'Product_Agent',
+  'finance-agent': 'Finance_Agent',
+  'finance-opponent': 'Finance_Agent',
+  'critic-agent': 'Adversarial_Critic',
+  'report-writer': 'Report_Writer',
+  'synthesizer': 'Synthesizer',
+  'general-responder': 'Orchestrator',
+  'deep-research': 'Orchestrator',
+  'moderator': 'Moderator',
+}
+
 export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId }: Props) {
   const chatInput = useComfyStore((s) => s.chatInput)
   const setChatInput = useComfyStore((s) => s.setChatInput)
   const chatMessages = useComfyStore((s) => s.chatMessages)
   const isProcessing = useComfyStore((s) => s.isOrchestratorProcessing)
   const chatReflecting = useComfyStore((s) => s.chatReflecting)
+  const nodes = useComfyStore((s) => s.nodes)
+  const focusOnNodes = useComfyStore((s) => s.focusOnNodes)
   // Count BMC cells already on the canvas. Used to neutralise the
   // "探索完毕 · 开始生成 BMC" CTA after a successful generation — the
   // backend handler also refuses re-fires, but suppressing the button
@@ -383,37 +414,52 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
                   >
                     {isUser ? (
                       <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                    ) : (
-                      // Route assistant messages through the renderer
-                      // registry. Agents with dedicated renderers (critic /
-                      // deep-research / moderator) get structured output;
-                      // others fall through to default markdown.
-                      renderAgentOutput({
-                        surface: 'chat',
-                        content: msg.content || '',
-                        agentId: mEx.mentionedAgent,
-                      })
-                    )}
+                    ) : (() => {
+                      // Compute matching canvas node IDs for this agent.
+                      // Used by both renderAgentOutput (single-node focus via
+                      // renderer chips) and the "定位" button (bulk focus).
+                      const sig = mEx.mentionedAgent ? AGENT_SIGNATURE_MAP[mEx.mentionedAgent] : undefined
+                      const matchingNodeIds = sig
+                        ? nodes.filter((n) => {
+                            const meta = (n.data as { meta?: { metadata?: { agent_signature?: string } } })?.meta
+                            return meta?.metadata?.agent_signature === sig
+                          }).map((n) => n.id)
+                        : []
+                      const handleFocusNode = (nodeId: string) => focusOnNodes([nodeId])
+                      const handleFocusAll = matchingNodeIds.length > 0
+                        ? () => focusOnNodes(matchingNodeIds)
+                        : undefined
+                      return (
+                        <>
+                          {renderAgentOutput({
+                            surface: 'chat',
+                            content: msg.content || '',
+                            agentId: mEx.mentionedAgent,
+                            onFocusNode: handleFocusNode,
+                          })}
+                          {/* Per-message actions for assistant turns: Copy + 定位 + Regenerate */}
+                          <MessageActions
+                            content={msg.content}
+                            mentionedAgent={mEx.mentionedAgent}
+                            onFocus={handleFocusAll}
+                            onRegen={mEx.mentionedAgent ? () => {
+                              // Regen: find the user message immediately preceding
+                              // this assistant message in chat history and re-call
+                              // mentionAgent with the same agent + prompt.
+                              const prev = chatMessages[idx - 1]
+                              if (!prev || prev.role !== 'user') return
+                              const userMsg = prev.content
+                              // user content for mention is "@<id> <body>" — strip prefix
+                              const stripped = userMsg.replace(/^@[a-z][a-z0-9-]+\s+/i, '')
+                              const mention = useComfyStore.getState().mentionAgent
+                              void mention(mEx.mentionedAgent!, stripped)
+                            } : undefined}
+                          />
+                        </>
+                      )
+                    })()}
                   </div>
-                  {/* Per-message actions for assistant turns: Copy + Regenerate */}
-                  {!isUser ? (
-                    <MessageActions
-                      content={msg.content}
-                      mentionedAgent={mEx.mentionedAgent}
-                      onRegen={mEx.mentionedAgent ? () => {
-                        // Regen: find the user message immediately preceding
-                        // this assistant message in chat history and re-call
-                        // mentionAgent with the same agent + prompt.
-                        const prev = chatMessages[idx - 1]
-                        if (!prev || prev.role !== 'user') return
-                        const userMsg = prev.content
-                        // user content for mention is "@<id> <body>" — strip prefix
-                        const stripped = userMsg.replace(/^@[a-z][a-z0-9-]+\s+/i, '')
-                        const mention = useComfyStore.getState().mentionAgent
-                        void mention(mEx.mentionedAgent!, stripped)
-                      } : undefined}
-                    />
-                  ) : null}
+                  {/* Per-message actions for user turns are empty */}
                 </div>
               </div>
             )

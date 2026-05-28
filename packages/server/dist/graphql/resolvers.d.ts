@@ -3,28 +3,186 @@ import type { FlowDefinition } from '@starlink/shared';
 import type { GraphQLContext } from '../context/index.js';
 import type { CanvasNode } from '@starlink/shared';
 export declare const resolvers: {
-    JSON: any;
+    JSON: typeof GraphQLJSON;
     Query: {
         workspaceGraph: (_: unknown, args: {
             workspaceId: string;
-        }, ctx: GraphQLContext) => Promise<CanvasGraph>;
+        }, ctx: GraphQLContext) => Promise<{
+            workspaceId: string;
+            nodes: {
+                type: "note" | "document" | "task" | "reference" | "image" | "web";
+                id: string;
+                position: {
+                    x: number;
+                    y: number;
+                };
+                data: {
+                    type: "note";
+                    title: string;
+                    content: string;
+                    status?: string | undefined;
+                    subtitle?: string | undefined;
+                    bullets?: string[] | undefined;
+                    variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                    footerText?: string | undefined;
+                    category?: string | undefined;
+                    subCategory?: string | undefined;
+                    meta?: Record<string, unknown> | undefined;
+                } | {
+                    type: "document";
+                    title: string;
+                    summary: string;
+                    references: number;
+                    points?: string[] | undefined;
+                } | {
+                    type: "task";
+                    status: "todo" | "in-progress" | "done";
+                    title: string;
+                    assignee?: string | undefined;
+                    dueDate?: string | undefined;
+                } | {
+                    type: "reference";
+                    title: string;
+                    source: string;
+                    location: string;
+                } | {
+                    type: "image";
+                    title: string;
+                    url: string;
+                } | {
+                    type: "web";
+                    title: string;
+                    url: string;
+                    description?: string | undefined;
+                };
+            }[];
+            edges: {
+                source: string;
+                id: string;
+                target: string;
+                label?: string | null | undefined;
+                kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
+            }[];
+        }>;
         conversation: (_: unknown, args: {
             id: string;
         }, ctx: GraphQLContext) => Promise<{
-            metadata: any;
-            graph: CanvasGraph;
-            knowledgeEvidence: KnowledgeEvidence[];
-            citations: CardCitation[];
+            metadata: {
+                createdAt: string;
+                updatedAt: string;
+                status: "idle" | "running" | "paused" | "failed" | "completed";
+                id: string;
+                latestQuestion?: string | undefined;
+            };
+            graph: {
+                workspaceId: string;
+                nodes: {
+                    type: "note" | "document" | "task" | "reference" | "image" | "web";
+                    id: string;
+                    position: {
+                        x: number;
+                        y: number;
+                    };
+                    data: {
+                        type: "note";
+                        title: string;
+                        content: string;
+                        status?: string | undefined;
+                        subtitle?: string | undefined;
+                        bullets?: string[] | undefined;
+                        variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                        footerText?: string | undefined;
+                        category?: string | undefined;
+                        subCategory?: string | undefined;
+                        meta?: Record<string, unknown> | undefined;
+                    } | {
+                        type: "document";
+                        title: string;
+                        summary: string;
+                        references: number;
+                        points?: string[] | undefined;
+                    } | {
+                        type: "task";
+                        status: "todo" | "in-progress" | "done";
+                        title: string;
+                        assignee?: string | undefined;
+                        dueDate?: string | undefined;
+                    } | {
+                        type: "reference";
+                        title: string;
+                        source: string;
+                        location: string;
+                    } | {
+                        type: "image";
+                        title: string;
+                        url: string;
+                    } | {
+                        type: "web";
+                        title: string;
+                        url: string;
+                        description?: string | undefined;
+                    };
+                }[];
+                edges: {
+                    source: string;
+                    id: string;
+                    target: string;
+                    label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
+                }[];
+            };
+            knowledgeEvidence: {
+                docId: string;
+                score: number;
+                snippet: string;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
+            citations: {
+                cardId: string;
+                fieldName: "title" | "content" | "summary";
+                spans: {
+                    textStart: number;
+                    textEnd: number;
+                    refs: {
+                        docId: string;
+                        snippetId: string;
+                        evidenceId: string;
+                    }[];
+                }[];
+            }[];
         } | null>;
         conversationSessions: (_: unknown, args: {
             workspaceId: string;
             limit?: number | null;
-        }, ctx: GraphQLContext) => Promise<any[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "running" | "failed" | "completed" | "archived";
+            title: string;
+            id: string;
+            workspaceId: string;
+            createdAt: string;
+            updatedAt: string;
+            latestQuestion: string | null;
+            userId: string;
+            contextSnapshot: Record<string, unknown>;
+            completedAt: string | null;
+            heartbeatAt?: string | null | undefined;
+            ownerPid?: string | null | undefined;
+            failureReason?: string | null | undefined;
+        }[]>;
         conversationMessages: (_: unknown, args: {
             workspaceId: string;
             conversationId: string;
             limit?: number | null;
-        }, ctx: GraphQLContext) => Promise<any[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            content: string;
+            id: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            conversationId: string;
+            createdAt: string;
+            userId: string | null;
+            role: "user" | "assistant" | "system" | "tool";
+        }[]>;
         cardsReferencingEvidence: (_: unknown, args: {
             conversationId: string;
             evidenceId: string;
@@ -35,7 +193,28 @@ export declare const resolvers: {
             scope?: string | null;
             kind?: string | null;
             limit?: number | null;
-        }, ctx: GraphQLContext) => Promise<any[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            kind: "summary" | "decision" | "user-skill" | "canvas";
+            workspaceId: string;
+            confidence: number;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+            category?: string | undefined;
+            layer?: "user" | "session" | "workspace" | "global" | undefined;
+            facet?: "episodic" | "semantic" | "procedural" | undefined;
+        }[]>;
         /**
          * P2 · myMemories — user-scoped memory list. Always filters by
          * ctx.userId (no override possible). Returns rows where:
@@ -51,7 +230,28 @@ export declare const resolvers: {
             kind?: string | null;
             query?: string | null;
             limit?: number | null;
-        }, ctx: GraphQLContext) => Promise<any[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            kind: "summary" | "decision" | "user-skill" | "canvas";
+            workspaceId: string;
+            confidence: number;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+            category?: string | undefined;
+            layer?: "user" | "session" | "workspace" | "global" | undefined;
+            facet?: "episodic" | "semantic" | "procedural" | undefined;
+        }[]>;
         /**
          * P2 · myKnowledgeEvidence — reverse-lookup of "AI cited which KB
          * chunks for me, where". Scans memory_items.metadata->>'knowledgeEvidence'
@@ -80,9 +280,9 @@ export declare const resolvers: {
             schemaVersion: number;
             exportedAt: string;
             userId: string;
-            sessions: GraphQLJSON[];
-            messages: GraphQLJSON[];
-            memoryItems: GraphQLJSON[];
+            sessions: import("@starlink/shared").ConversationSession[];
+            messages: import("@starlink/shared").ConversationMessage[];
+            memoryItems: import("@starlink/shared").MemoryItem[];
             knowledgeBases: Array<Record<string, unknown>>;
             knowledgeDocuments: Array<Record<string, unknown>>;
         }>;
@@ -91,7 +291,56 @@ export declare const resolvers: {
             conversationId?: string | null;
             query: string;
             kbId?: string | null;
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            workspaceId: string;
+            conversationId: string | null;
+            query: string;
+            builtAt: string;
+            canvasSummary: {
+                nodeCount: number;
+                edgeCount: number;
+                highlights: string[];
+            };
+            recentMessages: {
+                content: string;
+                id: string;
+                workspaceId: string;
+                metadata: Record<string, unknown>;
+                conversationId: string;
+                createdAt: string;
+                userId: string | null;
+                role: "user" | "assistant" | "system" | "tool";
+            }[];
+            memories: {
+                title: string;
+                content: string;
+                id: string;
+                kind: "summary" | "decision" | "user-skill" | "canvas";
+                workspaceId: string;
+                confidence: number;
+                metadata: Record<string, unknown>;
+                createdAt: string;
+                updatedAt: string;
+                userId: string | null;
+                scope: "user" | "workspace";
+                sourceType: string;
+                sourceId: string | null;
+                importance: number;
+                tags: string[];
+                lastUsedAt: string | null;
+                archivedAt: string | null;
+                category?: string | undefined;
+                layer?: "user" | "session" | "workspace" | "global" | undefined;
+                facet?: "episodic" | "semantic" | "procedural" | undefined;
+            }[];
+            knowledgeEvidence: {
+                docId: string;
+                score: number;
+                snippet: string;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
+            promptBlock: string;
+        }>;
         /**
          * Runtime event backfill for WS subscription gap-fill.
          *
@@ -116,7 +365,218 @@ export declare const resolvers: {
             workspaceId: string;
             conversationId?: string | null;
             sinceCursor?: number | null;
-        }, ctx: GraphQLContext) => Promise<ConversationEvent[]>;
+        }, ctx: GraphQLContext) => Promise<({
+            type: "graph/appended";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                nodes: {
+                    type: "note" | "document" | "task" | "reference" | "image" | "web";
+                    id: string;
+                    position: {
+                        x: number;
+                        y: number;
+                    };
+                    data: {
+                        type: "note";
+                        title: string;
+                        content: string;
+                        status?: string | undefined;
+                        subtitle?: string | undefined;
+                        bullets?: string[] | undefined;
+                        variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                        footerText?: string | undefined;
+                        category?: string | undefined;
+                        subCategory?: string | undefined;
+                        meta?: Record<string, unknown> | undefined;
+                    } | {
+                        type: "document";
+                        title: string;
+                        summary: string;
+                        references: number;
+                        points?: string[] | undefined;
+                    } | {
+                        type: "task";
+                        status: "todo" | "in-progress" | "done";
+                        title: string;
+                        assignee?: string | undefined;
+                        dueDate?: string | undefined;
+                    } | {
+                        type: "reference";
+                        title: string;
+                        source: string;
+                        location: string;
+                    } | {
+                        type: "image";
+                        title: string;
+                        url: string;
+                    } | {
+                        type: "web";
+                        title: string;
+                        url: string;
+                        description?: string | undefined;
+                    };
+                }[];
+                edges: {
+                    source: string;
+                    id: string;
+                    target: string;
+                    label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
+                }[];
+            };
+        } | {
+            type: "graph/diff";
+            conversationId: string;
+            payload: {
+                nodes?: {
+                    type: "note" | "document" | "task" | "reference" | "image" | "web";
+                    id: string;
+                    position: {
+                        x: number;
+                        y: number;
+                    };
+                    data: {
+                        type: "note";
+                        title: string;
+                        content: string;
+                        status?: string | undefined;
+                        subtitle?: string | undefined;
+                        bullets?: string[] | undefined;
+                        variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                        footerText?: string | undefined;
+                        category?: string | undefined;
+                        subCategory?: string | undefined;
+                        meta?: Record<string, unknown> | undefined;
+                    } | {
+                        type: "document";
+                        title: string;
+                        summary: string;
+                        references: number;
+                        points?: string[] | undefined;
+                    } | {
+                        type: "task";
+                        status: "todo" | "in-progress" | "done";
+                        title: string;
+                        assignee?: string | undefined;
+                        dueDate?: string | undefined;
+                    } | {
+                        type: "reference";
+                        title: string;
+                        source: string;
+                        location: string;
+                    } | {
+                        type: "image";
+                        title: string;
+                        url: string;
+                    } | {
+                        type: "web";
+                        title: string;
+                        url: string;
+                        description?: string | undefined;
+                    };
+                }[] | undefined;
+                edges?: {
+                    source: string;
+                    id: string;
+                    target: string;
+                    label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
+                }[] | undefined;
+                removedNodeIds?: string[] | undefined;
+                removedEdgeIds?: string[] | undefined;
+            };
+        } | {
+            type: "evidence/updated";
+            conversationId: string;
+            payload: {
+                docId: string;
+                score: number;
+                snippet: string;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
+        } | {
+            type: "card/cited";
+            conversationId: string;
+            payload: {
+                cardId: string;
+                citation: {
+                    cardId: string;
+                    fieldName: "title" | "content" | "summary";
+                    spans: {
+                        textStart: number;
+                        textEnd: number;
+                        refs: {
+                            docId: string;
+                            snippetId: string;
+                            evidenceId: string;
+                        }[];
+                    }[];
+                };
+                groundingRate: number;
+            };
+        } | {
+            type: "status";
+            status: "idle" | "running" | "paused" | "failed" | "completed";
+            conversationId: string;
+            message?: string | undefined;
+        } | {
+            type: "phase.changed";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                phase: "planning" | "execution" | "review" | "decision";
+                occurredAt: string;
+                reason?: string | null | undefined;
+            };
+        } | {
+            type: "seminar.turn.completed";
+            conversationId: string;
+            payload: {
+                title: string;
+                summary: string;
+                workspaceId: string;
+                phase: "planning" | "execution" | "review" | "decision";
+                occurredAt: string;
+                agentId: string;
+                agentName: string;
+                nodeId: string;
+            };
+        } | {
+            type: "seminar.decision.made";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                decision: string;
+                phase: "decision";
+                occurredAt: string;
+            };
+        } | {
+            type: "seminar.decision.requested";
+            conversationId: string;
+            payload: {
+                workspaceId: string;
+                decision: string;
+                phase: "decision";
+                occurredAt: string;
+            };
+        } | {
+            type: "agent/subagent-progress";
+            conversationId: string;
+            payload: {
+                ns: string[];
+                nodeName: string;
+                payloadKeys: string[];
+            };
+        } | {
+            type: "persistence/warning";
+            conversationId: string;
+            payload: {
+                message: string;
+                source: "canvas-graph" | "conversation-summary" | "conversation-completion";
+                severity: "warning" | "error";
+            };
+        })[]>;
         kbTaskStatus: (_: unknown, args: {
             workspaceId: string;
             kbId: string;
@@ -124,8 +584,8 @@ export declare const resolvers: {
             workspaceId: string;
             taskId: string;
             kbId: string;
-            status: GraphQLJSON["status"];
-            taskType: GraphQLJSON["payload"]["taskType"];
+            status: import("@starlink/shared").TaskEvent["status"];
+            taskType: import("@starlink/shared").TaskEvent["payload"]["taskType"];
             error?: string;
             updatedAt: string;
             lastEventId: string;
@@ -171,45 +631,85 @@ export declare const resolvers: {
             query: string;
             topK?: number | null;
         }, ctx: GraphQLContext) => Promise<{
-            docId: any;
-            snippet: any;
-            score: any;
-            metadata: any;
+            docId: string;
+            snippet: string;
+            score: number;
+            metadata: {
+                snippetId: string;
+            };
         }[]>;
-        workspaces: (_: unknown, __: unknown, ctx: GraphQLContext) => Promise<any[]>;
+        workspaces: (_: unknown, __: unknown, ctx: GraphQLContext) => Promise<{
+            type: string;
+            status: "error" | "archived" | "draft" | "active" | "provisioning";
+            workspaceId: string;
+            updatedAt: string;
+            name: string;
+            focus: string;
+            ownerId: string;
+            ownerName: string;
+            members: {
+                id: string;
+                name: string;
+                permissions: string[];
+                role?: string | undefined;
+            }[];
+            viewerPermissions: string[];
+            canManage: boolean;
+        }[]>;
         workspaceAssets: (_: unknown, args: {
             workspaceId: string;
-        }, ctx: GraphQLContext) => Promise<any[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "error" | "archived" | "processing" | "draft" | "ready" | "published";
+            title: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            version: number;
+            assetId: string;
+            assetType: string;
+            sourceModule: string;
+            createdBy: string;
+            content?: unknown;
+            sourceTaskId?: string | null | undefined;
+        }[]>;
         workspaceMetadataHistory: (_: unknown, args: {
             workspaceId: string;
-        }, ctx: GraphQLContext) => Promise<any[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            summary: string;
+            workspaceId: string;
+            version: number;
+            historyId: string;
+            changedBy: string;
+            changedAt: string;
+        }[]>;
         availableTools: (_: unknown, __: unknown, ctx: GraphQLContext) => {
-            name: any;
-            label: any;
-            description: any;
-            category: any;
-            icon: any;
-            color: any;
-            inputSchema: any;
-            outputSchema: any;
-            inputPorts: any;
-            outputPorts: any;
-            runtime: any;
+            name: string;
+            label: string;
+            description: string;
+            category: import("@starlink/shared").ToolCategory;
+            icon: string;
+            color: string;
+            inputSchema: import("@starlink/shared").ToolInputSchema;
+            outputSchema: import("@starlink/shared").ToolOutputSchema;
+            inputPorts: import("@starlink/shared").PortDefinition[];
+            outputPorts: import("@starlink/shared").PortDefinition[];
+            runtime: import("@starlink/shared").ToolRuntimeConfig;
         }[];
         toolByName: (_: unknown, args: {
             name: string;
         }, ctx: GraphQLContext) => {
-            name: any;
-            label: any;
-            description: any;
-            category: any;
-            icon: any;
-            color: any;
-            inputSchema: any;
-            outputSchema: any;
-            inputPorts: any;
-            outputPorts: any;
-            runtime: any;
+            name: string;
+            label: string;
+            description: string;
+            category: import("@starlink/shared").ToolCategory;
+            icon: string;
+            color: string;
+            inputSchema: import("@starlink/shared").ToolInputSchema;
+            outputSchema: import("@starlink/shared").ToolOutputSchema;
+            inputPorts: import("@starlink/shared").PortDefinition[];
+            outputPorts: import("@starlink/shared").PortDefinition[];
+            runtime: import("@starlink/shared").ToolRuntimeConfig;
         } | null;
         flows: (_: unknown, args: {
             workspaceId: string;
@@ -256,7 +756,7 @@ export declare const resolvers: {
             nodeStates: import("../application/execution-store.js").NodeStateRecord[];
             id: string;
             flowId: string;
-            status: GraphQLJSON;
+            status: import("@starlink/shared").ExecutionStatus;
             inputs: Record<string, unknown>;
             state: Record<string, unknown> | null;
             error: string | null;
@@ -269,7 +769,7 @@ export declare const resolvers: {
             nodeStates: never[];
             id: string;
             flowId: string;
-            status: GraphQLJSON;
+            status: import("@starlink/shared").ExecutionStatus;
             inputs: Record<string, unknown>;
             state: Record<string, unknown> | null;
             error: string | null;
@@ -285,7 +785,19 @@ export declare const resolvers: {
     CanvasGraph: {
         citations: (parent: {
             nodes?: CanvasNode[];
-        }) => CardCitation[];
+        }) => {
+            cardId: string;
+            fieldName: "title" | "content" | "summary";
+            spans: {
+                textStart: number;
+                textEnd: number;
+                refs: {
+                    docId: string;
+                    snippetId: string;
+                    evidenceId: string;
+                }[];
+            }[];
+        }[];
     };
     Mutation: {
         startConversation: (_: unknown, args: {
@@ -294,10 +806,89 @@ export declare const resolvers: {
             kbId?: string | null;
             headless?: boolean | null;
         }, ctx: GraphQLContext) => Promise<{
-            metadata: any;
-            graph: CanvasGraph;
-            knowledgeEvidence: KnowledgeEvidence[];
-            citations: CardCitation[];
+            metadata: {
+                createdAt: string;
+                updatedAt: string;
+                status: "idle" | "running" | "paused" | "failed" | "completed";
+                id: string;
+                latestQuestion?: string | undefined;
+            };
+            graph: {
+                workspaceId: string;
+                nodes: {
+                    type: "note" | "document" | "task" | "reference" | "image" | "web";
+                    id: string;
+                    position: {
+                        x: number;
+                        y: number;
+                    };
+                    data: {
+                        type: "note";
+                        title: string;
+                        content: string;
+                        status?: string | undefined;
+                        subtitle?: string | undefined;
+                        bullets?: string[] | undefined;
+                        variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                        footerText?: string | undefined;
+                        category?: string | undefined;
+                        subCategory?: string | undefined;
+                        meta?: Record<string, unknown> | undefined;
+                    } | {
+                        type: "document";
+                        title: string;
+                        summary: string;
+                        references: number;
+                        points?: string[] | undefined;
+                    } | {
+                        type: "task";
+                        status: "todo" | "in-progress" | "done";
+                        title: string;
+                        assignee?: string | undefined;
+                        dueDate?: string | undefined;
+                    } | {
+                        type: "reference";
+                        title: string;
+                        source: string;
+                        location: string;
+                    } | {
+                        type: "image";
+                        title: string;
+                        url: string;
+                    } | {
+                        type: "web";
+                        title: string;
+                        url: string;
+                        description?: string | undefined;
+                    };
+                }[];
+                edges: {
+                    source: string;
+                    id: string;
+                    target: string;
+                    label?: string | null | undefined;
+                    kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
+                }[];
+            };
+            knowledgeEvidence: {
+                docId: string;
+                score: number;
+                snippet: string;
+                metadata?: Record<string, unknown> | undefined;
+            }[];
+            citations: {
+                cardId: string;
+                fieldName: "title" | "content" | "summary";
+                spans: {
+                    textStart: number;
+                    textEnd: number;
+                    refs: {
+                        docId: string;
+                        snippetId: string;
+                        evidenceId: string;
+                    }[];
+                }[];
+            }[];
         }>;
         clearWorkspaceCanvas: (_: unknown, args: {
             workspaceId: string;
@@ -337,7 +928,16 @@ export declare const resolvers: {
                 content: string;
                 metadata?: Record<string, unknown> | null;
             };
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            content: string;
+            id: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            conversationId: string;
+            createdAt: string;
+            userId: string | null;
+            role: "user" | "assistant" | "system" | "tool";
+        }>;
         /**
          * P3 · refreshUserSkills — demand-mode extraction trigger.
          *
@@ -382,7 +982,28 @@ export declare const resolvers: {
                 archive?: boolean | null;
                 feedback?: string | null;
             };
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            kind: "summary" | "decision" | "user-skill" | "canvas";
+            workspaceId: string;
+            confidence: number;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+            category?: string | undefined;
+            layer?: "user" | "session" | "workspace" | "global" | undefined;
+            facet?: "episodic" | "semantic" | "procedural" | undefined;
+        }>;
         createMemoryItem: (_: unknown, args: {
             input: {
                 workspaceId: string;
@@ -397,10 +1018,52 @@ export declare const resolvers: {
                 tags?: string[] | null;
                 metadata?: Record<string, unknown> | null;
             };
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            kind: "summary" | "decision" | "user-skill" | "canvas";
+            workspaceId: string;
+            confidence: number;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+            category?: string | undefined;
+            layer?: "user" | "session" | "workspace" | "global" | undefined;
+            facet?: "episodic" | "semantic" | "procedural" | undefined;
+        }>;
         extractConversationMemory: (_: unknown, args: {
             conversationId: string;
-        }, ctx: GraphQLContext) => Promise<any[]>;
+        }, ctx: GraphQLContext) => Promise<{
+            title: string;
+            content: string;
+            id: string;
+            kind: "summary" | "decision" | "user-skill" | "canvas";
+            workspaceId: string;
+            confidence: number;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            userId: string | null;
+            scope: "user" | "workspace";
+            sourceType: string;
+            sourceId: string | null;
+            importance: number;
+            tags: string[];
+            lastUsedAt: string | null;
+            archivedAt: string | null;
+            category?: string | undefined;
+            layer?: "user" | "session" | "workspace" | "global" | undefined;
+            facet?: "episodic" | "semantic" | "procedural" | undefined;
+        }[]>;
         addNode: (_: unknown, args: {
             workspaceId: string;
             input: {
@@ -412,7 +1075,53 @@ export declare const resolvers: {
                 };
                 data: unknown;
             };
-        }, ctx: GraphQLContext) => Promise<CanvasNode>;
+        }, ctx: GraphQLContext) => Promise<{
+            type: "note" | "document" | "task" | "reference" | "image" | "web";
+            id: string;
+            position: {
+                x: number;
+                y: number;
+            };
+            data: {
+                type: "note";
+                title: string;
+                content: string;
+                status?: string | undefined;
+                subtitle?: string | undefined;
+                bullets?: string[] | undefined;
+                variant?: "primary" | "list" | "insight" | "timeline-step" | "timeline-dimension" | "timeline-action" | undefined;
+                footerText?: string | undefined;
+                category?: string | undefined;
+                subCategory?: string | undefined;
+                meta?: Record<string, unknown> | undefined;
+            } | {
+                type: "document";
+                title: string;
+                summary: string;
+                references: number;
+                points?: string[] | undefined;
+            } | {
+                type: "task";
+                status: "todo" | "in-progress" | "done";
+                title: string;
+                assignee?: string | undefined;
+                dueDate?: string | undefined;
+            } | {
+                type: "reference";
+                title: string;
+                source: string;
+                location: string;
+            } | {
+                type: "image";
+                title: string;
+                url: string;
+            } | {
+                type: "web";
+                title: string;
+                url: string;
+                description?: string | undefined;
+            };
+        }>;
         connectNodes: (_: unknown, args: {
             workspaceId: string;
             input: {
@@ -421,7 +1130,13 @@ export declare const resolvers: {
                 target: string;
                 label?: string | null;
             };
-        }, ctx: GraphQLContext) => Promise<CanvasEdge>;
+        }, ctx: GraphQLContext) => Promise<{
+            source: string;
+            id: string;
+            target: string;
+            label?: string | null | undefined;
+            kind?: "bmc-structure" | "llm-insight" | "user-drawn" | "revision" | undefined;
+        }>;
         createKnowledgeBase: (_: unknown, args: {
             workspaceId: string;
             name?: string | null;
@@ -494,7 +1209,21 @@ export declare const resolvers: {
                 authorName: string;
                 authorRole?: string | null;
             };
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "error" | "archived" | "processing" | "draft" | "ready" | "published";
+            title: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            version: number;
+            assetId: string;
+            assetType: string;
+            sourceModule: string;
+            createdBy: string;
+            content?: unknown;
+            sourceTaskId?: string | null | undefined;
+        }>;
         savePracticeSession: (_: unknown, args: {
             input: {
                 workspaceId: string;
@@ -518,7 +1247,21 @@ export declare const resolvers: {
                 quickReplies?: string[];
                 lastUpdated?: string | null;
             };
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "error" | "archived" | "processing" | "draft" | "ready" | "published";
+            title: string;
+            workspaceId: string;
+            metadata: Record<string, unknown>;
+            createdAt: string;
+            updatedAt: string;
+            version: number;
+            assetId: string;
+            assetType: string;
+            sourceModule: string;
+            createdBy: string;
+            content?: unknown;
+            sourceTaskId?: string | null | undefined;
+        }>;
         createFlow: (_: unknown, args: {
             workspaceId: string;
             name: string;
@@ -575,7 +1318,7 @@ export declare const resolvers: {
             nodeStates: never[];
             id: string;
             flowId: string;
-            status: GraphQLJSON;
+            status: import("@starlink/shared").ExecutionStatus;
             inputs: Record<string, unknown>;
             state: Record<string, unknown> | null;
             error: string | null;
@@ -598,7 +1341,24 @@ export declare const resolvers: {
                     permissions: string[];
                 }>;
             };
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            type: string;
+            status: "error" | "archived" | "draft" | "active" | "provisioning";
+            workspaceId: string;
+            updatedAt: string;
+            name: string;
+            focus: string;
+            ownerId: string;
+            ownerName: string;
+            members: {
+                id: string;
+                name: string;
+                permissions: string[];
+                role?: string | undefined;
+            }[];
+            viewerPermissions: string[];
+            canManage: boolean;
+        }>;
         reflectOnIdeation: (_: unknown, args: {
             input: {
                 event: {
@@ -629,9 +1389,9 @@ export declare const resolvers: {
             };
         }, context: GraphQLContext) => Promise<{
             scaffold: string;
-            content: any;
-            source: any;
-            latencyMs: any;
+            content: string;
+            source: "error" | "llm" | "scripted";
+            latencyMs: number | undefined;
         }>;
         processIdeationWizardStep: (_: unknown, args: {
             input: {
@@ -652,7 +1412,17 @@ export declare const resolvers: {
                 }>;
                 workspaceId?: string | null;
             };
-        }, context: GraphQLContext) => Promise<WizardStepResponse>;
+        }, context: GraphQLContext) => Promise<{
+            source: "error" | "llm" | "scripted";
+            extracted: {
+                content: string;
+                label: string;
+                kind: "core-idea" | "customer-pain" | "value-angle" | "hypothesis" | "validation-channel" | "revenue" | "risk" | "evidence" | "reflection";
+            };
+            nextQuestion: string;
+            nextStep: "validation" | "meta" | "done" | "core-idea" | "customer-pain" | "value-angle" | "hypothesis" | "revenue" | "risk";
+            latencyMs?: number | undefined;
+        }>;
         /**
          * Cancel a stale 'running' session. Authorization: caller must own
          * the session (userId match) — we don't allow one user to cancel
@@ -667,7 +1437,21 @@ export declare const resolvers: {
         cancelStaleSession: (_: unknown, args: {
             sessionId: string;
             reason?: string | null;
-        }, ctx: GraphQLContext) => Promise<any>;
+        }, ctx: GraphQLContext) => Promise<{
+            status: "running" | "failed" | "completed" | "archived";
+            title: string;
+            id: string;
+            workspaceId: string;
+            createdAt: string;
+            updatedAt: string;
+            latestQuestion: string | null;
+            userId: string;
+            contextSnapshot: Record<string, unknown>;
+            completedAt: string | null;
+            heartbeatAt?: string | null | undefined;
+            ownerPid?: string | null | undefined;
+            failureReason?: string | null | undefined;
+        } | null>;
         mentionAgent: (_: unknown, args: {
             input: {
                 workspaceId: string;
@@ -682,7 +1466,7 @@ export declare const resolvers: {
         flowExecutionProgress: {
             subscribe: (_: unknown, args: {
                 executionId: string;
-            }) => any;
+            }) => import("graphql-subscriptions/dist/pubsub-async-iterable-iterator.js").PubSubAsyncIterableIterator<unknown>;
             resolve: (payload: {
                 flowExecutionProgress: unknown;
             }) => unknown;
@@ -692,7 +1476,7 @@ export declare const resolvers: {
                 workspaceId: string;
                 conversationId?: string | null;
             }, ctx: GraphQLContext) => Promise<AsyncIterable<{
-                conversationProgress: GraphQLJSON;
+                conversationProgress: import("@starlink/shared").ConversationEvent;
             }>>;
             resolve: (payload: {
                 conversationProgress: unknown;

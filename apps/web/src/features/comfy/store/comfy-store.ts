@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { addEdge, applyEdgeChanges, applyNodeChanges } from 'reactflow'
-import type { Node, Edge, Connection, NodeChange, EdgeChange } from 'reactflow'
+import type { Node, Edge, Connection, NodeChange, EdgeChange, ReactFlowInstance } from 'reactflow'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 import { watchConversation } from '@/shared/lib/conversation-sync-engine'
 import { applyCanvasLayout } from './canvas-layout-registry'
@@ -731,6 +731,13 @@ interface MacraState {
   executeWorkflow: () => Promise<void>
   executeNode: (nodeId: string) => Promise<void>
 
+  // ReactFlow 实例引用（非序列化，仅用于 focus 操作）
+  reactFlowInstance: ReactFlowInstance | null
+  setReactFlowInstance: (instance: ReactFlowInstance | null) => void
+
+  /** 将画布聚焦到指定的节点上（pan + zoom）。 */
+  focusOnNodes: (nodeIds: string[]) => void
+
   // 重置
   reset: () => void
 }
@@ -759,6 +766,20 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   lastCompletionAt: null,
   activeMentions: [],
   nodeWrittenAt: new Map(),
+  reactFlowInstance: null,
+  setReactFlowInstance: (instance) => {
+    set({ reactFlowInstance: instance })
+  },
+  focusOnNodes: (nodeIds) => {
+    const { reactFlowInstance, nodes } = get()
+    if (!reactFlowInstance) return
+    const targetNodes = nodes.filter((n) => nodeIds.includes(n.id))
+    if (targetNodes.length > 0) {
+      reactFlowInstance.fitView({ nodes: targetNodes, padding: 0.3, duration: 600 })
+    } else {
+      reactFlowInstance.fitView({ padding: 0.2, duration: 400 })
+    }
+  },
   pushActiveMention: ({ id, agentId, summary }) => {
     set((state) => ({
       activeMentions: [
