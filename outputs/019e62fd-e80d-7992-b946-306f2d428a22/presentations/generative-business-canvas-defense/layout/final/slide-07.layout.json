@@ -1,0 +1,736 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/oaruwj",
+    "id": "oaruwj",
+    "slide": 7,
+    "layoutId": "9c8ccf31-bd0c-40c2-b1b1-091bbc320b3f",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "2907b1df-9e2a-49b8-bfef-b595d44f8de5",
+    "masterLayoutName": "Master",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Aptos Mono",
+      "PingFang SC"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "9c8ccf31-bd0c-40c2-b1b1-091bbc320b3f",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "2907b1df-9e2a-49b8-bfef-b595d44f8de5",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "2907b1df-9e2a-49b8-bfef-b595d44f8de5",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m1cfa9w3",
+      "id": "1",
+      "bbox": [
+        0,
+        0,
+        1280,
+        720
+      ],
+      "geometry": "rect",
+      "fillColor": "#F6F1E8",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/tsvu9kni",
+      "id": "2",
+      "name": "kicker-marker",
+      "bbox": [
+        64,
+        40,
+        24,
+        2
+      ],
+      "geometry": "rect",
+      "fillColor": "#0E87A6",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/47y1kre1",
+      "id": "3",
+      "name": "kicker-label",
+      "bbox": [
+        96,
+        24,
+        420,
+        24
+      ],
+      "geometry": "rect",
+      "text": "系统框架",
+      "textPreview": "系统框架",
+      "resolvedFontSize": 12,
+      "resolvedTextStyle": {
+        "anchor": 2,
+        "fontSize": 12,
+        "typeface": "PingFang SC",
+        "color": "#0E87A6",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "middle",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "系统框架"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "系统框架",
+          "resolvedTextStyle": {
+            "fontSize": 12,
+            "typeface": "PingFang SC",
+            "color": "#0E87A6",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "系统框架",
+              "fontSize": 12,
+              "typeface": "PingFang SC",
+              "color": "#0E87A6",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bat47y1k",
+      "id": "4",
+      "bbox": [
+        64,
+        58,
+        1060,
+        88
+      ],
+      "geometry": "rect",
+      "text": "三支柱结构把推理、证据和界面分开治理。",
+      "textPreview": "三支柱结构把推理、证据和界面分开治理。",
+      "resolvedFontSize": 31,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 31,
+        "typeface": "PingFang SC",
+        "color": "#161C24",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "三支柱结构把推理、证据和界面分开治理。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "三支柱结构把推理、证据和界面分开治理。",
+          "resolvedTextStyle": {
+            "fontSize": 31,
+            "typeface": "PingFang SC",
+            "color": "#161C24",
+            "bold": true,
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "三支柱结构把推理、证据和界面分开治理。",
+              "fontSize": 31,
+              "typeface": "PingFang SC",
+              "color": "#161C24",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/mp0bi9s3",
+      "id": "5",
+      "bbox": [
+        64,
+        160,
+        584,
+        420
+      ],
+      "geometry": "rect",
+      "fillColor": "#FBF8F1",
+      "lineColor": "#D5CABC",
+      "lineWidth": 1
+    },
+    {
+      "order": 6,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/w7mp0bi9",
+      "id": "6",
+      "bbox": [
+        76,
+        172,
+        560,
+        396
+      ],
+      "alt": "图：Starlink progressive canvas construction framework",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "d8ea886b-b3d1-4e3d-a49b-09a2902fc03c",
+        "contentType": "image/png",
+        "byteLength": 1100615
+      }
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4vmtwra5",
+      "id": "7",
+      "bbox": [
+        76,
+        583,
+        560,
+        18
+      ],
+      "geometry": "rect",
+      "text": "图：Starlink progressive canvas construction framework",
+      "textPreview": "图：Starlink progressive canvas construction framework",
+      "resolvedFontSize": 10,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 10,
+        "typeface": "PingFang SC",
+        "color": "#5E6673",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "图：Starlink progressive canvas construction framework"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "图：Starlink progressive canvas construction framework",
+          "resolvedTextStyle": {
+            "fontSize": 10,
+            "typeface": "PingFang SC",
+            "color": "#5E6673",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "图：Starlink progressive canvas construction framework",
+              "fontSize": 10,
+              "typeface": "PingFang SC",
+              "color": "#5E6673"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/b2hwfyxo",
+      "id": "8",
+      "bbox": [
+        704,
+        198,
+        8,
+        8
+      ],
+      "geometry": "rect",
+      "fillColor": "#C25532",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/mhk3q5o7",
+      "id": "9",
+      "bbox": [
+        726,
+        190,
+        418,
+        51
+      ],
+      "geometry": "rect",
+      "text": "Reasoning core：监督器、领域生成器、critic、synthesizer 和 utility agents。",
+      "textPreview": "Reasoning core：监督器、领域生成器、critic、synthesizer 和 utility agents。",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "PingFang SC",
+        "color": "#161C24",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 3,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Reasoning"
+          },
+          {
+            "index": 2,
+            "text": "core：监督器、领域生成器、critic、synthesizer"
+          },
+          {
+            "index": 3,
+            "text": "和 utility agents。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Reasoning core：监督器、领域生成器、critic、synthesizer 和 utility agents。",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "PingFang SC",
+            "color": "#161C24",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Reasoning core：监督器、领域生成器、critic、synthesizer 和 utility agents。",
+              "fontSize": 18,
+              "typeface": "PingFang SC",
+              "color": "#161C24"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0z61032l",
+      "id": "10",
+      "bbox": [
+        704,
+        253,
+        8,
+        8
+      ],
+      "geometry": "rect",
+      "fillColor": "#C25532",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/pkzupwb2",
+      "id": "11",
+      "bbox": [
+        726,
+        245,
+        418,
+        51
+      ],
+      "geometry": "rect",
+      "text": "Retrieval layer：面向 agent 绑定的知识库检索，不是全局无差别注入。",
+      "textPreview": "Retrieval layer：面向 agent 绑定的知识库检索，不是全局无差别注入。",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "PingFang SC",
+        "color": "#161C24",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Retrieval layer：面向 agent"
+          },
+          {
+            "index": 2,
+            "text": "绑定的知识库检索，不是全局无差别注入。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Retrieval layer：面向 agent 绑定的知识库检索，不是全局无差别注入。",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "PingFang SC",
+            "color": "#161C24",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Retrieval layer：面向 agent 绑定的知识库检索，不是全局无差别注入。",
+              "fontSize": 18,
+              "typeface": "PingFang SC",
+              "color": "#161C24"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/itgfmlkj",
+      "id": "12",
+      "bbox": [
+        704,
+        308,
+        8,
+        8
+      ],
+      "geometry": "rect",
+      "fillColor": "#C25532",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7ed8bat4",
+      "id": "13",
+      "bbox": [
+        726,
+        300,
+        418,
+        51
+      ],
+      "geometry": "rect",
+      "text": "Canvas interface：每个画布单元成为可引用、可展开、可编辑的对象。",
+      "textPreview": "Canvas interface：每个画布单元成为可引用、可展开、可编辑的对象。",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18,
+        "typeface": "PingFang SC",
+        "color": "#161C24",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 3,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Canvas"
+          },
+          {
+            "index": 2,
+            "text": "interface：每个画布单元成为可引用、可展开、可"
+          },
+          {
+            "index": 3,
+            "text": "编辑的对象。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Canvas interface：每个画布单元成为可引用、可展开、可编辑的对象。",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "typeface": "PingFang SC",
+            "color": "#161C24",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Canvas interface：每个画布单元成为可引用、可展开、可编辑的对象。",
+              "fontSize": 18,
+              "typeface": "PingFang SC",
+              "color": "#161C24"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0nuxc3yl",
+      "id": "14",
+      "bbox": [
+        64,
+        684,
+        520,
+        16
+      ],
+      "geometry": "rect",
+      "text": "Starlink · Generative Business Canvas System",
+      "textPreview": "Starlink · Generative Business Canvas System",
+      "resolvedFontSize": 9,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 9,
+        "typeface": "PingFang SC",
+        "color": "#5E6673",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Starlink · Generative Business Canvas System"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Starlink · Generative Business Canvas System",
+          "resolvedTextStyle": {
+            "fontSize": 9,
+            "typeface": "PingFang SC",
+            "color": "#5E6673",
+            "alignment": "left"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Starlink · Generative Business Canvas System",
+              "fontSize": 9,
+              "typeface": "PingFang SC",
+              "color": "#5E6673"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/p8nqxs72",
+      "id": "15",
+      "bbox": [
+        1170,
+        678,
+        46,
+        22
+      ],
+      "geometry": "rect",
+      "text": "07",
+      "textPreview": "07",
+      "resolvedFontSize": 12,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 12,
+        "typeface": "Aptos Mono",
+        "color": "#5E6673",
+        "alignment": "right",
+        "verticalAlignment": "top",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "07"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "07",
+          "resolvedTextStyle": {
+            "fontSize": 12,
+            "typeface": "Aptos Mono",
+            "color": "#5E6673",
+            "alignment": "right"
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "07",
+              "fontSize": 12,
+              "typeface": "Aptos Mono",
+              "color": "#5E6673"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "rgba(0, 0, 0, 0)",
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

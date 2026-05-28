@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, Brain, Database, FileText, Lightbulb, ListChecks, Sparkles, Square } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Brain, Database, FileText, Lightbulb, ListChecks, Sparkles, Square, type LucideIcon } from 'lucide-react'
 import { useComfyStore } from '../store'
 
 const AGENT_DISPATCH_TICKS: ReadonlyArray<string> = [
@@ -63,7 +63,7 @@ interface SuggestionAction {
   onClick: () => void
   /** Severity styling: primary = call-to-action; warn = problem; info = nice-to-have. */
   severity: 'primary' | 'warn' | 'info'
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
+  icon: LucideIcon
 }
 
 interface CoachState {

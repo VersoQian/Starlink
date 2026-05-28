@@ -74,7 +74,7 @@ interface StacksDrawerProps {
   defaultOpen?: boolean
 }
 
-const ROLE_TINT: Record<AgentByline, string> = {
+const ROLE_TINT: Partial<Record<AgentByline, string>> = {
   market:      'text-byline-market',
   product:     'text-byline-product',
   finance:     'text-byline-finance',
@@ -230,7 +230,7 @@ function SectionMemory({ items }: { items: StacksMemoryItem[] }) {
                 aria-hidden="true"
                 className={[
                   'shrink-0 font-display text-[12px] font-[700] leading-none',
-                  m.byline ? ROLE_TINT[m.byline] : 'text-paper-ash3',
+                  m.byline ? (ROLE_TINT[m.byline] ?? 'text-paper-ash3') : 'text-paper-ash3',
                 ].join(' ')}
               >
                 ·

@@ -30,7 +30,7 @@ const STATUS_DOT: Record<AgentPresence['status'], string> = {
   debating: 'bg-press',
 }
 
-const ROLE_TINT: Record<AgentByline, string> = {
+const ROLE_TINT: Partial<Record<AgentByline, string>> = {
   market:      'text-byline-market',
   product:     'text-byline-product',
   finance:     'text-byline-finance',
@@ -85,7 +85,7 @@ export function Masthead({ workspaceName, edition, agents }: MastheadProps) {
                 aria-label={`${agent.name} (${agent.status})`}
               >
                 <span
-                  className={`font-display text-[14px] font-[700] ${ROLE_TINT[agent.role]}`}
+                  className={`font-display text-[14px] font-[700] ${ROLE_TINT[agent.role] ?? 'text-paper-ash3'}`}
                   aria-hidden="true"
                 >
                   {agent.initial}

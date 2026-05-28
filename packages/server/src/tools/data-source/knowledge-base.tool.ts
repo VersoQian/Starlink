@@ -70,6 +70,18 @@ export default class KnowledgeBaseTool extends BaseTool {
     input: Record<string, unknown>,
     _context: ToolContext,
   ): AsyncGenerator<ToolMessage> {
+    if (process.env.BENCHMARK_DISABLE_LIVE_KB === 'true') {
+      yield {
+        type: 'json',
+        data: {
+          results: [],
+          kbId: 'benchmark-disabled',
+          note: 'live KB lookup disabled for benchmark; use seeded knowledgeEvidence instead'
+        }
+      }
+      return
+    }
+
     let kbId = input.kbId as string
     const query = input.query as string
     const topK = (input.topK as number) ?? 5

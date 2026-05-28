@@ -1,0 +1,8 @@
+task mode: create
+primary deck-profile: engineering-platform
+secondary gates: product-platform, academic thesis defense
+required proof objects: workflow comparison, system architecture, multi-agent topology/capability matrix, blackboard and citation lifecycle, hybrid retrieval pipeline, frontend workspace screenshots, evaluation metrics.
+source/asset requirements: source DOCX, extracted figures, repository thesis figures, one image2.0 generated cover background.
+brand authenticity: no official company logos invented; Starlink treated as thesis system name, not SpaceX brand. University marks preserved only from source cover if used; final deck does not use them as logo.
+profile QA gates: technical labels stay specific; diagrams connect to mechanisms; evaluation numbers trace to thesis text/tables; no generic AI dashboard filler.
+known missing inputs: no separate school PPT template supplied, so deck uses original academic boardroom style.

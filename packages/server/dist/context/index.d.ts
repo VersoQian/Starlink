@@ -1,5 +1,10 @@
 import type { ExpressContextFunctionArgument } from '@apollo/server/express4';
 import { ConversationStore } from '../application/conversation-store.js';
+import { MemoryCaptureService } from '../application/memory-capture.js';
+import { MemoryRetrievalService } from '../application/memory-retrieval.js';
+import { MemoryConsolidator } from '../application/memory-consolidator.js';
+import { MemoryReaper } from '../application/memory-reaper.js';
+import { UserSkillConsolidator } from '../services/user-skill-consolidator.js';
 import { TaskEventStore } from '../application/task-event-store.js';
 import { ToolRegistry } from '../tool-registry/registry.js';
 import { FlowStore } from '../application/flow-store.js';
@@ -24,6 +29,11 @@ export type GraphQLContext = {
     /** Sprint 1.1 · KB-aware wizard prefill service (prefillWizardFromKb). */
     wizardPrefillService?: WizardPrefillService;
 };
+export declare const sharedMemoryCaptureService: MemoryCaptureService;
+export declare const sharedMemoryRetrievalService: MemoryRetrievalService;
+export declare const sharedUserSkillConsolidator: UserSkillConsolidator;
+export declare const sharedMemoryConsolidator: MemoryConsolidator;
+export declare const sharedMemoryReaper: MemoryReaper;
 export declare function createContext({ req }: ExpressContextFunctionArgument): Promise<GraphQLContext>;
 export declare function createWsContext(connectionParams?: Record<string, unknown>): Promise<GraphQLContext>;
 export declare function getTaskEventStore(): TaskEventStore;

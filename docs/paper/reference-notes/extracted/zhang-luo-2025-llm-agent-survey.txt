@@ -1,0 +1,895 @@
+--- page 1 ---
+1
+Large Language Model Agent: A Survey on
+Methodology, Applications and Challenges
+Junyu Luo, Weizhi Zhang, Y e Yuan, Yusheng Zhao, Junwei Y ang, Yiyang Gu, Bohan Wu, Binqi Chen,
+Ziyue Qiao, Qingqing Long, Rongcheng Tu, Xiao Luo, Wei Ju, Zhiping Xiao, Yifan Wang, Meng Xiao,
+Chenwu Liu, Jingyang Yuan, Shichang Zhang, Yiqiao Jin, Fan Zhang, Xian Wu, Hanqing Zhao,
+Dacheng Tao,Fellow, IEEE, Philip S. Yu, Fellow, IEEE and Ming Zhang
+Abstract—The era of intelligent agents is upon us, driven by revolutionary advancements in large language models. Large Language
+Model (LLM) agents, with goal-driven behaviors and dynamic adaptation capabilities, potentially represent a critical pathway toward
+artificial general intelligence. This survey systematically deconstructs LLM agent systems through a methodology-centered taxonomy,
+linking architectural foundations, collaboration mechanisms, and evolutionary pathways. We unify fragmented research threads by
+revealing fundamental connections between agent design principles and their emergent behaviors in complex environments. Our work
+provides a unified architectural perspective, examining how agents are constructed, how they collaborate, and how they evolve over time,
+while also addressing evaluation methodologies, tool applications, practical challenges, and diverse application domains. By surveying
+the latest developments in this rapidly evolving field, we offer researchers a structured taxonomy for understanding LLM agents and
+identify promising directions for future research. The collection is available at https://github.com/luo-junyu/Awesome-Agent-Papers.
+Index Terms—Large language model, LLM agent, AI agent, intelligent agent, multi-agent system, LLM, literature survey
+✦
+1 I NTRODUCTION
+A
+rtificial Intelligence is entering a pivotal era with the
+emergence of LLM agents—intelligent entities powered
+by large language models (LLMs) capable of perceiving
+environments, reasoning about goals, and executing ac-
+tions [1]. Unlike traditional AI systems that merely respond
+to user inputs, modern LLM agents actively engage with
+their environments through continuous learning, reason-
+ing, and adaptation. This shift represents a technological
+advancement and a fundamental reimagining of human-
+machine relationships. Commercial LLM agent systems
+(e.g., DeepResearch, DeepSearch, and Manus) exemplify this
+paradigm shift—autonomously executing complex tasks that
+• Junyu Luo, Ye Yuan, Yusheng Zhao, Junwei Yang, Yiyang Gu, Bohan
+Wu, Binqi Chen, Wei Ju, Chenwu Liu, Jingyang Yuan, and Ming Zhang
+are with the School of Computer Science and PKU-Anker LLM Lab,
+Peking University, Beijing, China. (e-mail: luojunyu@stu.pku.edu.cn,
+mzhang cs@pku.edu.cn)
+• Weizhi Zhang and P .S. Yu are with the Department of Computer Science,
+University of Illinois at Chicago, Chicago, USA.
+• Ziyue Qiao is with the School of Computing and Information Technology,
+Great Bay University, Guangdong, China.
+• Qingqing Long and Meng Xiao are with the Computer Network Informa-
+tion Center, Chinese Academy of Sciences, Beijing, China.
+• Rongcheng Tu, Hanqing Zhao, and Dacheng Tao are with Nanyang
+Technological University, Singapore.
+• Xiao Luo is with the Department of Computer Science, University of
+California, Los Angeles, USA.
+• Zhiping Xiao is with Paul G. Allen School of Computer Science and
+Engineering, University of Washington, Seattle, USA.
+• Yifan Wang is with the School of Information Technology & Management,
+University of International Business and Economics, Beijing, China.
+• Shichang Zhang is with Harvard University, Cambridge, USA.
+• Yiqiao Jin is with Georgia Institute of Technology, Atlanta, USA.
+• Fan Zhang and Xian Wu are with Jarvis Research Center, Tencent YouTu
+Lab, Shenzhen, China.
+once required human expertise, from in-depth research to
+computer operation, while adapting to specific user needs.
+Compared to traditional agent systems [2], LLM-based
+agents have achieved generational across multiple dimen-
+sions, including knowledge sources [3], generalization ca-
+pabilities [4], and interaction modalities [5]. Today’s agents
+represent a qualitative leap driven by the convergence of
+three key developments: ❶ unprecedented reasoning capabil-
+ities of LLMs [6], ❷ advancements in tool manipulation and
+environmental interaction [7], and ❸ sophisticated memory
+architectures that support longitudinal experience accumu-
+lation [8], [9]. This convergence has transformed theoretical
+constructs into practical systems, increasingly blurring the
+boundary between assistants and collaborators. This shift
+fundamentally arises from LLMs’ role as general-purpose task
+processors, unifying perception, decision-making, and action
+within semantic space through generative architectures,
+thereby forming human-like cognitive loops [10].
+Our study presents a novel examination of agent systems
+through a unified taxonomy that connects agent construction,
+collaboration mechanisms, and evolutionary pathways. We
+offer a comprehensive perspective tracing on how agents
+are defined, how they function individually or collectively,
+and how they evolve over time. Beyond clarifying the
+current landscape, our work not only clarifies the current
+landscape but identifies emerging patterns that signal future
+developments. The rapid advancement of agent technologies
+necessitates timely surveys to provide researchers with an
+up-to-date taxonomy for understanding this dynamic field.
+Figure 1 presents our organizational framework for
+understanding the LLM agent ecosystem. At its core, our
+methodology-centered approach examines the technical
+foundations of agent systems through three interconnected
+dimensions: construction (how agents are defined and built),
+arXiv:2503.21460v1  [cs.CL]  27 Mar 2025
+
+--- page 2 ---
+2
+Agent Methodology
+Construction EvolutionCollaboration
+Self-Learning
+Multi-agent 
+Co-Evolution
+External 
+Resource
+Centralized 
+Control
+Decentralized 
+Collaboration
+Hybrid 
+Architecture
+Profile 
+Definition
+Memory 
+Mechanism
+Planning 
+Capability
+Action 
+Execution
+Evaluation and Tools
+Benchmark and Datasets Tools
+LLM Use 
+Tools
+LLM Create 
+Tools
+Tools Develop 
+LLM
+General 
+Assessment
+Domain-specific 
+Evaluation
+Collaboration 
+Evaluation
+Real-World Issues
+Security Social ImpactPrivacy
+Agent-centric 
+Security
+Data-centric 
+Security
+Memorization 
+Vulnerability
+Intellectual 
+Property Exploitation
+Benefits
+Ethical 
+Concerns
+Applications
+Chemistry
+ Materials 
+Science
+Biology
+Astronomy
+Medical
+Gaming
+ Productivity 
+Tools
+Social 
+Science
+Dataset 
+Construction
+Fig. 1: An overview of the LLM agent ecosystem organized into four interconnected dimensions: ❶ Agent Methodology,
+covering the foundational aspects of construction, collaboration, and evolution; ❷ Evaluation and Tools, presenting
+benchmarks, assessment frameworks, and development tools; ❸ Real-World Issues, addressing critical concerns around
+security, privacy, and social impact; and❹ Applications, highlighting diverse domains where LLM agents are being deployed.
+We provide a structured framework for understanding the complete lifecycle of modern LLM-based agent systems.
+collaboration (how they interact and work together), and
+evolution (how they learn and improve over time). This
+tripartite foundation is complemented by practical consid-
+erations, including evaluation methodologies, development
+tools, real-world challenges related to security and ethics,
+and diverse application domains. This framework shapes the
+structure of our survey, enabling a systematic exploration of
+each dimension while highlighting their interconnections.
+Distinction from Previous Surveys. Despite several surveys
+exploring various aspects of AI agents in recent years,
+our study makes a distinctive contribution through its
+methodological focus and comprehensive analysis of LLM
+agent architectures. Previous surveys have primarily focused
+on specific applications (e.g., gaming [11], [12]), deployment
+environments [13], [14], multi-modality [15] or security [16],
+while others have provided broad overviews without a de-
+tailed methodological taxonomy [1], [17]. Recent works also
+have examined LLM-based agents compared to traditional AI
+agents [9], multi-agent interaction [18], workflows [19], and
+cooperative decision-making mechanisms [20]. In contrast to
+these works, our survey stands out through:
+1) Methodology-centered taxonomy: We propose a sys-
+tematic taxonomy that deconstructs LLM agent systems
+into their fundamental methodological components, in-
+cluding role definition, memory mechanisms, planning
+capabilities, and action execution [21].
+2) Build-Collaborate-Evolve framework: We analyze three
+interconnected dimensions of LLM agents - construction,
+collaboration, and evolution - offering a more holistic
+understanding than previous approaches [22], [23].
+This integrated architectural perspective highlights the
+continuity between individual LLM agent design and
+collaborative systems, whereas prior studies have often
+examined these aspects separately [22], [24].
+3) Frontier applications and real-world focus: Beyond
+addressing theoretical concepts, our work examines
+cutting-edge tools, communication protocols, and di-
+verse applications on LLM agents. We provide com-
+prehensive analysis of pressing real-world challenges
+including security, privacy, and ethics. This forward-
+looking perspective is particularly valuable as agent
+technologies transition from research to widespread
+implementation.
+Our survey provides researchers and practitioners with
+a more structured taxonomy for understanding, comparing,
+and advancing research of LLM agents from different per-
+spectives. As LLM agent systems increasingly integrate into
+various critical domains, understanding their architectural
+foundations becomes essential not only for researchers but
+also for policy scholars, industry practitioners, and society
+at large. This survey aims to provide this foundation while
+charting a path forward for this rapidly evolving field.
+2 A GENT METHODOLOGY
+This section presents a comprehensive framework for un-
+derstanding LLM-based agent systems through three in-
+terconnected dimensions: construction, collaboration, and
+evolution. As illustrated in Figure 2, we first examine agent
+construction (Section 2.1), which establishes the founda-
+tional components including profile definition, memory
+mechanisms, planning capabilities, and action execution.
+We then explore collaboration paradigms (Section 2.2) that
+enable multiple agents to work together through centralized
+
+--- page 3 ---
+3
+Large Language Model Agent
+Profile Definition
+§2.1.1
+Human-Curated
+Static Profiles Camel [25], AutoGen [26], MetaGPT [27], ChatDev [28], AFlow [29]
+Betch-Generated
+Dynamic Profiles Generative Agents [30], RecAgent [31], DSPy [32]
+Memory
+Mechanism
+§2.1.2
+Short-Term
+Memory ReAct [33], ChatDev [28], Graph of Thoughts [34], AFlow [29]
+Long-Term
+Memory
+Voyager [35], GITM [36], ExpeL [37], Reflexion [38], TPTU [39],
+OpenAgents [40], Lego-Prover [41], MemGPT [42]
+Knowledge
+Retrieval
+as Memory
+RAG [43], GraphRAG [44], Chain of Agnets [45], IRCoT [46],
+Llatrieval [47], KG-RAR [48], DeepRAG [49]
+Planning
+Capability
+§2.1.3
+Task Decompo-
+sition Strategies
+Plan-and-solve Prompting [50], Distributed Problem Solving and
+Planning [51], ReAct [33], Chain-of-discussion [52], Tree-planner
+[53], ReAcTree [54], ToT [55], ReST-MCTS* [56], LLM-MARS [57],
+LLM as BT-planner [58], ConceptAgent [59]
+Feedback-
+Driven Iteration
+BrainBody-LLM [60], TrainerAgent [61], RASC [62], REVECA [63],
+AdaPlanner [64], AIFP [65]
+Action Execution
+§2.1.4
+Tool Utilization TRICE [66], GPT4Tools [67], EASYTOOL [68], AvaTaR [69],
+Physical
+Interaction DriVLMe [70], ReAd [71], Collaborative Voyager [72]
+Agent
+Collaboration
+§2.2
+Centralized
+Control
+§2.2.1
+Coscientist [73], LLM-Blender [74], MetaGPT [27], AutoAct [75],
+Meta-Prompting [76], Wjudge [77]
+Decentralized
+Collaboration
+§2.2.2
+GAgents [30], CAMEL [25], MedAgents [78], ReConcile [79], MAD
+[80], MADR [81], MDebate [82], AutoGen [26]
+Hybrid
+Architecture
+§2.2.3
+KnowAgent [83], WKM [84], Textgrad [85]
+Agent Evolution
+§2.3
+Autonomous
+Optimization and
+Self-Learning
+§2.3.1
+SE [86], Evolutionary Optimization [87], DiverseEvol [88], SELF-
+REFINE [89], STaR [90], V-STaR [91], Self-Verification [92], Self-
+Rewarding [93], RLCD [94], RLC [95]
+Multi-Agent
+Co-Evolution
+§2.3.2
+ProAgent [96], CORY [97], CAMEL [25], Red-Team LLMs [98],
+Multi-Agent Debate [82], MAD [99]
+Evolution via
+External Resources
+§2.3.3
+KnowAgent [83], WKM [84], CRITIC [100], STE [101], SelfEvolve
+[102]
+Fig. 2: A taxonomy of large language model agent methodologies.
+control, decentralized cooperation, or hybrid architectures.
+Finally, we investigate evolution mechanisms (Section 2.3)
+that allow agents to improve over time through autonomous
+optimization, multi-agent co-evolution, and external resource
+integration. This three-dimensional framework provides a
+systematic approach to analyzing the full lifecycle of LLM
+agent systems.
+2.1 Agent Construction
+Agent construction serves as the foundational phase in
+developing LLM-based autonomous systems, encompassing
+the systematic design of core components that enable goal-
+directed behaviors. This process prioritizes four interdepen-
+dent pillars: profile definition (2.1.1), memory mechanism
+(2.1.2), planning capability (2.1.3), and action execution (2.1.4).
+These components collectively form a recursive optimization
+loop, where memory informs planning, execution outcomes
+update memory, and contextual feedback refines agent
+profiles. The construction paradigm emphasizes modular
+interoperability while preserving system-wide coherence, en-
+abling subsequent collaboration and evolutionary adaptation
+mechanisms, which will be discussed in later sections.
+2.1.1 Profile Definition
+Profile definition establishes an agent’s operational iden-
+tity by configuring its intrinsic attributes and behavioral
+patterns [25], [26]. Current methodologies encompass two
+approaches: human-curated static profiles ensure domain-
+specific consistency through manual specification, while
+batch-generated dynamic profiles adaptively modulate opera-
+tional parameters to stochastically yield a batch of agent
+initializations. These mechanisms collectively govern an
+agent’s decision boundaries and interaction protocols while
+maintaining alignment with predefined objectives.
+Human-Curated Static Profiles. This approach establishes
+fixed agent profiles through manual specification by domain
+
+--- page 4 ---
+4
+experts, embedding explicit rules and domain-specific knowl-
+edge. It ensures strict adherence to predefined behavioral
+guidelines and task requirements enabling standardized
+communication protocols among agents. This is particularly
+effective in scenarios demanding high interpretability and
+regulatory compliance. Such frameworks typically employ
+coordinated interactions between predefined agent compo-
+nents to achieve complex functionalities through structured
+communication patterns. Representative implementations
+demonstrate two key paradigms: systems like Camel [25],
+AutoGen [26], and OpenAgents [40] orchestrate human-
+agent collaboration through predefined conversational roles
+(e.g., user proxy and assistant), enabling task execution
+through structured dialogues. Meanwhile, frameworks such
+as MetaGPT [27], ChatDev [28], and AFlow [29] showcase
+role-based coordination patterns. ChatDev specializes in
+code development by coordinating static technical roles (e.g.,
+product managers and programmers) with deterministic
+interaction protocols, while MetaGPT and AFlow extend this
+paradigm to general task solving through structured role
+orchestration.
+Batch-Generated Dynamic Profiles. This paradigm employs
+parameterized initialization to systematically generate di-
+verse agent profiles that emulate human societal behaviors.
+By injecting controlled variations into personality traits,
+knowledge backgrounds, or value systems during agent
+creation (e.g., through template-based prompting or latent
+space sampling), the framework produces heterogeneous
+populations capable of exhibiting complex social dynamics.
+Such parameter-driven diversity is essential for simulating
+realistic human-agent interactions in applications ranging
+from social behavior studies to emergent group intelli-
+gence simulations. This is demonstrated in systems for
+human behavior simulation [30] and simulated user data
+collection [31] where different profile configurations directly
+shape collective interaction patterns. Moreover, DSPy [32]
+can further optimize the parameters of the agent profile
+initialization.
+2.1.2 Memory Mechanism
+Memory mechanisms equip agents with the ability to store,
+organize, and retrieve information across temporal dimen-
+sions. Short-term memory maintains transient contextual
+data for immediate task execution, while long-term mem-
+ory preserves structured experiential knowledge for persis-
+tent reference. Integrating knowledge retrieval mechanisms
+further optimizes information accessibility with Retrieval-
+Augmented Generation (RAG) techniques [43].
+Short-Term Memory. Short-term memory retains agent-
+internal dialog histories and environmental feedback to
+support context-sensitive task execution. This mechanism
+is widely implemented in frameworks such as ReAct [33]
+for thinking with reflection, ChatDev [28] for software
+development, Graph of Thoughts [34] for solving elabo-
+rate problems, and AFlow [29] for workflow automation,
+demonstrating its versatility across domains. While this
+mechanism enables detailed reasoning through interactive
+exchanges, its transient nature limits knowledge retention
+beyond immediate contexts—intermediate reasoning traces
+often dissipate after task completion and cannot be directly
+transferred to new scenarios. Furthermore, due to LLMs’
+context window limitations, practical implementations re-
+quire active information compression (e.g., summarization or
+selective retention) and impose many constraints on multi-
+turn interaction depth to prevent performance degradation.
+Long-Term Memory. Long-term memory systematically
+archives agents’ intermediate reasoning trajectories and
+synthesizes them into reusable tools for future invoca-
+tion. This process transforms ephemeral cognitive efforts
+into persistent operational assets through three dominant
+paradigms: ❶ skill libraries that codify procedural knowledge
+(e.g., Voyager’s automated skill discovery in Minecraft [35]
+and GITM’s text-based knowledge base [36]), ❷ experi-
+ence repositories that store success/failure patterns (e.g.,
+ExpeL’s distilled experience pool [37] and Reflexion’s trial-
+optimized memory [38]), and ❸ tool synthesis frameworks
+that evolve capabilities through combinatorial adaptation
+(e.g., TPTU’s adaptive tool composition [39] and OpenAgents’
+self-expanding toolkit [40]). Cross-domain implementations,
+such as Lego-Prover’s theorem bank [41] and MemGPT’s
+tiered memory architecture [42], further demonstrate how
+structured long-term storage enhances reasoning efficiency
+through strategic knowledge reuse.
+Knowledge Retrieval as Memory. This paradigm di-
+verges from agent-internal memory generation by integrat-
+ing external knowledge repositories into generation pro-
+cesses, effectively expanding agents’ accessible information
+boundaries. Current implementations exhibit three domi-
+nant approaches: ❶ Static knowledge grounding through
+text corpora (RAG [43]) or structured knowledge graphs
+(GraphRAG [44]), ❷ Interactive retrieval that integrates
+agent dialogues with external queries, as demonstrated in
+Chain of Agents [45] where short-term inter-agent commu-
+nications trigger contextualized knowledge fetching, and ❸
+Reasoning-integrated retrieval, exemplified by IRCoT [46]
+and Llatrieval [47], which interleave step-by-step reasoning
+with dynamic knowledge acquisition. Advanced variants
+like KG-RAR [48] further construct task-specific subgraphs
+during reasoning, while DeepRAG [49] introduces fine-tuned
+retrieval decision modules to balance parametric knowledge
+and external evidence. These hybrid architectures enable
+agents to transcend training data limitations while maintain-
+ing contextual relevance, establishing knowledge retrieval as
+critical infrastructure for scalable memory systems.
+2.1.3 Planning Capability
+Planning capabilities are a critical aspect of LLM agents’ abil-
+ities, enabling them to navigate through complex tasks and
+problem-solving scenarios with high accuracy [103]. Effective
+planning is es
+
+--- page 5 ---
+5
+the full problem. Task decomposition strategies fall into two
+main categories: single-path chaining and multi-path tree
+expansion.
+Single-path chaining is a simple method with the simplist
+version as zero-shot chain-of-thought [104], [105]. It first asks
+the agent to devise a plan, which consists of a sequence of
+subtasks that are built upon one another. Subsequently, the
+agent is asked to solve the subtasks in the order they are
+presented [50], [105]. This plan-and-solve paradigm [51] is
+straightforward and easy to implement. However, it may
+suffer from a lack of flexibility and error accumulation
+during chaining, as the agent is required to follow the pre-
+defined plan without any deviation during the problem-
+solving procedure. Therefore, one line of work proposes to
+adopt dynamic planning that only generates the next subtask
+based on the current situation of the agent [33], [105]. This
+enables the agent to receive environmental feedback and
+adjust its plan accordingly, enhancing its robustness and
+adaptability. Moreover, another line of work proposes to
+use multiple chain-of-thoughts to improve the robustness of
+the planning process. This is similar to ensemble methods,
+involving self-consistency [62], [106], majority voting [107],
+and agent discussion [52] to combine multiple chains. By
+combining the wisdom of multiple chains, the agent can
+make more accurate decisions and reduce the risk of error
+accumulation.
+A more complicated method is to use trees instead
+of chains as the planning data structure, where multiple
+possible reasoning paths exist when the agent is planning,
+and the agent is allowed to backtrack with information
+from feedback [53], [54]. Long et al. [55] propose a tree-
+of-thought (ToT) method that explores the solution space
+through a tree-like thought process. This allows the LLMs
+to backtrack to previous states, which makes it possible
+for the model to correct its previous mistakes, enabling
+applications to various complicated tasks that involve the
+”trial-error-correct” process. In more realistic scenarios, the
+agent can gather feedback from the environment or humans
+and dynamically adjust its reasoning path, potentially in-
+corporating reinforcement learning [56], [108]. This enables
+the agent to make more informed decisions in real-world
+applications using advanced algorithms such as Monte Carlo
+Tree Search [109], facilitating use cases in robotics [57]–[59]
+and game-playing [110], [111].
+Feedback-Driven Iteration. Feedback-driven iteration is a cru-
+cial aspect of LLM planning capabilities, enabling the agent
+to learn from the feedback and enhance its performance over
+time. Feedback can originate from various sources, such as
+environmental input, human guidance, model introspection,
+and multi-agent collaboration.
+Environmental feedback is one of the most common types
+of feedback in robotics [60], generated by the environment
+in which the embodied agent operates. Human feedback,
+another crucial type, comes from user interactions or manu-
+ally labeled data prepared in advance [61], [112]. Model
+introspection provides an additional source of feedback,
+which is generated by the agent itself [62]. Multi-agent
+collaboration also serves as a feedback mechanism, where
+multiple agents work together to solve a problem and
+exchange insights [63], [112]. These sources of feedback
+TABLE 1: A summary of agent collaboration methods.
+Category Method Key Contribution
+Centralized Control
+Coscientist [73] Human-centralized experimental controlLLM-Blender [74] Cross-attention response fusionMetaGPT [27] Role-specialized workflow managementAutoAct [75] Triple-agent task differentiationMeta-Prompting [76] Meta-prompt task decompositionWJudge [77] Weak-discriminator validation
+Decentralized Collaboration
+MedAgents [78] Expert voting consensusReConcile [79] Multi-agent answer refinementMETAL [115] Domain-specific revision agentsDS-Agent [116] Database-driven revisionMAD [80] Structured anti-degeneration protocolsMADR [81] Verifiable fact-checking critiquesMDebate [82] Stubborn-collaborative consensusAutoGen [26] Group-chat iterative debates
+Hybrid Architecture
+CAMEL [25] Grouped role-play coordinationAFlow [29] Three-tier hybrid planningEoT [117] Multi-topology collaboration patternsDiscoGraph [118] Pose-aware distillationDyLAN [119] Importance-aware topologyMDAgents [120] Complexity-aware routing
+help evaluate the agent’s performance and thus guide its
+planning. For instance, the agent can use feedback to update
+(regenerate) its plan, adjust its reasoning path, or even modify
+its goal. This iterative process continues until a satisfactory
+plan is achieved [64], [65].
+2.1.4 Action Execution
+With the planning capability, it is important for the LLMs
+to have the ability to execute the planned actions in the real
+world. Action execution is a critical aspect of LLM agents’
+abilities, as good plans are useless if the agent cannot execute
+them effectively. Action execution involves two aspects: tool
+utilization [113], and physical interaction [114].
+Tool utilization [113] is an important aspect of LLM
+action execution, enabling a wide range of abilities such
+as precise calculation of numbers, up-to-date information
+understanding, and proficient code generation. The tool
+use ability involves two aspects: tool use decision and tool
+selection. The tool-use decision is the process of deciding
+whether to use a tool to solve a problem. When the agent is
+generating content with less confidence or facing problems
+related to specific tool functions, the agent should decide to
+use specific tools [66], [67]. Tool selection is another important
+aspect of tool utilization, involving the understanding of
+tools and the agent’s current situation [68], [69]. For example,
+Yuan et al. [68] propose simplifying the tool documentation
+to better understand the available tools, enabling a more
+accurate selection of tools.
+Physical interaction [114] is a fundamental aspect of
+embodied LLM agents. Their ability t
+
+--- page 6 ---
+6
+fundamental architectures: centralized control , decentralized
+cooperation, and hybrid architectures. These paradigms differ
+in their decision hierarchies, communication topologies, and
+task allocation mechanisms, each offering distinct advantages
+for specific application scenarios.
+2.2.1 Centralized Control
+Centralized control architectures employ a hierarchical co-
+ordination mechanism where a central controller organizes
+agent activities through task allocation and decision inte-
+gration, while other sub-agents can only communicate with
+the controller. This paradigm features two implementation
+strategies: explicit controller systems utilize dedicated co-
+ordination modules (often implemented as separate LLM
+agents) to decompose tasks and assign subgoals, while
+differentiation-based systems achieve centralized control by
+using prompts to guide the meta agent in assuming distinct
+sub-roles. The centralized approach excels in mission-critical
+scenarios requiring strict coordination, such as industrial
+automation [122] and scientific research [73].
+Explicit Controller Systems. Multiple related works have
+been developed to explicitly implenment centralized architec-
+tures. The Coscientist [73] exemplifies the explicit controller
+paradigm, where a human operator serves as the central
+controller. It establishes standardized scientific experimental
+workflows, allocates specialized agents and tools to distinct
+experimental phases, and maintains direct control over the
+final execution plan. LLM-Blender [74] explicitly creates
+a controller that employs a cross-attention encoder for
+pairwise comparison to identify the best responses, and then
+fuses the top-ranked responses, enhancing their strengths
+while mitigating weaknesses. MetaGPT [27] simulates real-
+world software development workflows, direclty assigning
+specialized managers to control distinct functional roles and
+phases.
+Differentiation-based Systems. AutoAct [75] exemplifies
+the differentiation-based paradigm, which implicitly differ-
+entiates the meta-agent into three sub-agents—plan-agent,
+tool-agent, and reflect-agent—to break down the complex
+ScienceQA task. Meta-Prompting [76] decomposes com-
+plex tasks into domain-specific subtasks through carefully
+crafted meta-prompts. A single model acts as a coordinator,
+dynamically assigning subtasks to specialized sub-agents
+guided by task-oriented prompts. The centrol manager then
+integrates all intermediate outputs to produce the final
+solution. These works predominantly employ highly capable
+agents as central controllers to optimize task allocation and
+decision aggregation. However, WJudge [77] demonstrates
+that even controllers with limited discriminative power can
+also significantly enhance the overall performance of agent
+systems.
+2.2.2 Decentralized Collaboration
+In contrast to centralized architectures where a single con-
+trol node often becomes a bottleneck due to handling all
+inter-agent communication, task scheduling, and contention
+resolution, decentralized collaboration enables direct node-
+to-node interaction through self-organizing protocols. This
+paradigm can be further categorized into two distinct
+approaches: revision-based systems and communication-based
+systems.
+Revision-based Systems. In this paradigm, agents only
+observe finalized decisions generated by peers and iteratively
+refine a shared output through structured editing protocols.
+This approach typically produces more standardized and de-
+terministic outcomes. For instance, MedAgents [78] employs
+predefined domain-specific expert agents that sequentially
+propose and modify decisions independently, with consensus
+achieved through final voting. ReConcile [79] coordinates
+agents to iteratively refine answers through mutual response
+analysis, confidence evaluation, and human-curated exem-
+plars. METAL [115] introduces specialized text and visual
+revision agents for chart generation tasks, demonstrating
+how domain-specific refinement improves output quality.
+Notably, revision signals may originate not only from agent
+interactions but also from external knowledge bases [116],
+[123], enabling hybrid refinement strategies.
+Communication-based Systems. Compared to revision-based
+approaches, communication-based methods feature more
+flexible organizational structures, allowing agents to directly
+engage in dialogues and observe peers’ reasoning processes.
+This makes them particularly suitable for modeling dy-
+namic scenarios such as human social interactions [30]. Key
+implementations include: MAD [80] employs structured
+communication protocols to address the ”degeneration-of-
+thought” problem, where agents overly fixate on initial
+solutions. MADR [81] enhances this by enabling agents to
+critique implausible claims, refine arguments, and gener-
+ate verifiable explanations for fact-checking. MDebate [82]
+optimizes consensus-building through strategic alternation
+between stubborn adherence to valid points and collaborative
+refinement. AutoGen [26] implements a group-chat frame-
+work that supports multi-agent participation in iterative
+debates for decision refinement.
+2.2.3 Hybrid Architecture
+Hybrid architectures strategically combine centralized co-
+ordination and decentralized collaboration to balance con-
+trollability with flexibility, optimize resource utilization, and
+adapt to heterogeneous task requirements. This approach
+introduces two implementation patterns: static systems with
+predefined coordination rules and dynamic systems featuring
+self-optimizing topologies.
+Static Systems. Static systems predefine fixed patterns for
+combining different collaboration modalities. Representative
+implementations include: CAMEL [25] partitions agents into
+intra-group decentralized teams for role-playing simulations,
+while maintaining inter-group coordination through central-
+ized governance. AFlow [29] employs a three-tier hierarchy
+consisting of centralized strategic planning, decentralized
+tactical negotiation, and market-driven op
+
+--- page 7 ---
+7
+TABLE 2: A summary of agent evolution methods.
+Category Method Key Contribution
+Self-Supervised LearningSE [86] Adaptive token masking for pretrainingEvolutionary Optimization [87] Efficient model merging and adaptationDiverseEvol [88] Improved instruction tuning via diverse data
+Self-Reflection & Self-Correction
+SELF-REFINE [89] Iterative self-feedback for refinementSTaR [90] Bootstrapping reasoning with few rationalesV-STaR [91] Training a verifier using DPOSelf-Verification [92] Backward verification for correction
+Self-Rewarding & RLSelf-Rewarding [93] LLM-as-a-Judge for self-rewardingRLCD [94] Contrastive distillation for alignmentRLC [95] Evaluation-generation gap for optimization
+Cooperative Co-EvolutionProAgent [96] Intent inference for teamworkCORY [97] Multi-agent RL fine-tuningCAMEL [25] Role-playing framework for cooperation
+Competitive Co-EvolutionRed-Team LLMs [98] Adversarial robustness trainingMulti-Agent Debate [82] Iterative critique for refinementMAD [99] Debate-driven divergent thinking
+Knowledge-Enhanced EvolutionKnowAgent [83] Action knowledge for planningWKM [84] Synthesizing prior and dynamic knowledge
+Feedback-Driven EvolutionCRITIC [100] Tool-assisted self-correctionSTE [101] Simulated trial-and-error for tool learningSelfEvolve [102] Automated debugging and refinement
+inputs guides the student model via feature map distillation,
+while matrix-valued edge weights enable adaptive spatial
+attention across agents. DyLAN [119] first utilizes the Agent
+Importance Score to identify the most contributory agents
+and then dynamically adjusts the collaboration structure
+to optimize task completion. MDAgents [120] dynamically
+assigns collaboration structures based on the task at hand.
+It first performs a complexity check to classify tasks as low,
+moderate, or high complexity. Simple tasks are handled by
+a single agent, while more complex tasks are addressed
+through hierarchical collaboration.
+2.3 Agent Evolution
+LLM Agents are evolving through various mechanisms that
+enable autonomous improvement, multi-agent interaction,
+and external resource integration. This section explores three
+key dimensions of agent evolution: autonomous optimization
+and self-learning, multi-agent co-evolution, and evolution via
+external resources. These mechanisms collectively enhance
+model adaptability, reasoning, and performance in complex
+environments. We summarize the methods in Table 2.
+2.3.1 Autonomous Optimization and Self-Learning
+Autonomous optimization and self-learning allow LLMs
+to improve their capabilities without extensive supervision.
+This includes self-supervised learning, self-reflection, self-
+correction, and self-rewarding mechanisms that enable mod-
+els to explore, adapt, and refine their outputs dynamically.
+Self-Supervised Learning and Adaptive Adjustment. Self-
+supervised learning enables LLMs to improve using un-
+labeled or internally generated data, reducing reliance on
+human annotations. For example, self-evolution learning
+(SE) [86] enhances pretraining by dynamically adjusting to-
+ken masking and learning strategies. Evolutionary optimiza-
+tion techniques facilitate efficient model merging and adap-
+tation, improving performance without extensive additional
+resources [87]. DiverseEvol [88] refines instruction tuning
+by improving data diversity and selection efficiency. These
+advancements contribute to the autonomous adaptability of
+LLMs, enabling more efficient learning and generalization
+across tasks.
+Self-Reflection and Self-Correction. Self-reflection and self-
+correction enable LLMs to iteratively refine their outputs
+by identifying and addressing errors. For instance, SELF-
+REFINE [89] applies iterative self-feedback to improve gen-
+erated responses without external supervision. In reasoning
+tasks, STaR [90] and V-STaR [91] train models to verify and
+refine their own problem-solving processes, reducing reliance
+on labeled data. Additionally, self-verification techniques
+enable models to retrospectively assess and correct their
+outputs, leading to more reliable decision-making [92].
+These approaches collectively enhance LLM agents’ ability
+to self-reflect and self-correct, reducing hallucinations and
+improving reasoning quality.
+Self-Rewarding and Reinforcement Learning. Self-rewarding
+and reinforcement learning approaches enable LLMs to
+enhance performance by generating internal reward signals.
+Self-generated rewards help models refine decision-making,
+with techniques ensuring stable and consistent learning
+improvements [93]. Contrastive distillation further enables
+models to align themselves through self-rewarding mecha-
+nisms [94]. Additionally, RLC [95] leverages the evaluation-
+generation gap via reinforcement learning strategies, fa-
+cilitating self-improvement. These methods enhance LLM
+adaptability by integrating self-rewarding strategies and
+reinforcement learning paradigms.
+2.3.2 Multi-Agent Co-Evolution
+Multi-agent co-evolution enables LLMs to improve through
+interactions with other agents. This involves cooperative
+learning, where agents share information and coordinate
+actions, as well as competitive co-evolution, where agents
+engage in adversarial interactions to refine strategies and
+enhance performance.
+Cooperative and Collaborative Learning. Multi-agent col-
+laboration enhances LLMs by enabling knowledge sharing,
+joint decision-making, and coordinated problem-solving.
+For instance, ProAgent [96] enables LLM-based agents
+to adapt dynamically in cooperative tasks by inferring
+teammates’ intentions and updating beliefs, enhancing zero-
+shot coordination. CORY [97] extends RL fine-tuning into a
+cooperative multi-agent framework, where LLMs iteratively
+improve through role-exchange mechanisms, enhancing
+policy optimality and stability. CAMEL [25] develops a role-
+playing framework where communicative agents collaborate
+autonomously using inception prompting, improving coor-
+dination and task-solving efficiency in multi-agent settings.
+These approaches 
+
+--- page 8 ---
+8
+General
+Assessment
+Domain-specific 
+Evaluation
+Collaboration 
+Evaluation
+Multi-dimensional 
+Capability
+Dynamic
+And Self-evolving
+Domain-specific 
+Competency Tests
+Real-world 
+Environment Simulation
+Web
+Interaction
+Code
+Generation
+Tools Used by
+LLM Agents
+Tools Created by
+LLM Agents 
+Tools for Deploying 
+LLM Agents
+Knowledge
+Retrieval Computation
+Creation
+Productionization
+Operation
+and Maintenance
+API Interactions
+Decision Execution Reflection
+Model Context 
+Protocol
+Benchmark and Datasets Tools
+Evaluation and Tools
+Fig. 3: An overview of evaluation benchmarks and tools
+for LLM agents. The left side shows various evaluation
+frameworks categorized by general assessment, domain-
+specific evaluation, and collaboration evaluation. The right
+side illustrates tools used by LLM agents, tools created by
+agents, and tools for deploying agents.
+develop stronger reasoning, resilience, and strategic adapt-
+ability in a multi-agent adversarial manner.
+2.3.3 Evolution via External Resources
+External resources enhance the evolution of agents by
+providing structured information and feedback. Knowledge-
+enhanced evolution integrates structured knowledge to
+improve reasoning and decision-making, while external
+feedback-driven evolution leverages real-time feedback from
+tools and environments to refine model performance.
+Knowledge-Enhanced Evolution. LLMs can evolve by inte-
+grating structured external knowledge, improving reasoning,
+decision-making, and task execution. For example, KnowA-
+gent [83] improves LLM-based planning by integrating action
+knowledge, constraining decision paths, and mitigating hallu-
+cinations, leading to more reliable task execution. The world
+knowledge model (WKM) [84] enhances agent planning
+by synthesizing expert and empirical knowledge, providing
+global priors and dynamic local knowledge to guide decision-
+making. These approaches collectively improve the evolution
+of LLM by incorporating diverse and structured external
+information.
+External Feedback-Driven Evolution. LLMs can refine their
+behavior by leveraging external feedback from tools, eval-
+uators, and humans to improve performance iteratively.
+For example, CRITIC [100] allows LLMs to validate and
+revise their outputs through tool-based feedback, improving
+accuracy and reducing inconsistencies. STE [101] enhances
+tool learning by simulating trial-and-error, imagination, and
+memory, enabling more effective tool use and long-term
+adaptation. SelfEvolve [102] adopts a two-step framework
+where LLMs generate and debug code using feedback from
+execution results, enhancing performance without human
+intervention. These approaches enable LLMs to evolve
+iteratively by integrating structured feedback, improving
+adaptability and robustness.
+3 E VALUATION AND TOOLS
+As LLM agents continue to evolve in complexity and
+capability, robust evaluation frameworks and specialized
+tools have become essential components of the agent ecosys-
+tem. This section explores the comprehensive landscape of
+benchmarks, datasets, and tools that enable the development,
+assessment, and deployment of LLM agents. We first examine
+evaluation methodologies in Section 3.1, covering general
+assessment frameworks, domain-specific evaluation systems,
+and collaborative evaluation approaches. We then discuss the
+tools ecosystem in Section 3.2, including tools used by LLM
+agents, tools created by agents themselves, and infrastructure
+for deploying agent systems.
+3.1 Evaluation Benchmarks and Datasets
+The evolution of LLM agents has driven the creation of
+specialized benchmarks that systematically evaluate agent
+capabilities across technical dimensions and application
+domains. These frameworks address three key requirements:
+general assessment frameworks, domain-specific scenario
+simulation, and collaborative evaluation of complex systems.
+3.1.1 General Assessment Frameworks
+The evolution of intelligent agents requires evaluation
+frameworks to move beyond simple success-rate metrics
+to comprehensive cognitive analysis. Recent advances focus
+on building adaptive and interpretable assessment systems
+capable of capturing the subtle interplay between reasoning
+depth, environmental adaptability, and task complexity.
+Multi-Dimensional Capability Assessment. Modern bench-
+marks are increasingly adopting a hierarchical paradigm
+that dissects agent intelligence across various dimensions
+of reasoning, planning, and problem solving. AgentBench
+[124] builds a unified test field across eight interactive
+environments, revealing the advantages of a commercial
+LLM in complex reasoning. Mind2Web [125] extends this
+paradigm to web interaction scenarios, proposing the first
+generalist agent for evaluating 137 real-world websites with
+different tasks spanning 31 domains. This open environment
+benchmark enables multi-dimensional capability assessment
+through real web-based challenges. This is in line with
+MMAU [126], which enhances explainability through granu-
+lar capability mapping and breaks down agent intelligence
+into five core competencies by more than 3,000 cross-domain
+tasks. BLADE [127] extends evaluation to scientific discovery
+by tracking the analytical decision patterns of expert vali-
+dation workflows. VisualAgentBench [128] further extends
+this approach to multimodal foundation agents, establishing
+a unified benchmark across materialized interactions, GUI
+operations, and visual design tasks, and rigorously testing
+the LLM’s ability to handle the dynamics of the complex
+visual world. Embodied Agent Interface [129] introduces
+modular inference components (object interpretation, sub-
+object decomposition, etc.) to provide fine-grained error
+classification for embedded systems. CRAB [130] offers
+cross-platform testing with graphics-based assessment and
+a unified Python interface. These frameworks emphasize
+the shift from a single measure of success to multifaceted
+cognitive analysis.
+Dynamic and Self-Evolving Evaluation Paradigms. Next-
+generation framework addresses baseline

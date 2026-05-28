@@ -76,6 +76,17 @@ export default class MemorySearchTool extends BaseTool {
     input: Record<string, unknown>,
     context: ToolContext,
   ): AsyncGenerator<ToolMessage> {
+    if (process.env.BENCHMARK_DISABLE_MEMORY_TOOLS === 'true') {
+      yield {
+        type: 'json',
+        data: {
+          memories: [],
+          note: 'memory search disabled for benchmark'
+        }
+      }
+      return
+    }
+
     const query = String(input.query ?? '').trim()
     const topK = Math.max(1, Math.min(30, Math.floor(Number(input.topK ?? 8))))
     const scope = typeof input.scope === 'string' ? input.scope : undefined

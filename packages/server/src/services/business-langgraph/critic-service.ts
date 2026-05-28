@@ -33,6 +33,13 @@ import type { BusinessStateType, MacraNodeData, CriticConflict } from './state.j
 
 const auditLogger = createAuditLogger('packages/server:business-langgraph:critic-service')
 
+function isBenchmarkPersistenceDisabled(): boolean {
+  return (
+    process.env.BENCHMARK_DISABLE_PERSISTENCE === 'true' ||
+    process.env.BENCHMARK_DISABLE_STREAM_HEARTBEAT === 'true'
+  )
+}
+
 export class CriticService {
   /** Same-process Map for HITL directive hot path. Cross-process recovery
    *  reads from conversation_sessions.hitl_directive. */
@@ -49,6 +56,7 @@ export class CriticService {
   async setHitlResumeDirective(traceId: string, directive: HitlResumeDirective): Promise<void> {
     if (!traceId) return
     this.hitlResumeDirectives.set(traceId, directive)
+    if (isBenchmarkPersistenceDisabled()) return
     try {
       await this.conversationMemoryStore.setHitlDirective(
         traceId,
@@ -74,6 +82,7 @@ export class CriticService {
     const cached = this.hitlResumeDirectives.get(traceId)
     if (cached) {
       this.hitlResumeDirectives.delete(traceId)
+      if (isBenchmarkPersistenceDisabled()) return cached
       // Best-effort clear of DB row too so a future restart doesn't
       // re-apply the same directive.
       this.conversationMemoryStore
@@ -81,6 +90,7 @@ export class CriticService {
         .catch(() => {/* tolerated — DB may be down; in-memory was authoritative */})
       return cached
     }
+    if (isBenchmarkPersistenceDisabled()) return null
     try {
       const persisted = await this.conversationMemoryStore.consumeHitlDirective(traceId)
       if (!persisted) return null

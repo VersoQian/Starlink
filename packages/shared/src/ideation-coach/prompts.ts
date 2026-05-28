@@ -149,8 +149,9 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
     return `\n\n## 最近反思类型: ${last3.join(' → ')}（避免立刻重复同类型）`
   })()
 
-  // P10 fix D · turn-count graduation pressure. After 4+ user messages
-  // without canvas changes, suggest user move to /wizard or generate BMC.
+  // P10 fix D · turn-count graduation pressure. Early exploration should
+  // stay conversational; only introduce /wizard as an optional accelerator
+  // after several turns without canvas structure.
   // P11.18 fix · skip this entire suggestion if BMC cells already exist.
   // The "graduate to BMC" hint is meaningless once BMC has graduated; the
   // user just sees "canvas empty, run /wizard" while staring at 9 BMC
@@ -173,8 +174,11 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
       return `\n\n## 当前阶段（重要）\n画布已有 ${bmcCardCount} 个 BMC cell，用户已完成探索阶段。**禁止建议 /wizard** 或说"画布空白"。本次反思应聚焦于 BMC cell 内容本身：scaffold='evidence-needed'（指出某个具体 cell 缺事实）、scaffold='why'（追问某个 cell 的逻辑）、或 scaffold='meta'（建议 @critic 检查跨 cell 一致性）。${surfaceLine}`
     }
     const canvasIsSparse = canvas.nodes.length < 3
+    if (turns >= 7 && canvasIsSparse) {
+      return `\n\n## 进阶提示（重要）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。优先保持探索感：告诉用户可以继续自由描述，你会边聊边归纳。可以把 \`/wizard\` 作为**可选加速器**轻轻带出：如果想更快补齐客户、价值、渠道、收入等关键维度，也可以输入 \`/wizard\`。不要表达成“你应该去 wizard”，也不要暗示用户探索方式不对。`
+    }
     if (turns >= 4 && canvasIsSparse) {
-      return `\n\n## 进阶提示（重要）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。**强烈建议** scaffold='meta'，并在 content 里温和地引导用户：要么用 \`/wizard\` 走 7 步结构化引导，要么直接说"准备生成 BMC"让系统拆解。不要再问 why。`
+      return `\n\n## 探索阶段提示（轻量）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。不要强推 \`/wizard\` 或 BMC；继续问一个能让想法更具体的问题。若需要 meta 视角，最多轻描淡写地说“你可以继续自由说，我会帮你整理”。`
     }
     return ''
   })()

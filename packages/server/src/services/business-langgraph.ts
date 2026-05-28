@@ -45,6 +45,7 @@ import { distillSummariesForCells } from '../agents/shared/cell-summarizer.js'
 import { LLMClient } from './llm-client.js'
 import { trace, context as otelContext, SpanStatusCode, type Context as OtelContext } from '@opentelemetry/api'
 import { getTracer } from '../infrastructure/telemetry/otel-init.js'
+import { ablationContext } from './ablation-context.js'
 
 // ============== Stage 4d module split (2026-05-04) ==============
 // Constants, state schema, parsing helpers, debate budget machinery and
@@ -929,7 +930,7 @@ export class BusinessLangGraphService {
     // 后续轮次：分析冲突，派遣相关 Agent 修正
     const conflicts = state.conflicts
     const conflictSummary = conflicts
-      .map((c) => `[${c.severity}] ${c.label}: ${c.content.substring(0, 100)}`)
+      .map((c) => `[${c.severity}] ${c.label}: ${c.content.substring(0, 500)}`)
       .join('\n')
 
     // edit_plan with a specific dimension — scope revision to that one agent.
@@ -1012,24 +1013,8 @@ export class BusinessLangGraphService {
     if (directive && directive.kind === 'edit_plan' && !directive.dimension) {
       guidance = `[人类指令] ${directive.body}\n\n${guidance}`
     }
-    if (this.model) {
-      try {
-        const response = await this.model.invoke([
-          new SystemMessage(`你是研讨会主持人。以下是上一轮讨论中发现的冲突。请为需要修正的 Agent 提供简洁的修正方向（2-3 句话）。
-
-冲突列表：
-${conflictSummary}
-
-需要修正的 Agent：${activeAgents.join(', ')}
-
-只输出修正指导，不要其他内容。`),
-          new HumanMessage(state.question)
-        ])
-        guidance = readModelText(response) || guidance
-      } catch {
-        // fallback to default guidance
-      }
-    }
+    // guidance already contains the full conflictSummary; skip LLM paraphrase
+    // to preserve specific conflict details that agents need for targeted repair.
 
     this.logTrace({
       step: 'supervisor',
@@ -2793,11 +2778,10 @@ ${conflictDigest || '（无冲突）'}
   private async runCritic(state: BusinessStateType): Promise<Partial<BusinessStateType>> {
     const startedAt = Date.now()
 
-    // P11.18 · Ablation gate. When ABLATION_DISABLE_CRITIC=true, the
-    // critic subgraph is skipped entirely so we can measure BMC quality
-    // without conflict detection. Used by yc-vs-runners.ts --no-critic.
-    // Returns empty conflicts, downstream synthesizer / debate get no work.
-    if (process.env.ABLATION_DISABLE_CRITIC === 'true') {
+    // P11.18 · Ablation gate. When noCritic is set (via ablationContext),
+    // the critic subgraph is skipped entirely so we can measure BMC quality
+    // without conflict detection.
+    if (ablationContext.get().noCritic) {
       auditLogger.info({
         action: 'business-langgraph.runCritic.ablation-skipped',
         userId: state.userId,

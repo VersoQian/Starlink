@@ -112,22 +112,29 @@ export function openStreamLifecycle(
   // prevents false-positives but the contract is cleaner with non-null
   // ASAP.
   const ownerPid = `gateway-${process.pid}-${nanoid(6)}`
-  const heartbeatTimer = setInterval(() => {
+  const heartbeatDisabled =
+    process.env.BENCHMARK_DISABLE_PERSISTENCE === 'true' ||
+    process.env.BENCHMARK_DISABLE_STREAM_HEARTBEAT === 'true'
+  const heartbeatTimer = heartbeatDisabled
+    ? null
+    : setInterval(() => {
+        void deps.conversationMemoryStore
+          .touchHeartbeat(context.traceId, ownerPid)
+          .catch((err) => {
+            auditLogger.warn({
+              action: 'stream-lifecycle.heartbeat.failed',
+              requestId: context.traceId,
+              workflowId: context.workspaceId,
+              userId: context.userId,
+              metadata: { error: err instanceof Error ? err.message : String(err) }
+            })
+          })
+      }, HEARTBEAT_INTERVAL_MS)
+  if (!heartbeatDisabled) {
     void deps.conversationMemoryStore
       .touchHeartbeat(context.traceId, ownerPid)
-      .catch((err) => {
-        auditLogger.warn({
-          action: 'stream-lifecycle.heartbeat.failed',
-          requestId: context.traceId,
-          workflowId: context.workspaceId,
-          userId: context.userId,
-          metadata: { error: err instanceof Error ? err.message : String(err) }
-        })
-      })
-  }, HEARTBEAT_INTERVAL_MS)
-  void deps.conversationMemoryStore
-    .touchHeartbeat(context.traceId, ownerPid)
-    .catch(() => undefined)
+      .catch(() => undefined)
+  }
 
   // Handoff queue + subscriber. The subscriber pushes into an in-memory
   // queue; the generator drains it between yields so events appear in
@@ -150,7 +157,9 @@ export function openStreamLifecycle(
     handoffLogger,
     drainHandoffs,
     unsubscribeHandoff,
-    stopHeartbeat: () => clearInterval(heartbeatTimer),
+    stopHeartbeat: () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+    },
     streamStartedAt: Date.now()
   }
 }

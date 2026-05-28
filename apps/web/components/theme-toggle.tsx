@@ -1,18 +1,20 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useTheme as useNextTheme } from 'next-themes'
 import { useTheme as useAppTheme } from '@/lib/theme'
 
 export function ThemeToggle() {
   const [mounted, setMounted] = useState(false)
   const mode = useAppTheme((state) => state.mode)
   const setAppTheme = useAppTheme((state) => state.setTheme)
-  const { setTheme } = useNextTheme()
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', mode === 'dark')
+  }, [mode])
 
   if (!mounted) {
     return (
@@ -31,7 +33,6 @@ export function ThemeToggle() {
       type="button"
       onClick={() => {
         setAppTheme(nextMode)
-        setTheme(nextMode)
       }}
       className="group relative inline-flex h-8 w-[70px] items-center rounded-full border border-[#DDD2FF] bg-[#F3EEFF] p-1 shadow-[0_10px_30px_-22px_rgba(109,74,255,0.9)] transition focus:outline-none focus:ring-2 focus:ring-[#8B7CFF]/60 focus:ring-offset-2 dark:border-slate-700 dark:bg-slate-900"
       aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}

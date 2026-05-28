@@ -8,6 +8,8 @@
  * `releaseDebateBudget(traceId)` between cases.
  */
 
+import { ablationContext } from '../ablation-context.js'
+
 export type OrchestrationMode = 'legacy' | 'registry'
 
 export function getOrchestrationMode(): OrchestrationMode {
@@ -15,11 +17,9 @@ export function getOrchestrationMode(): OrchestrationMode {
 }
 
 export function isDebateEnabled(): boolean {
-  // P11.18 · Ablation override: when ABLATION_DISABLE_DEBATE=true,
-  // debate is forced off regardless of DEBATE_ENABLED. Used by
-  // yc-vs-runners.ts --no-debate to measure BMC quality without
-  // adversarial loop.
-  if (process.env.ABLATION_DISABLE_DEBATE === 'true') return false
+  // P11.18 · Ablation override: when noDebate is set (via ablationContext),
+  // debate is forced off regardless of DEBATE_ENABLED.
+  if (ablationContext.get().noDebate) return false
   return process.env.DEBATE_ENABLED === 'true'
 }
 

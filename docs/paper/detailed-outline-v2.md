@@ -1,21 +1,15 @@
-# Starlink 论文 · 详细技术 outline v2
+# Starlink
 
-> 在 v1 章节框架基础上，每个小节列出**具体待写内容**（话题点 + 代码引用 + 数字证据），方便逐节扩写时直接照单填料。
->
-> 引用约定：`packages/server/src/...:LNN` 表示文件路径 + 行号；`agent.yaml` 指 12 份 agent 配置。
->
-> 文档来源：`docs/paper/outline.md`（章节骨架）+ `docs/paper/full-draft-v1.md`（已完成 11k 字初稿）+ Explore agent 系统扫描（41 项具体实现细节）。
 
 ---
 
 ## 摘要 / Abstract
 
-**目标**：600 中文 + 250 英文
 
 **待写内容**：
 
 - 问题陈述：CB Insights 2023 创业失败前两位（"no market need" 42% / "got outcompeted" 19%），证明 BMC 迭代质量决定创业成败
-- 单 LLM 4 大局限的实证：12 YC case 上 gpt-solo 在 KEY_PARTNERSHIPS 维度 **12/12 案例全 0 分**
+- 单 LLM 4 大局限的实证：1
 - Starlink 方案三段式：12-agent 协同 + 双语混合 RAG + ReactFlow 双模式画布
 - 4 贡献 C1-C4 一句话各概括
 - 关键定量结果（来自 `yc-vs-runners-20260508-012752.md`）：
@@ -417,7 +411,7 @@ type Subscription {
 
 ## 第 5 章 · 知识增强机制 RAG（~4500 字）
 
-### 5.1 知识接入（~600 字）
+### 5.1 知识接入
 
 4 种入库路径表：
 
@@ -437,7 +431,7 @@ type Subscription {
 - `mammoth`（DOCX）、`pdf-parse`（PDF）、`xlsx`（Excel）、`marked`（Markdown）、`jsdom`（HTML）
 - 二进制 vs 文本路径 sniff（`detectContentType` + `isBinaryContentType`）
 
-### 5.2 Chunking 策略（~500 字）
+### 5.2 Chunking 策略
 
 **算法**（`application/kb-store.ts:chunkText`）：
 - 段落优先切分（`\n{2,}`）
@@ -450,8 +444,7 @@ type Subscription {
 - 太长（> 1000 字）→ 浪费 embedding API 配额，关键 token 注意力被稀释
 - 600 字是经验值，未来可做 ablation 验证
 
-### 5.3 Embedding 选型（~600 字）
-
+### 5.3 Embedding 选型
 **主选 vs 备选**：
 
 | Provider | 模型 | 维度 | 优势 |
@@ -470,7 +463,7 @@ type Subscription {
 - Wizard prefill 25 次 embedding 调用：cold 26.6s → cache hit 11.9s（-55%）
 - 首次仍慢因 Aliyun 序列化 per-API-key
 
-### 5.4 双语词法分词【算法 5-1，关键贡献 C2 第一部分】（~700 字）
+### 5.4 双语词法分词
 
 **完整算法清单**（贴出 `application/kb-store.ts:tokenizeForLexical` 完整 TypeScript）
 
@@ -484,7 +477,7 @@ type Subscription {
 - whitespace + lowercase：对中文等同 unigram，无短语
 - 我们的方案：unicode-class-based + bigram，一次扫描 O(n)
 
-### 5.5 Hybrid RAG with RRF Fusion【算法 5-2，关键贡献 C2 第二部分】（~900 字）
+### 5.5 Hybrid RAG with RRF Fusion
 
 **RRF 公式**（贴 LaTeX）：
 
@@ -507,7 +500,7 @@ $$\text{RRF\_score}(d) = \sum_{r \in \text{rankers}} \frac{1}{k + \text{rank}_r(
 - 网络稳定：hybrid ≈ vector，MRR=1.0 都饱和
 - 网络抖动：hybrid +28% recall（关键发现，第 7.2 节详述）
 
-### 5.6 Score-threshold post-filter（~400 字）
+### 5.6 Score-threshold post-filter
 
 - `KB_SEARCH_MIN_SCORE = 0.55`（cosine 阈值）
 - Hybrid 模式特殊：`sem < 0.55 AND lex >= 2 仍保留`（强词法信号兜底）
@@ -519,22 +512,22 @@ $$\text{RRF\_score}(d) = \sum_{r \in \text{rankers}} \frac{1}{k + \text{rank}_r(
 - 去重 → 写入 `metadata.citations` field
 - 反向查询 `cardsReferencingEvidence(conversationId, evidenceId)`：用户在 EvidenceDrawer 看完 chunk 可点击"定位相关卡片"
 
-### 5.8 Agent ↔ KB 自动绑定（~400 字）
+### 5.8 Agent ↔ KB 自动绑定
 
 - `kb_agent_bindings (agent_id, kb_id, auto_search)` 三元组
 - mention-router 调用时自动注入：最多 5 KB × top-3 chunk × 每 chunk 200 字 = 3000 字预算
 - 防 prompt context 爆炸
 
-### 5.9 Cross-step Inference（P12 增强 · ~300 字）
+### 5.9 Cross-step Inference
 
 - 单步 retrieval 0 hit 时，用其他步骤的 chunks 间接推断
 - 实测：3 KB seed 数据下，covered 3→4 / partial 3→2 / absent 1→1（hypothesis 被救回）
 
 ---
 
-## 第 6 章 · 可视化商业画布交互（前端章 · ~5500 字）
+## 第 6 章 · 可视化商业画布交互
 
-### 6.1 设计目标与挑战（~600 字）
+### 6.1 设计目标与挑战
 
 4 个挑战各 100-150 字：
 
@@ -543,7 +536,7 @@ $$\text{RRF\_score}(d) = \sum_{r \in \text{rankers}} \frac{1}{k + \text{rank}_r(
 3. **流式增量更新**：streaming generation 时画布要平滑增量，不能整体重排
 4. **视觉层级**：cell + edge + chip + drawer + chat 多层 UI 同时存在层级要清晰
 
-### 6.2 Editorial Boardroom v2 设计语言（~800 字）
+### 6.2 Editorial Boardroom v2 设计语言
 
 **三字体策略表**：
 - Display: Fraunces (variable, 3 optical sizes)，标题 / kicker
@@ -569,7 +562,7 @@ byline: { market: '#9B8E70', product: '#7A8B7E', finance: '#6E7A8C', critic: '#8
 - `<body>` 默认 `text-paper`（warm off-white）会被所有 light surface 继承 → drawer 文字几乎不可见
 - 修复：body 改 `text-stratum-ink`，dark surface 自行声明 `text-paper`
 
-### 6.3 双模式画布（~800 字）
+### 6.3 双模式画布
 
 **【图 6-1】双模式截图（待 Gemini）**
 
@@ -580,7 +573,7 @@ byline: { market: '#9B8E70', product: '#7A8B7E', finance: '#6E7A8C', critic: '#8
 
 切换动画 250ms ease-out，`isAnimating` state 防止动画期间用户拖拽。
 
-### 6.4 节点类型与 ReactFlow 集成（~700 字）
+### 6.4 节点类型与 ReactFlow 集成
 
 **【表 6-1】6 类节点表**（域 / 视觉 / 数据来源）
 
@@ -604,7 +597,7 @@ report-card        6 段报告卡 / 420×200px / report-writer
 - critic 冲突边经常跨多个 BMC cell（resource-goal: KR ↔ RS, channel-product: CH ↔ VP, compliance-business: CS ↔ KA）
 - `interactionWidth=24` 增加点击容差（不需精准点 1.5px 线）
 
-### 6.5 实时增量更新（~700 字）
+### 6.5 实时增量更新
 
 **applyDelta 算法**（贴 TypeScript）：
 ```typescript
@@ -625,7 +618,7 @@ applyDelta: (delta: GraphDelta) => {
 - 现象：BMC pipeline 持久化 18 节点，但前端只收到 3 节点（subscription drop 或 race）
 - 修复：`status='completed'` 时强制 final refetch（`loadLatestGraph`）+ defensive merge（incoming snapshot 节点更少时不清空，仅 union）
 
-### 6.6 浮动 UI 组件（~800 字）
+### 6.6 浮动 UI 组件
 
 **【图 6-2】浮动 UI 全景图（待 Gemini）**
 
@@ -647,14 +640,14 @@ applyDelta: (delta: GraphDelta) => {
 - 4px grab strip，1.5px navy hover
 - localStorage 持久化（key 含 drawer 名）
 
-### 6.7 Anti-Overlap 反重叠（~500 字）
+### 6.7 Anti-Overlap 反重叠
 
 3 条机制：
 - `shiftLeftForPanel`：CitationPanel 打开时 CoachLive 列向左 372px
 - viewport < 1100px 互斥：chat ↔ citation 自动关闭一个
 - z-index 分层：edge zIndex=10 浮于 node 之上（critic 红线）
 
-### 6.8 Citation 可视化与跳转（~400 字）
+### 6.8 Citation 可视化与跳转
 
 **3 步交互链**：
 1. 节点内容 markdown 渲染时识别 `[[ref:]]` tag → 转 chip
@@ -665,7 +658,7 @@ applyDelta: (delta: GraphDelta) => {
 - 修前：本地 `knowledgeEvidence` store 没有 chunk 时显示"原文不可见"
 - 修后：fall back 到 `kbChunkLookup` 实时 PG 查询
 
-### 6.9 可观测性 UI（~600 字）
+### 6.9 可观测性 UI
 
 **【图 6-3】AgentHealthChip 双状态截图（待 Gemini）**
 
@@ -678,8 +671,7 @@ applyDelta: (delta: GraphDelta) => {
 
 ---
 
-## 第 7 章 · 实验评估（~6500 字）★ 论文核心数据章
-
+## 第 7 章 · 实验评估
 ### 7.1 实验设置（~600 字）
 
 **硬件 + 软件表**：

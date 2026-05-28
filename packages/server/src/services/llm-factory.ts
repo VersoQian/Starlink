@@ -82,11 +82,19 @@ function isDeepSeekThinkingModel(model: string): boolean {
 }
 
 function buildModelKwargs(model: string): Record<string, unknown> | undefined {
-  if (!isDeepSeekThinkingModel(model)) return undefined
-  return {
-    thinking: { type: 'enabled' },
-    reasoning_effort: 'high',
+  if (isDeepSeekThinkingModel(model)) {
+    return {
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+    }
   }
+  // GLM-4.5 / GLM-4.6 on Bailian default to thinking mode (3K+ reasoning tokens
+  // per call). For benchmark / production we want fast non-thinking output.
+  const m = model.toLowerCase()
+  if (m.startsWith('glm-4.5') || m.startsWith('glm-4.6')) {
+    return { enable_thinking: false }
+  }
+  return undefined
 }
 
 /**
@@ -160,44 +168,53 @@ export function clampMaxTokens(
 }
 
 export function createLLMModelFor(profile: AgentProfile): BusinessModel | null {
-  const family = detectFamily(profile.model)
+  // P12 · evaluation hook. When LLM_MODEL_OVERRIDE is set, every agent
+  // resolves to the same model via the fallback (LLM_API_KEY / LLM_BASE_URL)
+  // route. Used by the cross-vendor benchmark so all 12 agents run on the
+  // same backend as the baseline. Thinking-kwargs are disabled because the
+  // override model may not be DeepSeek-V4-family.
+  const overrideModel = process.env.LLM_MODEL_OVERRIDE
+  const effectiveModel = overrideModel || profile.model
+  const family = overrideModel ? 'openai' : detectFamily(profile.model)
   const cfg = readFamilyConfig(family)
   if (!cfg) {
     auditLogger.warn({
       action: 'llm-factory.no-api-key',
-      metadata: { agentId: profile.id, model: profile.model, family }
+      metadata: { agentId: profile.id, model: effectiveModel, family }
     })
     return null
   }
-  const key = cacheKeyFor(profile, family, cfg.baseURL)
+  const cacheProfile = overrideModel ? { ...profile, model: effectiveModel } : profile
+  const key = cacheKeyFor(cacheProfile, family, cfg.baseURL)
   const cached = llmCache.get(key)
   if (cached) {
     auditLogger.info({
       action: 'llm-factory.cache-hit',
-      metadata: { agentId: profile.id, model: profile.model, family, source: cfg.source }
+      metadata: { agentId: profile.id, model: effectiveModel, family, source: cfg.source }
     })
     return cached
   }
 
   const configuration = cfg.baseURL ? { baseURL: cfg.baseURL } : undefined
-  const modelKwargs = buildModelKwargs(profile.model)
+  const modelKwargs = overrideModel ? undefined : buildModelKwargs(profile.model)
   const cappedMaxTokens = clampMaxTokens(profile)
   auditLogger.info({
     action: 'llm-factory.created',
     metadata: {
       agentId: profile.id,
-      model: profile.model,
+      model: effectiveModel,
       family,
       source: cfg.source,
       hasBaseURL: Boolean(cfg.baseURL),
       hasThinking: Boolean(modelKwargs),
-      maxTokens: cappedMaxTokens ?? null
+      maxTokens: cappedMaxTokens ?? null,
+      override: Boolean(overrideModel)
     }
   })
 
   const instance = new ChatOpenAI({
     apiKey: cfg.apiKey,
-    model: profile.model,
+    model: effectiveModel,
     temperature: profile.temperature,
     maxTokens: cappedMaxTokens,
     configuration,

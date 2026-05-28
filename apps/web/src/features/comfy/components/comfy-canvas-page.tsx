@@ -16,6 +16,7 @@ import { AgentHealthChip } from './agent-health-chip'
 import { MemoryDrawer } from './memory-drawer'
 import { CanvasWizardPanel } from './canvas-wizard-panel'
 import { CanvasLiveCoach } from './canvas-live-coach'
+import { MentionProgressPill } from './mention-progress-pill'
 import { SubAgentWireWidget } from './sub-agent-wire-widget'
 import { CanvasHitlBanner } from './canvas-hitl-banner'
 import { CanvasPromptDialog } from './canvas-prompt-dialog'
@@ -540,7 +541,29 @@ export function CanvasPage({
   // and fires the 8-agent pipeline.
   const handleGraduateToBmc = useCallback(async () => {
     if (isOrchestratorProcessing) return
-    const { chatMessages: msgs } = useComfyStore.getState()
+    // Re-fire guard: if BMC has already been generated (≥1 cc-bmc-card on
+    // canvas), refuse to start the 8-agent pipeline again. Without this
+    // guard, mis-clicking "探索完毕 · 开始生成 BMC" after a successful
+    // generation kicks off a full ~5-minute re-run that duplicates every
+    // cell (BMC IDs are deterministic by agent×domain → addMacraNode
+    // overwrites in place, but the user pays the latency + token cost
+    // and gets a wave of redundant graph/diff churn). The right next
+    // action when BMC already exists is to @-mention an agent for
+    // targeted updates, or click "生成报告" for the report.
+    const { nodes: storeNodes, chatMessages: msgs } = useComfyStore.getState()
+    const bmcCount = storeNodes.filter(
+      (n) => typeof (n.data as { meta?: { macraType?: string } })?.meta?.macraType === 'string'
+        && (n.data as { meta: { macraType: string } }).meta.macraType === 'cc-bmc-card'
+    ).length
+    if (bmcCount > 0) {
+      appendChatMessage({
+        role: 'assistant',
+        content: `BMC 已生成（${bmcCount}/9 cells）。要补充或修改某个维度，请 @ 对应的 agent（例如 \`@market-agent 把客户细分聚焦到 SaaS 决策者\`）；要写报告请点 "生成报告"。`,
+        source: 'scripted'
+      })
+      setChatOpen(true)
+      return
+    }
     const stitched = msgs
       .slice(-12)
       .map((m) => `${m.role === 'user' ? '用户' : '教练'}：${m.content}`)
@@ -550,7 +573,7 @@ export function CanvasPage({
     await callLangGraph(fullSeed, 'seed').catch((err) => {
       console.error('[graduate] BMC pipeline failed', err)
     })
-  }, [callLangGraph, isOrchestratorProcessing, seedInput])
+  }, [appendChatMessage, callLangGraph, isOrchestratorProcessing, seedInput])
 
   const handleRunCritic = useCallback(async () => {
     // P12 fix M2 · empty-canvas guard. Re-Calc on empty BMC returns
@@ -778,6 +801,10 @@ export function CanvasPage({
         <CanvasStageStrip />
         <div className="flex-1 relative flex flex-col min-h-0">
           {viewMode === 'freeform' ? freeformContent : bmcGridContent}
+          {/* Floating top-center pill: shows running mention elapsed
+              time + "done · N cells" morph for ~8s after completion.
+              View-independent so it's visible in both 自由 and 九宫格. */}
+          <MentionProgressPill />
           {viewMode === 'freeform' ? (
             <>
               {!chatOpen && !citationOpen ? <CanvasPerspectiveToggle /> : null}
@@ -926,7 +953,12 @@ export function CanvasPage({
           isRecalculating={isOrchestratorProcessing}
         />
       }
-      main={viewMode === 'freeform' ? freeformContent : bmcGridContent}
+      main={
+        <div className="relative h-full w-full">
+          {viewMode === 'freeform' ? freeformContent : bmcGridContent}
+          <MentionProgressPill />
+        </div>
+      }
       persistentOverlay={
         <>
           <CanvasTutorialDialog

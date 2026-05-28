@@ -49,7 +49,7 @@ const DIM_AREA: Record<BmcDim, string> = {
   REVENUE: 'revenue',
 }
 
-const BYLINE_COLOR: Record<AgentByline, string> = {
+const BYLINE_COLOR: Partial<Record<AgentByline, string>> = {
   market:      'text-byline-market',
   product:     'text-byline-product',
   finance:     'text-byline-finance',
@@ -103,7 +103,7 @@ interface FrontpageCellProps {
 }
 
 function FrontpageCell({ cell, area }: FrontpageCellProps) {
-  const tint = cell.byline ? BYLINE_COLOR[cell.byline] : 'text-paper-ash3'
+  const tint = cell.byline ? (BYLINE_COLOR[cell.byline] ?? 'text-paper-ash3') : 'text-paper-ash3'
   const empty = !cell.content
 
   return (

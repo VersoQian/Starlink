@@ -255,7 +255,7 @@ async function callDeepSeekJudge(
         // Lower temperature for evaluator stability — we want repeatable
         // scores, not creative ones.
         temperature: 0.2,
-        max_tokens: 400
+        max_tokens: 1500
       }),
       signal: ac.signal
     })
@@ -359,7 +359,7 @@ async function callDeepSeekJudgeWithTemp(
         ],
         response_format: { type: 'json_object' },
         temperature,
-        max_tokens: 400
+        max_tokens: 1500
       }),
       signal: ac.signal
     })

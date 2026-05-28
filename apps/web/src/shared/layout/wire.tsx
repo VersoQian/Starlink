@@ -31,7 +31,7 @@ export type WireDispatch = {
   citations?: string[]
 }
 
-const ROLE_TINT: Record<AgentByline, string> = {
+const ROLE_TINT: Partial<Record<AgentByline, string>> = {
   market:      'text-byline-market',
   product:     'text-byline-product',
   finance:     'text-byline-finance',
@@ -118,7 +118,7 @@ function WireEntry({ dispatch }: { dispatch: WireDispatch }) {
           {time}
         </span>
         <span
-          className={`font-display text-[11px] uppercase tracking-kicker font-[600] ${ROLE_TINT[dispatch.role]}`}
+          className={`font-display text-[11px] uppercase tracking-kicker font-[600] ${ROLE_TINT[dispatch.role] ?? 'text-paper-ash3'}`}
         >
           {dispatch.agentName}
         </span>

@@ -1,0 +1,21 @@
+\begin{table}[htbp]
+\centering
+\begin{threeparttable}
+\caption{Mechanism-level interpretation of the ablation results.}
+\label{tab:ablation-mechanism-reading}
+\begin{tabular}{llll}
+\toprule
+Comparison & Main affected score & Observed change & Interpretation \\
+\midrule
+Full $\rightarrow$ No-RAG & Evidence & 4.00 $\rightarrow$ 1.83 & Retrieval grounding is the clearest measured contributor. \\
+Full $\rightarrow$ No-critic & Consistency / Repair & 5.00 $\rightarrow$ 4.33; 3.92 $\rightarrow$ 2.83 & The critic helps expose and route cross-cell conflicts. \\
+Full $\rightarrow$ No-debate & Repair & 3.92 $\rightarrow$ 3.58 & The debate loop does not improve mean score in this run. \\
+Full $\rightarrow$ Minimal & Evidence / Composite & 4.00 $\rightarrow$ 2.58; 4.53 $\rightarrow$ 3.84 & Removing all three mechanisms weakens the pipeline. \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item The no-debate condition is close to full on composite score (+0.04). This should be read as a limited observed effect under the current sample and rubric, not as evidence that debate is harmful or unnecessary.
+\end{tablenotes}
+\end{threeparttable}
+\end{table}

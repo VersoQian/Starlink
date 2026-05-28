@@ -194,18 +194,17 @@ export async function reflectOnIdeation(
 
   // P10 fix C · short-circuit on repeated user message. If the user just
   // sent essentially the same thing as their previous turn, the Coach
-  // should NOT loop back to the same Socratic question — instead nudge
-  // toward graduation. Saves an LLM call AND breaks the WHY/WHY loop.
+  // should NOT loop back to the same Socratic question — instead gently
+  // switch from extraction to organization. Saves an LLM call AND breaks
+  // the WHY/WHY loop without making /wizard feel like a correction.
   if (request.event.type === 'user-message') {
     const lastUserMsg = [...request.recentChat].reverse().find((m) => m.role === 'user')
     if (lastUserMsg && isMessageRepeat(lastUserMsg.content, request.event.label)) {
       return {
         scaffold: 'meta',
         content:
-          '我注意到你重复了同一个想法 — 这通常说明你已经讲得足够清楚，需要换个动作了。\n\n' +
-          '建议二选一：\n' +
-          '- 输入 `/wizard` 走 7 步结构化引导（推荐，每步聚焦一个维度）\n' +
-          '- 或者直接说**"开始生成 BMC"**，让 8 个 agent 协同把你的想法拆成 9 个商业维度',
+          '我注意到你在围绕同一个想法反复确认 — 这其实是好信号，说明核心方向开始稳定了。\n\n' +
+          '你可以继续自由描述，我会边聊边归纳；如果想更快补齐客户、价值、渠道、收入等关键维度，也可以输入 `/wizard` 走 7 步结构化引导。',
         source: 'scripted',
         latencyMs: Date.now() - startedAt
       }

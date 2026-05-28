@@ -9,7 +9,7 @@ model: deepseek-chat
 # constraint as critic — v4-pro/reasoner reject forced tool_choice; only
 # deepseek-chat works.
 temperature: 0.2
-max_tokens: 800
+max_tokens: 8000
 timeout_ms: 15000
 retries: 1
 cacheable: false

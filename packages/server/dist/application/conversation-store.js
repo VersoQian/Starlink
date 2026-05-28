@@ -28,6 +28,33 @@ const getWorkspaceMetadata = usePg ? getWorkspaceMetadataPg : getWorkspaceMetada
 const listWorkspaceMetadata = usePg ? listWorkspaceMetadataPg : listWorkspaceMetadataFile;
 const listWorkspaceMetadataHistory = usePg ? listWorkspaceMetadataHistoryPg : listWorkspaceMetadataHistoryFile;
 const updateWorkspaceMetadata = usePg ? updateWorkspaceMetadataPg : updateWorkspaceMetadataFile;
+/**
+ * P12 fix N2 · short-lived metadata cache. See assertWorkspacePermission
+ * for why. Cache entry hits the PG once per workspace per ~1s; concurrent
+ * callers reach the same in-flight Promise so they don't all fire
+ * parallel queries on cold cache.
+ */
+const METADATA_CACHE_TTL_MS = 1000;
+const metadataCache = new Map();
+async function getWorkspaceMetadataCached(workspaceId, seedOwnerId) {
+    const now = Date.now();
+    const cached = metadataCache.get(workspaceId);
+    if (cached && cached.expiresAt > now) {
+        return cached.promise;
+    }
+    const promise = getWorkspaceMetadata(workspaceId, { id: seedOwnerId });
+    // Cache the in-flight promise so concurrent first-callers share it
+    // (5 parallel resolvers on cold cache → 1 PG query, not 5).
+    metadataCache.set(workspaceId, { promise, expiresAt: now + METADATA_CACHE_TTL_MS });
+    // Drop from cache on rejection so a transient failure doesn't poison
+    // the next 1s of requests.
+    promise.catch(() => {
+        const current = metadataCache.get(workspaceId);
+        if (current?.promise === promise)
+            metadataCache.delete(workspaceId);
+    });
+    return promise;
+}
 export class ConversationStore {
     constructor({ eventBus, runtimeRepository, businessLangGraphService = new BusinessLangGraphService(), bmcFlowAdapter, toolRegistry, bmcFlowRuntime = readBmcFlowRuntime(), hitlApprovalStore }) {
         // Wave 3 A: the in-memory resolver Map serves the same-instance fast-path
@@ -48,7 +75,6 @@ export class ConversationStore {
         this.eventBus = eventBus;
         this.runtimeRepository = runtimeRepository;
         this.businessLangGraphService = businessLangGraphService;
-        this.mentionRouter = new MentionRouter(businessLangGraphService);
         this.toolRegistry = toolRegistry ?? null;
         this.bmcFlowAdapter = bmcFlowAdapter ?? (toolRegistry ? new BmcFlowAdapter(toolRegistry) : null);
         this.bmcFlowRuntime = bmcFlowRuntime;
@@ -57,6 +83,19 @@ export class ConversationStore {
         this.assetStore = new WorkspaceAssetStore(runtimeRepository);
         this.eventStore = new RuntimeEventStore(runtimeRepository, eventBus);
         this.memoryStore = new ConversationMemoryStore();
+        // P15 · pass a message-fetcher closure so MentionRouter can pull
+        // prior user messages (the /chat seed) as agent context. Without
+        // this, the first @-mention on a fresh canvas has no idea what the
+        // user's pitch was — agents refuse and force a re-paste.
+        const memStore = this.memoryStore;
+        this.mentionRouter = new MentionRouter(businessLangGraphService, undefined, async (conversationId, limit) => {
+            const rows = await memStore.listMessages(conversationId, limit);
+            return rows.map((m) => ({
+                role: (m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'ai'),
+                content: m.content,
+                createdAt: typeof m.createdAt === 'string' ? m.createdAt : String(m.createdAt)
+            }));
+        });
         this.contextBuilder = new WorkspaceContextBuilder(this.memoryStore);
         this.hitlApprovalStore = hitlApprovalStore === undefined
             ? (this.hitlEnabled ? new HitlApprovalStore() : null)
@@ -150,7 +189,7 @@ export class ConversationStore {
                 record.graph = currentGraph;
                 await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph);
                 await this.sessionStore.updateConversation(id, record);
-                await this.graphStore.persistGraph(currentGraph);
+                await this.persistGraphWithWarning(workspaceId, id, currentGraph);
                 const baseEvent = {
                     type: 'graph/appended',
                     conversationId: id,
@@ -266,7 +305,12 @@ export class ConversationStore {
             ...input,
             userId: input.userId ?? userId,
             scope: parseMemoryScope(input.scope) ?? 'workspace',
-            kind: parseMemoryKind(input.kind) ?? 'insight',
+            // P14 P2 · `insight` legacy default replaced with `summary`. Old
+            // 'insight' write path was used as a generic fallback; new code
+            // should specify (facet, category) explicitly via upsertMemory's
+            // canonical axes — this default only fires when callers omit kind
+            // entirely (rare).
+            kind: parseMemoryKind(input.kind) ?? 'summary',
             sourceType: input.sourceType ?? 'manual'
         });
     }
@@ -486,6 +530,26 @@ export class ConversationStore {
     async mentionAgent(workspaceId, userId, input) {
         await this.assertWorkspacePermission(workspaceId, userId, 'workspace.write');
         const baseGraph = await this.getGraph(workspaceId);
+        // P15 · build priorContext from client-supplied chat history. The
+        // /chat homepage stores its seed in localStorage and the chat dock
+        // never persists user messages to conversation_messages, so the
+        // server-side fetcher comes up empty on first @-mention. Trust
+        // the client for context (it's just text, not state).
+        const priorContext = (() => {
+            if (!input.priorChat || input.priorChat.length === 0)
+                return undefined;
+            const useful = input.priorChat
+                .map((m) => m.trim())
+                .filter((m) => m.length > 0)
+                .filter((m) => !/^\s*@\w[-\w]*\s+/.test(m) || m.length > 80);
+            if (useful.length === 0)
+                return undefined;
+            const seed = useful[0];
+            const tail = useful.slice(1).slice(-2);
+            const unique = [seed, ...tail.filter((m) => m !== seed)];
+            const lines = unique.map((m, i) => `[${i === 0 ? '原始 idea' : `近期补充 ${i}`}] ${m.slice(0, 400)}`);
+            return `## 用户先前在本对话里说过的话\n${lines.join('\n')}`;
+        })();
         const result = await this.mentionRouter.mention({
             workspaceId,
             userId,
@@ -494,7 +558,8 @@ export class ConversationStore {
             message: input.message,
             canvasNodes: baseGraph.nodes,
             canvasEdges: baseGraph.edges,
-            knowledgeEvidence: []
+            knowledgeEvidence: [],
+            priorContext
         });
         if (!result.refused && (result.appendedNodes.length > 0 || result.appendedEdges.length > 0)) {
             const newNodeIds = new Set(result.appendedNodes.map((n) => n.id));
@@ -523,7 +588,15 @@ export class ConversationStore {
                 edges: [...baseGraph.edges.filter((e) => !newEdgeIds.has(e.id)), ...newEdges]
             };
             await this.graphStore.setWorkspaceGraph(workspaceId, updatedGraph);
-            await this.graphStore.persistGraph(updatedGraph);
+            // P12 · Use warning helper when we have a conversation context
+            // (mention came from an active chat); otherwise let it throw so
+            // the GraphQL mutation surfaces the error to the caller.
+            if (input.conversationId) {
+                await this.persistGraphWithWarning(workspaceId, input.conversationId, updatedGraph);
+            }
+            else {
+                await this.graphStore.persistGraph(updatedGraph);
+            }
             const conversations = await this.sessionStore.getConversationsByWorkspace(workspaceId);
             for (const item of conversations) {
                 const nextRecord = {
@@ -698,7 +771,7 @@ export class ConversationStore {
                     currentGraph = update.graph;
                     record.graph = currentGraph;
                     await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph);
-                    await this.graphStore.persistGraph(currentGraph);
+                    await this.persistGraphWithWarning(workspaceId, conversationId, currentGraph);
                     record.knowledgeEvidence = update.knowledgeEvidence ?? [];
                     await this.sessionStore.updateConversation(conversationId, record);
                     if (!initialized) {
@@ -725,7 +798,7 @@ export class ConversationStore {
                     record.graph = currentGraph;
                     await this.graphStore.setWorkspaceGraph(workspaceId, currentGraph);
                     await this.sessionStore.updateConversation(conversationId, record);
-                    await this.graphStore.persistGraph(currentGraph);
+                    await this.persistGraphWithWarning(workspaceId, conversationId, currentGraph);
                     const event = initialized
                         ? {
                             type: 'graph/diff',
@@ -782,6 +855,23 @@ export class ConversationStore {
                     continue;
                 }
                 if (update.type === 'status') {
+                    continue;
+                }
+                if (update.type === 'persistence-warning') {
+                    // P12 · Persistence visibility passthrough. The stream raised
+                    // a warning (e.g. writeConversationSummary memory_items insert
+                    // failed) — translate to a 'persistence/warning' ConversationEvent
+                    // and publish so the front-end chat dock renders a yellow ⚠
+                    // bubble. The conversation itself is unaffected.
+                    await publishEvent({
+                        type: 'persistence/warning',
+                        conversationId,
+                        payload: {
+                            severity: update.severity ?? 'warning',
+                            source: update.source,
+                            message: update.message
+                        }
+                    });
                     continue;
                 }
                 if (update.type === 'subagent-progress') {
@@ -894,18 +984,20 @@ export class ConversationStore {
                     }
                 });
             }
-            const completeEvent = {
-                type: 'status',
-                conversationId,
-                status: 'completed'
-            };
-            await publishEvent(completeEvent);
             record.metadata = {
                 ...record.metadata,
                 status: 'completed',
                 updatedAt: new Date()
             };
             await this.sessionStore.updateConversation(conversationId, record);
+            // P12 race fix · run persistConversationCompletion BEFORE emitting
+            // status='completed'. The frontend conversation-sync-engine cancels
+            // the WS subscription as soon as status='completed' arrives, so any
+            // 'persistence/warning' event emitted after the completion event
+            // would be invisible to live subscribers (still saved to the ring
+            // buffer, but the user would only see it after a separate reconnect
+            // — which doesn't happen for a finished conversation). Order below
+            // ensures the warning rides ahead of completion.
             await this.persistConversationCompletion({
                 workspaceId,
                 userId,
@@ -914,6 +1006,12 @@ export class ConversationStore {
                 graph: currentGraph,
                 decision: latestDecision
             });
+            const completeEvent = {
+                type: 'status',
+                conversationId,
+                status: 'completed'
+            };
+            await publishEvent(completeEvent);
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -922,6 +1020,21 @@ export class ConversationStore {
             if (stack) {
                 console.error('Stack trace:', stack);
             }
+            record.metadata = {
+                ...record.metadata,
+                status: 'failed',
+                updatedAt: new Date()
+            };
+            await this.sessionStore.updateConversation(conversationId, record);
+            // P12 race fix · same reasoning as the success path: persistence
+            // warning must fire before status='failed' so live subscribers
+            // receive both events before unsubscribing.
+            await this.persistConversationFailure({
+                workspaceId,
+                userId,
+                conversationId,
+                message
+            });
             const failedEvent = {
                 type: 'status',
                 conversationId,
@@ -929,18 +1042,6 @@ export class ConversationStore {
                 message
             };
             await publishEvent(failedEvent);
-            record.metadata = {
-                ...record.metadata,
-                status: 'failed',
-                updatedAt: new Date()
-            };
-            await this.sessionStore.updateConversation(conversationId, record);
-            await this.persistConversationFailure({
-                workspaceId,
-                userId,
-                conversationId,
-                message
-            });
         }
     }
     createBusinessStream(context) {
@@ -984,7 +1085,26 @@ export class ConversationStore {
             });
         }
         catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
             console.error('[conversation-store] failed to persist conversation completion memory', error);
+            // P12 · Surface to user. The conversation itself is already
+            // marked completed in-memory; only the durable summary write
+            // failed (memory_items / session status / outcome). User can
+            // continue but cross-session memory is missing this round.
+            try {
+                await this.publishEvent(options.workspaceId, {
+                    type: 'persistence/warning',
+                    conversationId: options.conversationId,
+                    payload: {
+                        severity: 'warning',
+                        source: 'conversation-completion',
+                        message: `本次会话总结持久化失败：${message}（不影响当前画布；下次跨会话记忆可能缺这一轮）`
+                    }
+                });
+            }
+            catch (publishErr) {
+                console.error('[conversation-store] failed to publish completion warning', publishErr);
+            }
         }
     }
     async persistConversationFailure(options) {
@@ -1003,7 +1123,62 @@ export class ConversationStore {
             });
         }
         catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
             console.error('[conversation-store] failed to persist conversation failure memory', error);
+            try {
+                await this.publishEvent(options.workspaceId, {
+                    type: 'persistence/warning',
+                    conversationId: options.conversationId,
+                    payload: {
+                        severity: 'warning',
+                        source: 'conversation-completion',
+                        message: `失败状态持久化失败：${message}（重启后恢复机制可能识别为 stale）`
+                    }
+                });
+            }
+            catch (publishErr) {
+                console.error('[conversation-store] failed to publish failure warning', publishErr);
+            }
+        }
+    }
+    /**
+     * P12 · Persist canvas graph + surface failures as 'persistence/warning'
+     * events. Replaces the old silent `try { persistCanvasGraph } catch
+     * console.error` swallow in WorkspaceGraphStore. Caller no longer has
+     * to choose between "keep going on error" (data loss invisible to UI)
+     * vs "throw and abort the whole stream" — the stream continues with a
+     * yellow ⚠ bubble in the chat dock telling the user the canvas may
+     * not have been saved this round.
+     *
+     * Uses 'warning' severity by default: in-memory graph state is still
+     * coherent, only the canvas_graphs UPSERT failed. User can reload
+     * later to verify; for the active session, the in-memory graph is
+     * authoritative.
+     */
+    async persistGraphWithWarning(workspaceId, conversationId, graph) {
+        try {
+            await this.graphStore.persistGraph(graph);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error('[conversation-store] canvas_graphs persist failed', error);
+            if (conversationId) {
+                const event = {
+                    type: 'persistence/warning',
+                    conversationId,
+                    payload: {
+                        severity: 'warning',
+                        source: 'canvas-graph',
+                        message: `画布快照保存失败：${message}（会话可继续，状态以本次内存为准）`
+                    }
+                };
+                try {
+                    await this.publishEvent(workspaceId, event);
+                }
+                catch (publishErr) {
+                    console.error('[conversation-store] failed to publish persistence warning', publishErr);
+                }
+            }
         }
     }
     async publishEvent(workspaceId, event) {
@@ -1108,7 +1283,21 @@ export class ConversationStore {
         // Pass userId as seedOwner so that auto-created workspaces (URL
         // navigation to an unknown id) immediately give the requesting user
         // full ownership instead of leaving them locked out.
-        const metadata = await getWorkspaceMetadata(workspaceId, { id: userId });
+        //
+        // P12 fix N2 · short-lived metadata cache. A single GraphQL
+        // request typically calls 6+ resolvers, each independently asking
+        // for the same (workspaceId, userId) metadata row. Without a
+        // cache that's 6 PG round-trips per request — measured in audit
+        // logs as 6× workspace-access.granted within 30ms.
+        //
+        // 1-second TTL keyed by workspaceId is short enough that revoked
+        // permissions take effect within ~1s (acceptable: GraphQL
+        // requests typically complete in <100ms so they all see the
+        // same snapshot anyway), and long enough that a single multi-
+        // resolver request hits cache after the first call. We pass
+        // seedOwner only on cache miss so the auto-create semantics
+        // still apply for the first caller.
+        const metadata = await getWorkspaceMetadataCached(workspaceId, userId);
         return this.assertPermissionFromMetadata(metadata, userId, requiredPermission);
     }
     async assertConversationBelongsToWorkspace(workspaceId, conversationId) {
@@ -1140,7 +1329,11 @@ function shouldPersistRuntimeEvent(event) {
         || event.type === 'phase.changed'
         || event.type === 'seminar.turn.completed'
         || event.type === 'seminar.decision.made'
-        || event.type === 'seminar.decision.requested';
+        || event.type === 'seminar.decision.requested'
+        // P12 · Persist persistence-warning events to the ring buffer so a
+        // client reconnecting after a transient drop replays the warning
+        // and learns about silent persistence failures it missed.
+        || event.type === 'persistence/warning';
 }
 function buildConversationTitle(question) {
     const compact = question.replace(/\s+/g, ' ').trim();
@@ -1176,22 +1369,29 @@ function parseMessageRole(role) {
 function parseMemoryScope(scope) {
     if (!scope)
         return undefined;
-    if (scope === 'workspace' || scope === 'user' || scope === 'agent')
+    if (scope === 'workspace' || scope === 'user')
         return scope;
+    // P14 P2 · `agent` was a dead enum value (0 production writes audited
+    // 2026-05-09). Coerce to 'workspace' instead of erroring so any legacy
+    // GraphQL input that still sends 'agent' degrades gracefully.
+    if (scope === 'agent')
+        return 'workspace';
     throw new Error(`INVALID_MEMORY_SCOPE:${scope}`);
 }
 function parseMemoryKind(kind) {
     if (!kind)
         return undefined;
-    if (kind === 'preference'
-        || kind === 'decision'
-        || kind === 'insight'
-        || kind === 'constraint'
-        || kind === 'summary'
-        || kind === 'canvas'
-        || kind === 'user-skill') {
+    if (kind === 'decision' || kind === 'summary' || kind === 'canvas' || kind === 'user-skill') {
         return kind;
     }
+    // P14 P2 · `preference` / `insight` / `constraint` dropped from live
+    // enum (0 production writes audited 2026-05-09). Coerce to the closest
+    // semantic equivalent so any legacy input degrades gracefully — new
+    // code should pass facet/category via the canonical upsertMemory path.
+    if (kind === 'preference' || kind === 'constraint')
+        return 'user-skill';
+    if (kind === 'insight')
+        return 'summary';
     throw new Error(`INVALID_MEMORY_KIND:${kind}`);
 }
 function truncate(text, max) {

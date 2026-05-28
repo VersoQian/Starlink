@@ -116,6 +116,35 @@ export const conversationEventSchema = z.discriminatedUnion('type', [
             /** Top-level keys of the subgraph state that changed. */
             payloadKeys: z.array(z.string())
         })
+    }),
+    /**
+     * P12 · Persistence visibility. Surfaces server-side persistence
+     * failures (canvas_graphs upsert, memory_items conversation summary,
+     * conversation completion memory) as user-visible warnings instead
+     * of swallowing them in console.error / auditLogger only.
+     *
+     * Severity:
+     * - 'warning' (default) — operation failed but the conversation
+     *   continues; in-memory state remains consistent. Frontend renders
+     *   a yellow ⚠ chat bubble.
+     * - 'error' — operation failed and may have left state inconsistent;
+     *   user should consider reloading. Frontend renders a red bubble.
+     *
+     * Source identifies WHICH persistence call failed so the warning can
+     * be debugged after the fact via grep on the server logs.
+     */
+    z.object({
+        type: z.literal('persistence/warning'),
+        conversationId: z.string(),
+        payload: z.object({
+            severity: z.enum(['warning', 'error']).default('warning'),
+            source: z.enum([
+                'canvas-graph',
+                'conversation-summary',
+                'conversation-completion'
+            ]),
+            message: z.string()
+        })
     })
 ]);
 export const conversationMetadataSchema = z.object({

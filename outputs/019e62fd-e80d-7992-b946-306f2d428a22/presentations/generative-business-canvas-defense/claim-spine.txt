@@ -1,0 +1,30 @@
+thesis: Starlink turns Business Model Canvas generation from one-shot text generation into an inspectable, evidence-grounded, editable multi-agent workflow.
+audience: undergraduate thesis defense committee.
+one-line arc: problem opacity -> system decomposition -> implemented workspace -> measured mechanism evidence -> limitations and future work.
+
+slide list:
+- 01. 封面; proof object: 建立论文题目、作者、指导老师和生成式视觉。. source: DOCX cover metadata + image2.0 asset.
+- 02. 主线; proof object: 从九宫格文本生成推进到可追溯画布工作流。. source: four-part agenda.
+- 03. 背景; proof object: 早期商业想法不完整，BMC 需要协同分析。. source: problem map.
+- 04. 矛盾; proof object: 单次 LLM 调用把覆盖、证据和过程压进黑箱。. source: baseline vs Starlink comparison.
+- 05. 贡献; proof object: Starlink 把 BMC 生成变成可检查系统过程。. source: five contribution cards.
+- 06. 流程; proof object: 一个想法被推进成带证据、带状态、可修改的画布。. source: workflow figure.
+- 07. 框架; proof object: 推理、证据和界面分开治理。. source: three-pillar figure.
+- 08. 架构; proof object: 五层部署架构让研究原型可运行。. source: five-layer architecture.
+- 09. 预画布; proof object: 生成前补上下文，降低凭空补全。. source: knowledge upload + coach screenshots.
+- 10. 智能体; proof object: 职责边界和能力绑定比 agent 数量更重要。. source: agent roster table.
+- 11. 覆盖; proof object: 九个 BMC 维度先有责任地图再生成。. source: coverage matrix.
+- 12. 黑板; proof object: 并行生成依靠黑板合并而非自然对话收敛。. source: editable flow diagram.
+- 13. 评审; proof object: 监督器先路由，有限评审处理高严重冲突。. source: supervisor flowchart.
+- 14. 引用; proof object: 引用是贯穿证据、输出和画布单元的系统对象。. source: citation lifecycle.
+- 15. 检索; proof object: 检索层分开设计语义质量和故障韧性。. source: hybrid retrieval pipeline.
+- 16. 流水线; proof object: 主路径是有界 DAG，评审是受控循环。. source: editable six-step process.
+- 17. 工作区; proof object: 画布承载覆盖、引用、冲突和修改入口。. source: canvas screenshot.
+- 18. 双模式; proof object: 同一批节点既能自由探索也能九格呈现。. source: dual-mode screenshots.
+- 19. 复用; proof object: 报告和记忆让一次运行进入后续工作。. source: report + memory screenshots.
+- 20. 可观测; proof object: 用户和开发者都能看见慢在哪里、谁贡献了什么。. source: stage strip + timeline evidence.
+- 21. 实验; proof object: 评价聚焦九维覆盖、检索韧性和机制消融。. source: experiment design cards.
+- 22. 检索结果; proof object: Embedding 降级时混合检索保留更多证据。. source: recall table + metric.
+- 23. 质量对比; proof object: 覆盖检查在中能力模型上放大优势。. source: editable bar chart + aggregate table.
+- 24. 消融; proof object: 当前 rubric 下 retrieval grounding 最可测。. source: ablation figure.
+- 25. 结论; proof object: 生成式商业画布可以成为可审计系统工件。. source: conclusion / limits / future work.

@@ -171,8 +171,13 @@ export class LLMClient {
    * effective error budget moves from "any one call" to "all 3 attempts fail".
    */
   async chat(options: LLMChatOptions): Promise<LLMResponse> {
+    // P12 · evaluation hook. When LLM_MODEL_OVERRIDE is set, force every
+    // call (including per-agent profile.model pins) onto a single model.
+    // Lets the benchmark run all 12 agents under the same provider so
+    // Starlink-vs-baseline becomes apples-to-apples cross-vendor.
+    const forced = process.env.LLM_MODEL_OVERRIDE
     const body: Record<string, unknown> = {
-      model: options.model ?? this.defaultModel,
+      model: forced ?? options.model ?? this.defaultModel,
       messages: options.messages,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 4096,
@@ -210,8 +215,10 @@ export class LLMClient {
 
         if (!res.ok) {
           const text = await res.text()
-          // Retryable HTTP statuses: 408 (timeout), 429 (rate limit), 5xx
-          const retryable = res.status === 408 || res.status === 429 || res.status >= 500
+          // Retryable HTTP statuses: 408 (timeout), 429 (rate limit), 5xx,
+          // plus 403 (some providers, e.g. SiliconFlow, return 403 for QPS
+          // throttling rather than 429).
+          const retryable = res.status === 403 || res.status === 408 || res.status === 429 || res.status >= 500
           if (retryable && attempt < maxRetries) {
             const backoff = Math.min(15000, 1000 * Math.pow(3, attempt)) + Math.floor(Math.random() * 500)
             console.warn(`[llm-client] HTTP ${res.status} (retryable), attempt ${attempt + 1}/${maxRetries + 1}, retry in ${backoff}ms`)

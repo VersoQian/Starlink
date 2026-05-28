@@ -40,6 +40,10 @@ type ChatMessage = {
    *  dock renders a "STEP N/7" kicker and the entry-point start message
    *  shows a Cancel CTA so the user can opt out. */
   isWizard?: boolean
+  /** Agent id used by @-mention assistant replies. */
+  mentionedAgent?: string
+  /** Whether an @-mention request was refused by the target agent. */
+  refused?: boolean
 }
 
 /** In-chat wizard state. When `active=true`, regular chat send routes
@@ -356,6 +360,39 @@ const mergeById = <T extends { id: string }>(current: T[], updates?: T[]) => {
   return [...merged.values()]
 }
 
+// Canonical macra-node extractor, shared by every code path that hydrates
+// the macraNodes Map (snapshot loads, deltas, mention hydrates, reattach).
+// Previously this was duplicated inline in 5+ places, which drifted over
+// time — the mention path even dropped summary / fullContent / position.
+// summary defaults to '' (not data.content) so EvidenceDrawer's
+// derivedSummary multi-level extraction path remains reachable (P11 fix).
+const extractMacraNodeData = (canvasNode: CanvasNode): MacraNodeData | null => {
+  const data = (canvasNode.data ?? {}) as Record<string, unknown>
+  const meta = data.meta as Record<string, unknown> | undefined
+  if (!meta) {
+    return null
+  }
+  return {
+    id: canvasNode.id,
+    type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as MacraNodeData['type'],
+    label: typeof data.title === 'string' ? data.title : '未命名',
+    content: typeof data.content === 'string' ? data.content : '',
+    summary: typeof meta.summary === 'string' ? meta.summary : '',
+    fullContent: typeof meta.fullContent === 'string'
+      ? meta.fullContent
+      : (typeof data.content === 'string' ? data.content : ''),
+    domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
+    metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
+      ? (meta.metadata as Record<string, unknown>)
+      : {},
+    agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
+    severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
+    conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
+    isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
+    position: canvasNode.position
+  }
+}
+
 interface MacraState {
   workspaceId: string
 
@@ -427,6 +464,51 @@ interface MacraState {
    * for ~12s after pipeline ends.
    */
   lastCompletionAt: number | null
+
+  /**
+   * Phase awareness · 2026-05-12.
+   * Tracks every in-flight + recently-completed agent invocation so the
+   * top-of-canvas MentionProgressPill can show "✦ market-agent · 0:42"
+   * while a 100s LLM call is running, then morph to "✓ done · 3 cells"
+   * for a few seconds before fading. Without this the user has no
+   * feedback on the long-running mention path and assumes the page hung.
+   * Entries are auto-pruned after `completedAt + RETAIN_MS` by the
+   * MentionProgressPill component's interval tick.
+   */
+  activeMentions: Array<{
+    id: string
+    agentId: string
+    /** First ~40 chars of the user message — chip subtitle. */
+    summary: string
+    startedAt: number
+    completedAt: number | null
+    status: 'running' | 'completed' | 'failed' | 'refused'
+    /** Node ids touched by this mention — for flash highlight on completion. */
+    affectedNodeIds: string[]
+    /** Short result tag, e.g. "重写 CS/CH/CR", "无新内容", "失败". */
+    resultTag: string | null
+  }>
+  pushActiveMention: (m: {
+    id: string
+    agentId: string
+    summary: string
+  }) => void
+  finalizeActiveMention: (id: string, patch: {
+    status: 'completed' | 'failed' | 'refused'
+    affectedNodeIds?: string[]
+    resultTag?: string
+  }) => void
+  pruneActiveMentions: () => void
+
+  /**
+   * Phase awareness · 2026-05-12.
+   * Per-node write log: when each node was last written + which agent
+   * authored it. Drives the per-cell "✦ market-agent · 刚刚" attribution
+   * chip + brief flash animation on freshly-written cells.
+   * Updated by applyGraphDelta on every node touched. Persists across
+   * deltas; never cleared (so chip can show "10:42 写入" hours later).
+   */
+  nodeWrittenAt: Map<string, { at: number; agentId: string | null }>
 
   // 详情面板状态
   detailPanel: {
@@ -616,6 +698,18 @@ interface MacraState {
   // 别：那个是触发 8-agent BMC 生成 pipeline；这个是单轮反思教练，不动节点。
   reflectOnChat: (userMessage: string) => Promise<void>
 
+  // Shared graph-delta application. WS `graph/diff` events and the
+  // mention-hydrate path both funnel through this so writes never
+  // clobber each other (merge-by-id is order-independent + idempotent).
+  // Lifted from a startConversation-closure-local function to a store
+  // action so mentionAgent and any future caller can reuse it.
+  applyGraphDelta: (delta: {
+    nodes?: CanvasNode[]
+    edges?: CanvasEdge[]
+    removedNodeIds?: string[]
+    removedEdgeIds?: string[]
+  }) => void
+
   // @-mention agent (2026-05-04). Routes a chat message to a specific
   // agent via GraphQL mentionAgent mutation; updates chat + canvas with
   // the result. Refusals (e.g. critic without BMC) come back as
@@ -663,6 +757,55 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   currentAgent: null,
   lastDeltaAt: null,
   lastCompletionAt: null,
+  activeMentions: [],
+  nodeWrittenAt: new Map(),
+  pushActiveMention: ({ id, agentId, summary }) => {
+    set((state) => ({
+      activeMentions: [
+        ...state.activeMentions,
+        {
+          id,
+          agentId,
+          summary,
+          startedAt: Date.now(),
+          completedAt: null,
+          status: 'running' as const,
+          affectedNodeIds: [],
+          resultTag: null
+        }
+      ]
+    }))
+  },
+  finalizeActiveMention: (id, patch) => {
+    set((state) => ({
+      activeMentions: state.activeMentions.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              status: patch.status,
+              completedAt: Date.now(),
+              affectedNodeIds: patch.affectedNodeIds ?? m.affectedNodeIds,
+              resultTag: patch.resultTag ?? m.resultTag
+            }
+          : m
+      )
+    }))
+  },
+  pruneActiveMentions: () => {
+    // Drop completed entries older than 8s (gives user time to read the
+    // "✓ done" morph before it disappears). Running entries never expire
+    // from prune — they stay until finalizeActiveMention is called.
+    const cutoff = Date.now() - 8_000
+    set((state) => {
+      const filtered = state.activeMentions.filter(
+        (m) => m.status === 'running' || (m.completedAt ?? 0) > cutoff
+      )
+      // Avoid no-op rerender churn.
+      return filtered.length === state.activeMentions.length
+        ? {}
+        : { activeMentions: filtered }
+    })
+  },
   knowledgeEvidence: [],
   subAgentActivity: null,
   setSubAgentActivity: (next) => set({ subAgentActivity: next }),
@@ -867,12 +1010,10 @@ export const useComfyStore = create<MacraState>((set, get) => ({
     // users either click again (no-op due to active guard) or assume the
     // button is broken. The loader is replaced by the actual prefillSummary
     // once the GraphQL response arrives.
-    const loaderTs = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
     if (workspaceId && withKbPrefill) {
       get().appendChatMessage({
         role: 'assistant',
         content: '⏳ 正在启动 7 步向导，AI 在扫描知识库中…（首次会读取 ≤ 20s）',
-        timestamp: loaderTs,
         source: 'scripted'
       })
     }
@@ -1612,6 +1753,90 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
     }
   },
 
+  // ============== Shared graph-delta merger ==============
+  // Single funnel for every additive/removal write to the canvas state.
+  // Both the WS `graph/diff` handler (in startConversation) and the
+  // mention-hydrate path call this. Merge-by-id is idempotent and
+  // order-independent, so interleaved writes converge to the same union
+  // and stale snapshots can never erase newer cells. Bumps lastDeltaAt
+  // on every successful merge.
+  applyGraphDelta: (delta) => {
+    // Validate delta shape — server contract drift or payload corruption
+    // could send non-array fields; silently ignoring the bad slice is
+    // better than throwing mid-stream.
+    const validNodes = Array.isArray(delta.nodes) ? delta.nodes : undefined
+    const validEdges = Array.isArray(delta.edges) ? delta.edges : undefined
+    const validRemovedNodes = Array.isArray(delta.removedNodeIds) ? delta.removedNodeIds : undefined
+    const validRemovedEdges = Array.isArray(delta.removedEdgeIds) ? delta.removedEdgeIds : undefined
+
+    const nodeUpdates = validNodes?.map(mapCanvasNodeToReactFlow)
+    const edgeUpdates = validEdges?.map(mapCanvasEdgeToReactFlow)
+    const removedNodeSet = validRemovedNodes ? new Set(validRemovedNodes) : null
+    const removedEdgeSet = validRemovedEdges ? new Set(validRemovedEdges) : null
+
+    set((state) => {
+      const newMacraNodes = new Map(state.macraNodes)
+      // Per-node write log: clone the Map so we can stamp every node this
+      // delta touches. Drives the per-cell "✦ market-agent · 刚刚" chip.
+      const newNodeWrittenAt = new Map(state.nodeWrittenAt)
+      const writeStamp = Date.now()
+      let detectedRound = state.roundNumber
+      let detectedAgent: string | null = state.currentAgent
+
+      removedNodeSet?.forEach((nodeId) => {
+        newMacraNodes.delete(nodeId)
+        newNodeWrittenAt.delete(nodeId)
+      })
+
+      validNodes?.forEach((node) => {
+        const macraData = extractMacraNodeData(node)
+        if (!macraData) return
+        newMacraNodes.set(node.id, macraData)
+        newNodeWrittenAt.set(node.id, {
+          at: writeStamp,
+          agentId: macraData.agentType ?? null
+        })
+        // round-N tag detection — guard with Array.isArray; a server
+        // bug sending tags as object/string would silently iterate
+        // keys/chars and corrupt roundNumber.
+        const rawTags = macraData.metadata?.tags
+        if (Array.isArray(rawTags)) {
+          for (const tag of rawTags) {
+            if (typeof tag !== 'string') continue
+            const match = tag.match(/^round-(\d+)$/)
+            if (match) {
+              const round = Number(match[1])
+              if (round > detectedRound) detectedRound = round
+            }
+          }
+        }
+        if (typeof macraData.agentType === 'string' && macraData.agentType.length > 0) {
+          detectedAgent = macraData.agentType
+        }
+      })
+
+      // Apply BMC 9-grid layout on every merge so cells land in their
+      // canonical 3x3 positions immediately, not only after a reload.
+      const mergedNodes = mergeById(
+        removedNodeSet ? state.nodes.filter((node) => !removedNodeSet.has(node.id)) : state.nodes,
+        nodeUpdates
+      )
+      const laidOutNodes = applyCanvasLayout('bmc-9-grid', mergedNodes)
+      return {
+        nodes: laidOutNodes,
+        edges: mergeById(
+          removedEdgeSet ? state.edges.filter((edge) => !removedEdgeSet.has(edge.id)) : state.edges,
+          edgeUpdates
+        ),
+        macraNodes: newMacraNodes,
+        nodeWrittenAt: newNodeWrittenAt,
+        roundNumber: detectedRound,
+        currentAgent: detectedAgent,
+        lastDeltaAt: writeStamp
+      }
+    })
+  },
+
   // ============== Business LangGraph 调用 ==============
   callLangGraph: async (userPrompt, _mode = 'general', kbId) => {
     void _mode
@@ -1640,6 +1865,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       edges: [],
       nodeDataMap: new Map(),
       macraNodes: new Map(),
+      nodeWrittenAt: new Map(),
       roundNumber: 0,
       pendingInterrupt: null,
       currentAgent: null,
@@ -1673,44 +1899,18 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       const conversationId = response.startConversation.metadata.id
       set({ currentConversationId: conversationId })
 
-      const extractMacraNodeData = (canvasNode: CanvasNode): MacraNodeData | null => {
-        const data = (canvasNode.data ?? {}) as Record<string, unknown>
-        const meta = data.meta as Record<string, unknown> | undefined
-        if (!meta) {
-          return null
-        }
-
-        const macraData: MacraNodeData = {
-          id: canvasNode.id,
-          type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as MacraNodeData['type'],
-          label: typeof data.title === 'string' ? data.title : '未命名',
-          content: typeof data.content === 'string' ? data.content : '',
-          // P11 fix · summary 不能 fallback 到 data.content。当 server 端
-          // meta.summary 缺席（旧数据 + orchestrator 主路径都不产 summary
-          // 字段），之前的代码用 data.content 兜底 → drawer 的 derivedSummary
-          // 第一个 if 分支永远命中（拿到非空字符串），后面写好的 heading/
-          // bullet/sentence 提取永远不执行。修：缺席时返回 '' 让 derivedSummary
-          // 走它的多级提取策略。
-          summary: typeof meta.summary === 'string' ? meta.summary : '',
-          fullContent: typeof meta.fullContent === 'string'
-            ? meta.fullContent
-            : (typeof data.content === 'string' ? data.content : ''),
-          domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-          metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
-            ? (meta.metadata as Record<string, unknown>)
-            : {},
-          agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
-          severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
-          conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
-          isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
-          position: canvasNode.position
-        }
-
-        return macraData
-      }
-
       const applyGraph = (graph: WorkspaceGraphResponse) => {
-        const reactFlowNodes = graph.nodes.map(mapCanvasNodeToReactFlow)
+        // Initial-generation layout fix: server emits BMC cells at
+        // single-column stack positions (canvas-builder.ts assigns
+        // every macra node `(ROOT_POSITION.x, nextY)`). The streaming
+        // graph/diff path repositions via applyGraphDelta → applyBmcLayout,
+        // but the initial full-snapshot path used to bypass layout and
+        // paint cells at server positions — visually "都变成了一列" until
+        // the first delta arrives. Apply the canonical 9-grid here too.
+        const reactFlowNodes = applyCanvasLayout(
+          'bmc-9-grid',
+          graph.nodes.map(mapCanvasNodeToReactFlow)
+        )
         const macraNodesMap = new Map<string, MacraNodeData>()
 
         // 同时构建 macraNodes Map
@@ -1770,92 +1970,6 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         })
       }
 
-      const applyDelta = (delta: {
-        nodes?: CanvasNode[]
-        edges?: CanvasEdge[]
-        removedNodeIds?: string[]
-        removedEdgeIds?: string[]
-      }) => {
-        // P9 Block 4b · validate delta shape — server contract drift or
-        // payload corruption could send non-array fields; silently
-        // ignoring the bad slice is better than throwing mid-stream.
-        const validNodes = Array.isArray(delta.nodes) ? delta.nodes : undefined
-        const validEdges = Array.isArray(delta.edges) ? delta.edges : undefined
-        const validRemovedNodes = Array.isArray(delta.removedNodeIds) ? delta.removedNodeIds : undefined
-        const validRemovedEdges = Array.isArray(delta.removedEdgeIds) ? delta.removedEdgeIds : undefined
-
-        const nodeUpdates = validNodes?.map(mapCanvasNodeToReactFlow)
-        const edgeUpdates = validEdges?.map(mapCanvasEdgeToReactFlow)
-        // P9 Block 3a · pre-compute removed-id sets OUTSIDE the set()
-        // setter to avoid the race where multiple graph/diff events
-        // arriving < 100ms apart can have inconsistent intermediate
-        // state. The previous filter inside set() referenced
-        // state.nodes which could already be mid-merge.
-        const removedNodeSet = validRemovedNodes ? new Set(validRemovedNodes) : null
-        const removedEdgeSet = validRemovedEdges ? new Set(validRemovedEdges) : null
-
-        set((state) => {
-          const newMacraNodes = new Map(state.macraNodes)
-          let detectedRound = state.roundNumber
-          let detectedAgent: string | null = state.currentAgent
-
-          removedNodeSet?.forEach((nodeId) => {
-            newMacraNodes.delete(nodeId)
-          })
-
-          // 同时更新 macraNodes Map 并检测轮次
-          validNodes?.forEach(node => {
-            const macraData = extractMacraNodeData(node)
-            if (macraData) {
-              newMacraNodes.set(node.id, macraData)
-              // 从 metadata.tags 中检测轮次 (round-N)
-              // P9 Block 3b · Array.isArray guard — without it a
-              // server bug sending tags as object/string would silently
-              // iterate over keys/chars, corrupting roundNumber.
-              const rawTags = macraData.metadata?.tags
-              if (Array.isArray(rawTags)) {
-                for (const tag of rawTags) {
-                  if (typeof tag !== 'string') continue
-                  const match = tag.match(/^round-(\d+)$/)
-                  if (match) {
-                    const round = Number(match[1])
-                    if (round > detectedRound) detectedRound = round
-                  }
-                }
-              }
-              // Sprint 3.3 · capture most-recent emitting agent for Coach.
-              if (typeof macraData.agentType === 'string' && macraData.agentType.length > 0) {
-                detectedAgent = macraData.agentType
-              }
-            }
-          })
-
-          // P15 · apply BMC 9-grid layout on every streaming delta so
-          // cells land in their canonical 3x3 positions IMMEDIATELY,
-          // not just after a page-reload hydrate. Previously the
-          // streaming path skipped applyCanvasLayout, leaving cells in
-          // the server-emitted default (single column) until the page
-          // refreshed and re-routed through the workspace-graph fetch.
-          // First-time generations looked like a stacked list.
-          const mergedNodes = mergeById(
-            removedNodeSet ? state.nodes.filter((node) => !removedNodeSet.has(node.id)) : state.nodes,
-            nodeUpdates
-          )
-          const laidOutNodes = applyCanvasLayout('bmc-9-grid', mergedNodes)
-          return {
-            nodes: laidOutNodes,
-            edges: mergeById(
-              removedEdgeSet ? state.edges.filter((edge) => !removedEdgeSet.has(edge.id)) : state.edges,
-              edgeUpdates
-            ),
-            macraNodes: newMacraNodes,
-            roundNumber: detectedRound,
-            currentAgent: detectedAgent,
-            lastDeltaAt: Date.now()
-          }
-        })
-      }
-
       if (response.startConversation.graph) {
         applyGraph(response.startConversation.graph)
       }
@@ -1867,7 +1981,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           applyGraph(payload as WorkspaceGraphResponse)
         },
         onGraphDiff: (payload) => {
-          applyDelta(payload as {
+          get().applyGraphDelta(payload as {
             nodes?: CanvasNode[]
             edges?: CanvasEdge[]
             removedNodeIds?: string[]
@@ -2038,31 +2152,10 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         }
       }
 
-      // Build macra map mirror the same shape extractMacraNodeData uses
-      // in callLangGraph — kept inline so this action can stand alone.
       const macraNodesMap = new Map<string, MacraNodeData>()
       conv.graph.nodes.forEach((node) => {
-        const cn = node as unknown as CanvasNode
-        const dataObj = (cn.data ?? {}) as Record<string, unknown>
-        const meta = dataObj.meta as Record<string, unknown> | undefined
-        if (!meta) return
-        macraNodesMap.set(cn.id, {
-          id: cn.id,
-          type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
-          label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
-          content: typeof dataObj.content === 'string' ? dataObj.content : '',
-          summary: typeof meta.summary === 'string' ? meta.summary : '',
-          fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
-          domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-          metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
-            ? (meta.metadata as Record<string, unknown>)
-            : {},
-          agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
-          severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
-          conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
-          isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
-          position: cn.position,
-        } as MacraNodeData)
+        const macraData = extractMacraNodeData(node as unknown as CanvasNode)
+        if (macraData) macraNodesMap.set(macraData.id, macraData)
       })
 
       const layoutNodes = applyCanvasLayout('bmc-9-grid', conv.graph.nodes.map(mapCanvasNodeToReactFlow))
@@ -2153,34 +2246,23 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       try {
         const graph = await fetchWorkspaceGraphSnapshot(workspaceId)
         if (graph && Array.isArray(graph.nodes)) {
-          // Reuse the same mapping as hydrateFromConversation — keep it
-          // inline so this action is self-contained.
           const macraNodesMap = new Map<string, MacraNodeData>()
           graph.nodes.forEach((node) => {
-            const cn = node as unknown as CanvasNode
-            const dataObj = (cn.data ?? {}) as Record<string, unknown>
-            const meta = dataObj.meta as Record<string, unknown> | undefined
-            if (!meta) return
-            macraNodesMap.set(cn.id, {
-              id: cn.id,
-              type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
-              label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
-              content: typeof dataObj.content === 'string' ? dataObj.content : '',
-              summary: typeof meta.summary === 'string' ? meta.summary : '',
-              fullContent: typeof meta.fullContent === 'string' ? meta.fullContent : (typeof dataObj.content === 'string' ? dataObj.content : ''),
-              domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-              metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
-            ? (meta.metadata as Record<string, unknown>)
-            : {},
-              agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
-              severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
-              conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
-              isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
-              position: cn.position,
-            } as MacraNodeData)
+            const macraData = extractMacraNodeData(node as unknown as CanvasNode)
+            if (macraData) macraNodesMap.set(macraData.id, macraData)
           })
+          // Initial-generation layout fix: apply the 9-grid here too,
+          // not just in the streaming delta path. If the user opens
+          // the canvas while a conversation is mid-generation,
+          // reattachToActiveSession loads the current snapshot —
+          // those cells have server-stack positions (x=160, y=stacked)
+          // and were previously painted as one column until the next
+          // graph/diff arrived.
           set({
-            nodes: graph.nodes.map(mapCanvasNodeToReactFlow),
+            nodes: applyCanvasLayout(
+              'bmc-9-grid',
+              graph.nodes.map(mapCanvasNodeToReactFlow)
+            ),
             edges: graph.edges.map(mapCanvasEdgeToReactFlow),
             macraNodes: macraNodesMap,
           })
@@ -2193,36 +2275,6 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       // into this tab. We deliberately do NOT await watcher.done — the
       // page mount returns immediately; the subscription self-tears
       // when the server emits status='completed'.
-      // P11.18 fix · build a shared extractMacraNodeData here so reattach
-      // watcher updates BOTH state.nodes (ReactFlow) AND state.macraNodes.
-      // Previously this watcher only updated nodes/edges → macraNodes
-      // drifted out of sync → BMC count chip was stale, drawer couldn't
-      // open cards (lookup miss). Same shape as callLangGraph extractor.
-      const reattachExtract = (canvasNode: CanvasNode): MacraNodeData | null => {
-        const data = (canvasNode.data ?? {}) as Record<string, unknown>
-        const meta = data.meta as Record<string, unknown> | undefined
-        if (!meta) return null
-        return {
-          id: canvasNode.id,
-          type: (meta.macraType || canvasNode.type || 'cc-bmc-card') as MacraNodeData['type'],
-          label: typeof data.title === 'string' ? data.title : '未命名',
-          content: typeof data.content === 'string' ? data.content : '',
-          summary: typeof meta.summary === 'string' ? meta.summary : '',
-          fullContent: typeof meta.fullContent === 'string'
-            ? meta.fullContent
-            : (typeof data.content === 'string' ? data.content : ''),
-          domain: typeof meta.domain === 'string' ? (meta.domain as MacraNodeData['domain']) : undefined,
-          metadata: (meta.metadata && typeof meta.metadata === 'object' && !Array.isArray(meta.metadata))
-            ? (meta.metadata as Record<string, unknown>)
-            : {},
-          agentType: typeof meta.agentType === 'string' ? (meta.agentType as MacraNodeData['agentType']) : undefined,
-          severity: typeof meta.severity === 'string' ? (meta.severity as MacraNodeData['severity']) : undefined,
-          conflictType: typeof meta.conflictType === 'string' ? (meta.conflictType as MacraNodeData['conflictType']) : undefined,
-          isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined,
-          position: canvasNode.position
-        }
-      }
-
       const watcher = watchConversation({
         workspaceId,
         conversationId: running.id,
@@ -2233,11 +2285,17 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           // drawer, and citation panel can't find them.
           const macraMap = new Map<string, MacraNodeData>()
           for (const n of graph.nodes) {
-            const m = reattachExtract(n)
+            const m = extractMacraNodeData(n)
             if (m) macraMap.set(n.id, m)
           }
+          // graph/appended is a full-snapshot push. Apply 9-grid layout
+          // so cells with server-stack positions snap to canonical slots
+          // (matches the streaming graph/diff path's behavior).
           set({
-            nodes: graph.nodes.map(mapCanvasNodeToReactFlow),
+            nodes: applyCanvasLayout(
+              'bmc-9-grid',
+              graph.nodes.map(mapCanvasNodeToReactFlow)
+            ),
             edges: graph.edges.map(mapCanvasEdgeToReactFlow),
             macraNodes: macraMap,
             lastDeltaAt: Date.now()
@@ -2261,7 +2319,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             }
             if (Array.isArray(delta.nodes)) {
               for (const n of delta.nodes) {
-                const m = reattachExtract(n)
+                const m = extractMacraNodeData(n)
                 if (m) newMacra.set(n.id, m)
               }
             }
@@ -2598,6 +2656,16 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
     ])
     set({ chatReflecting: true })
 
+    // Track this invocation so the floating MentionProgressPill can
+    // show "✦ market-agent · 0:42" while the LLM runs. The id is a
+    // local-only ticket — server doesn't see it.
+    const mentionTicketId = `mention-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    get().pushActiveMention({
+      id: mentionTicketId,
+      agentId,
+      summary: trimmed.slice(0, 40)
+    })
+
     // P15 · pull user-role messages from current chat state to send as
     // priorChat. Without this, the first @-mention on a fresh canvas
     // has no idea what the user's pitch was (the /chat seed lives in
@@ -2641,60 +2709,44 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           content: m.reply || (m.refused ? (m.refusalReason ?? '已拒绝') : '(空响应)'),
           timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           source: m.refused ? 'error' : 'llm',
-          // @ts-expect-error — extension fields for mention rendering
           mentionedAgent: m.agentId,
-          // @ts-expect-error — extension field for mention rendering
           refused: m.refused
         }
       ])
 
-      // If canvas was mutated, re-hydrate the workspace snapshot so the
-      // BMC / 9-grid views update without requiring a full pipeline run.
+      // If canvas was mutated, re-hydrate via the shared delta merger
+      // instead of a full state replace. The previous code did a
+      // `set({ nodes, edges, macraNodes })` clobber here — during the
+      // ~100ms snapshot fetch any WS `graph/diff` event (e.g. from a
+      // BMC pipeline kicked off by this mention) would land via
+      // applyGraphDelta and then get overwritten by this stale snapshot.
+      // Routing through applyGraphDelta makes the write order-independent
+      // (merge-by-id is idempotent) so concurrent contributions converge.
       if (!m.refused && (m.appendedNodes.length > 0 || m.appendedEdges.length > 0)) {
         try {
           const fresh = await fetchWorkspaceGraphSnapshot(workspaceId)
           if (fresh && Array.isArray(fresh.nodes)) {
-            const layoutNodes = applyCanvasLayout(
-              'bmc-9-grid',
-              fresh.nodes.map(mapCanvasNodeToReactFlow)
-            )
-            const macraMap = new Map<string, MacraNodeData>()
-            fresh.nodes.forEach((node) => {
-              const cn = node as unknown as CanvasNode
-              const dataObj = (cn.data ?? {}) as Record<string, unknown>
-              const meta = dataObj.meta as Record<string, unknown> | undefined
-              if (!meta) return
-              macraMap.set(cn.id, {
-                id: cn.id,
-                type: (meta.macraType || cn.type || 'cc-bmc-card') as MacraNodeData['type'],
-                label: typeof dataObj.title === 'string' ? dataObj.title : '未命名',
-                content: typeof dataObj.content === 'string' ? dataObj.content : '',
-                domain: typeof meta.domain === 'string'
-                  ? (meta.domain as MacraNodeData['domain'])
-                  : undefined,
-                metadata: ((meta.metadata as Record<string, unknown> | undefined) ?? {}) as MacraNodeData['metadata'],
-                agentType: typeof meta.agentType === 'string'
-                  ? (meta.agentType as MacraNodeData['agentType'])
-                  : undefined,
-                severity: typeof meta.severity === 'string'
-                  ? (meta.severity as MacraNodeData['severity'])
-                  : undefined,
-                conflictType: typeof meta.conflictType === 'string'
-                  ? (meta.conflictType as MacraNodeData['conflictType'])
-                  : undefined,
-                isInteractive: typeof meta.isInteractive === 'boolean' ? meta.isInteractive : undefined
-              } as MacraNodeData)
-            })
-            set({
-              nodes: layoutNodes,
-              edges: fresh.edges.map(mapCanvasEdgeToReactFlow),
-              macraNodes: macraMap
+            get().applyGraphDelta({
+              nodes: fresh.nodes as CanvasNode[],
+              edges: (fresh.edges ?? []) as CanvasEdge[]
             })
           }
         } catch (err) {
           console.warn('[mentionAgent] hydrate after append failed', err)
         }
       }
+
+      // Finalize pill — show "✓ done · N cells" for ~8s before prune.
+      const affectedIds = m.appendedNodes.map((n) => n.id)
+      get().finalizeActiveMention(mentionTicketId, {
+        status: m.refused ? 'refused' : 'completed',
+        affectedNodeIds: affectedIds,
+        resultTag: m.refused
+          ? '已拒绝'
+          : affectedIds.length === 0
+            ? '无新内容'
+            : `${affectedIds.length} 张 cell`
+      })
     } catch (err) {
       console.error('@-mention failed', err)
       get().setChatMessages([
@@ -2704,12 +2756,14 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           content: `@${agentId} 调用失败：${err instanceof Error ? err.message : String(err)}`,
           timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           source: 'error',
-          // @ts-expect-error — extension fields for mention rendering
           mentionedAgent: agentId,
-          // @ts-expect-error — extension field for mention rendering
           refused: true
         }
       ])
+      get().finalizeActiveMention(mentionTicketId, {
+        status: 'failed',
+        resultTag: err instanceof Error ? err.message.slice(0, 32) : '失败'
+      })
     } finally {
       set({ chatReflecting: false })
     }
@@ -2973,6 +3027,8 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       pendingInterrupt: null,
       currentAgent: null,
       lastDeltaAt: null,
+      activeMentions: [],
+      nodeWrittenAt: new Map(),
       knowledgeEvidence: [],
       citations: {},
       // P13 · workspace-switch full reset: clear stage-strip drivers so
@@ -3007,3 +3063,10 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
 }))
 
 export type ComfyStore = MacraState
+
+// Dev-only: expose the store on window for quick smoke-tests from devtools
+// (e.g. `useComfyStore.getState().mentionAgent('critic-agent', '审查')`).
+// Guarded by NODE_ENV so production bundles don't leak it.
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  ;(window as unknown as { useComfyStore?: typeof useComfyStore }).useComfyStore = useComfyStore
+}

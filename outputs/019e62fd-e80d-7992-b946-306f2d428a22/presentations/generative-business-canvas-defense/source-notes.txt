@@ -1,0 +1,130 @@
+Source DOCX: /Users/qianyingtao/毕业论文/基于多智能体协同的生成式商业画布系统的设计与实现 _副本.docx
+Paragraphs: 667
+Tables: 2
+Media files: 46
+
+Headings:
+- [Heading 1] 摘 要
+- [Heading 1] ABSTRACT
+- [toc 2] 1.1 Background 1
+- [toc 2] 1.2 Purpose and Significance 2
+- [toc 2] 1.3 About the System 3
+- [toc 2] 1.4 The Organization of This Article 5
+- [toc 2] 2.1 Evolution of Business Decision-Support Systems 6
+- [toc 2] 2.2 Reasoning in Large Language Models 8
+- [toc 2] 2.3 Multi-Agent Large-Language-Model Systems 9
+- [toc 2] 2.4 Retrieval-Augmented Generation 12
+- [toc 2] 2.5 Generative-AI Interfaces and Visualization 13
+- [toc 2] 2.6 Observability for LLM-Driven Systems 14
+- [toc 2] 2.7 Chapter Summary 15
+- [toc 2] 3.1 System Overview 16
+- [toc 2] 3.2 Multi-Agent Reasoning Core 17
+- [toc 3] 3.2.1 Agents and Capabilities 19
+- [toc 3] 3.2.2 Coordination Mechanism 22
+- [toc 3] 3.2.3 Output Stability and Provenance 26
+- [toc 3] 3.2.4 Memory and Evolution 28
+- [toc 3] 3.2.5 The Canvas Generation Pipeline 29
+- [toc 2] 3.3 Bilingual Hybrid Retrieval 30
+- [toc 3] 3.3.1 Pipeline and Ingestion 31
+- [toc 3] 3.3.2 Bilingual Tokenization and Rank Fusion 32
+- [toc 3] 3.3.3 Agent–KB Binding and Execution Trace 33
+- [toc 2] 3.4 Experiments and Analysis 34
+- [toc 3] 3.4.1 Experimental Setup 34
+- [toc 3] 3.4.2 Retrieval Quality and Embedding-Service Jitter 36
+- [toc 3] 3.4.3 Quality Comparison 37
+- [toc 3] 3.4.4 Design Ablation 38
+- [toc 2] 3.5 Chapter Summary 39
+- [toc 2] 4.1 Requirement Analysis 41
+- [toc 3] 4.1.1 Functional Requirements 41
+- [toc 3] 4.1.2 Non-Functional Requirements 41
+- [toc 2] 4.2 System Context 42
+- [toc 2] 4.3 User Process45
+- [toc 3] 4.3.1 Entry and Routing 45
+- [toc 3] 4.3.2 Pre-Canvas: Knowledge Base and Coach 45
+- [toc 3] 4.3.3 Canvas Dispatch 48
+- [toc 3] 4.3.4 Canvas Rendering 49
+- [toc 3] 4.3.5 Report and Structured Citations50
+- [toc 3] 4.3.6 Memory Persistence 52
+- [toc 3] 4.3.7 Utility Agents Beyond the Canvas 53
+- [toc 2] 4.4 Design Mechanisms 54
+- [toc 3] 4.4.1 Four Design Tensions 54
+- [toc 3] 4.4.2 Editorial Boardroom Design Language 55
+- [toc 3] 4.4.3 Dual-Mode Canvas and Visual Primitives 55
+- [toc 3] 4.4.4 Streaming Incremental Merge and Floating UI56
+- [toc 3] 4.4.5 Citation as Interaction 56
+- [toc 2] 4.5 Runtime Observability 56
+- [toc 3] 4.5.1 Three-Layer Monitoring View57
+- [toc 3] 4.5.2 Workflow Stage Strip 58
+- [toc 3] 4.5.3 Per-Agent Runtime Panel 58
+- [toc 2] 4.6 Chapter Summary 59
+- [toc 2] 5.1 Conclusion 60
+- [toc 2] 5.2 Future Work 61
+- [Heading 1] CHAPTER 1: INTRODUCTION
+- [Heading 2] 1.1 Background
+- [Heading 2] 1.2 Purpose and Significance
+- [Heading 2] 1.3 About the System
+- [Heading 2] 1.4 The Organization of This Article
+- [Heading 1] CHAPTER 2: RELATED WORK
+- [Heading 2] 2.1 Evolution of Business Decision-Support Systems
+- [Heading 2] 2.2 Reasoning in Large Language Models
+- [Heading 2] 2.3 Multi-Agent Large-Language-Model Systems
+- [Heading 2] 2.4 Retrieval-Augmented Generation
+- [Heading 2] 2.5 Generative-AI Interfaces and Visualization
+- [Heading 2] 2.6 Observability for LLM-Driven Systems
+- [Heading 2] 2.7 Chapter Summary
+- [Heading 1] CHAPTER 3: PROPOSED METHOD
+- [Heading 2] 3.1 System Overview
+- [Heading 2] 3.2 Multi-Agent Reasoning Core
+- [Heading 3] 3.2.1 Agents and Capabilities
+- [Heading 3] 3.2.2 Coordination Mechanism
+- [Heading 3] 3.2.3 Output Stability and Provenance
+- [Heading 3] 3.2.4 Memory and Evolution
+- [Heading 3] 3.2.5 The Canvas Generation Pipeline
+- [Heading 2] 3.3 Bilingual Hybrid Retrieval
+- [Heading 3] 3.3.1 Pipeline and Ingestion
+- [Heading 3] 3.3.2 Bilingual Tokenization and Rank Fusion
+- [Heading 3] 3.3.3 Agent–KB Binding and Execution Trace
+- [Heading 2] 3.4 Experiments and Analysis
+- [Heading 3] 3.4.1 Experimental Setup
+- [Heading 3] 3.4.2 Retrieval Quality and Embedding-Service Jitter
+- [Heading 3] 3.4.3 Quality Comparison
+- [Heading 3] 3.4.4 Design Ablation
+- [Heading 2] 3.5 Chapter Summary
+- [Heading 1] CHAPTER 4: SYSTEM DESIGN AND DEVELOPMENT
+- [Heading 2] 4.1 Requirement Analysis
+- [Heading 3] 4.1.1 Functional Requirements
+- [Heading 3] 4.1.2 Non-Functional Requirements
+- [Heading 2] 4.2 System Context
+- [Normal] 4.2.1 Monorepo Layout and Technology Stack
+- [Normal] 4.2.2 Persistence Schema
+- [Normal] 4.2.3 Deployment and Boot Sequence
+- [Heading 2] 4.3 User Process
+- [Heading 3] 4.3.1 Entry and Routing
+- [Heading 3] 4.3.2 Pre-Canvas: Knowledge Base and Coach
+- [Heading 3] 4.3.3 Canvas Dispatch
+- [Heading 3] 4.3.4 Canvas Rendering
+- [Heading 3] 4.3.5 Report and Structured Citations
+- [Heading 3] 4.3.6 Memory Persistence
+- [Heading 3] 4.3.7 Utility Agents Beyond the Canvas
+- [Heading 2] 4.4 Design Mechanisms
+- [Heading 3] 4.4.1 Four Design Tensions
+- [Heading 3] 4.4.2 Editorial Boardroom Design Language
+- [Heading 3] 4.4.3 Dual-Mode Canvas and Visual Primitives
+- [Heading 3] 4.4.4 Streaming Incremental Merge and Floating UI
+- [Heading 3] 4.4.5 Citation as Interaction
+- [Heading 2] 4.5 Runtime Observability
+- [Heading 3] 4.5.1 Three-Layer Monitoring View
+- [Heading 3] 4.5.2 Workflow Stage Strip
+- [Heading 3] 4.5.3 Per-Agent Runtime Panel
+- [Heading 2] 4.6 Chapter Summary
+- [Heading 1] CHAPTER 5: CONCLUSION AND FUTURE WORK
+- [Heading 2] 5.1 Conclusion
+- [Heading 2] 5.2 Future Work
+- [Heading 1] References
+- [Heading 1] Acknowledgment
+
+Generated visual asset:
+- image2-cover-background.png: generated with built-in image_gen / image2.0 path, abstract non-logo cover visual; copied from ~/.codex/generated_images into workspace assets for embedding.
+
+Repository figure sources:
+- docs/paper/figures/*.png: generated thesis figures and product screenshots already present in the Starlink repository; used as evidence images inside editable PPT slides.

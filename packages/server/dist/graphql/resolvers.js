@@ -2,7 +2,7 @@ import GraphQLJSON from 'graphql-type-json';
 import { GraphQLError } from 'graphql';
 import { assertOperationRateLimit } from '../middleware/operation-rate-limit.js';
 import { communityPostInputSchema, conversationMessageSchema, conversationMetadataSchema, conversationSessionSchema, deriveSnippetId, memoryItemSchema, practiceSessionInputSchema, workspaceAssetSchema, workspaceContextSnapshotSchema, workspaceDirectoryItemSchema, workspaceMetadataHistoryEntrySchema, workspaceMetadataUpdateInputSchema } from '@starlink/shared';
-import { addKnowledgeFile, addKnowledgeSeed, bindKbToAgent, createKnowledgeBase, deleteKnowledgeBaseDocument, getKnowledgeBaseStatus, importKnowledgeUrl, listAgentBindingsForKb, listKnowledgeBases, listKnowledgeBaseDocuments, publishKnowledgeBase, searchKnowledgeBase, unbindKbFromAgent, updateKnowledgeBaseVisibility } from '../services/kb-task-service.js';
+import { addKnowledgeFile, addKnowledgeSeed, bindKbToAgent, createKnowledgeBase, deleteKnowledgeBaseDocument, getKnowledgeBaseStatus, importKnowledgeUrl, listAgentBindingsForKb, listKnowledgeBases, listKnowledgeBaseDocuments, publishKnowledgeBase, searchKnowledgeBase, lookupKbChunk, unbindKbFromAgent, updateKnowledgeBaseVisibility } from '../services/kb-task-service.js';
 import { pubsub, FLOW_EXECUTION_PROGRESS, publishExecutionEvent } from './subscriptions.js';
 import { reflectOnIdeation, processIdeationWizardStep } from '../services/ideation-coach-service.js';
 import { buildUserSkillPrompt } from '../services/user-skill-prompt.js';
@@ -212,6 +212,18 @@ export const resolvers = {
             return await resolveOrThrow(async () => {
                 await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read');
                 return await getKnowledgeBaseStatus(args.workspaceId, args.kbId);
+            });
+        },
+        /**
+         * P12 · single-chunk lookup. The Evidence drawer calls this when
+         * the user clicks a [[ref:docId#chunk-N]] citation: it parses N
+         * out of the snippetId and asks for that exact chunk's content.
+         */
+        kbChunkLookup: async (_, args, ctx) => {
+            return await resolveOrThrow(async () => {
+                await ctx.conversationStore.assertWorkspaceAccess(args.workspaceId, ctx.userId, 'workspace.read');
+                const idx = typeof args.chunkIndex === 'number' ? args.chunkIndex : 0;
+                return await lookupKbChunk(args.workspaceId, args.docId, idx);
             });
         },
         knowledgeBaseSearch: async (_, args, ctx) => {
@@ -888,10 +900,14 @@ export const resolvers = {
                         extensions: { code: 'BAD_USER_INPUT' }
                     });
                 }
+                const priorChat = Array.isArray(args.input.priorChat)
+                    ? args.input.priorChat.filter((s) => typeof s === 'string' && s.trim().length > 0).slice(0, 10)
+                    : undefined;
                 const result = await ctx.conversationStore.mentionAgent(args.input.workspaceId, ctx.userId, {
                     agentId: args.input.agentId,
                     message: trimmedMessage,
-                    conversationId: args.input.conversationId ?? undefined
+                    conversationId: args.input.conversationId ?? undefined,
+                    priorChat
                 });
                 return result;
             });
@@ -918,6 +934,92 @@ export const resolvers = {
                 });
             },
             resolve: (payload) => payload.conversationProgress
+        },
+        reportWriterStream: {
+            // P11.18 · Progressive report streaming via async iterator.
+            //
+            // Implementation note: this MVP splits the synchronously-generated
+            // 6-section markdown into sections by `### N.` heading regex and
+            // emits them sequentially. True LLM-token streaming would require
+            // a callback-aware LLM client (out of scope for this iteration);
+            // section-level progress is the next-best UX win — the user sees
+            // sections appear one by one within ~30s.
+            subscribe: async function* (_, args, ctx) {
+                const yieldEvent = (event) => ({
+                    reportWriterStream: {
+                        ...event,
+                        timestampIso: new Date().toISOString()
+                    }
+                });
+                try {
+                    yield yieldEvent({ kind: 'started' });
+                    // Permission + seed collection mirror MentionRouter.handleReportWriter.
+                    // We call invokeReportWriterForMention directly to skip the
+                    // mention-router KB injection (subscriptions don't carry that
+                    // context yet — the user must use the mutation path for
+                    // KB-augmented reports).
+                    const traceId = `report-stream-${Date.now()}`;
+                    // Lazy-import + instantiate to avoid pulling in the heavy
+                    // LangGraph deps at module load. The service is cheap to
+                    // create (just sets up tracer + LLM client lazily).
+                    const { BusinessLangGraphService } = await import('../services/business-langgraph.js');
+                    const business = new BusinessLangGraphService();
+                    // EMPTY_SEEDED_STATE shape: marketNodes / productNodes /
+                    // financeNodes / agentAvatars / conflicts / edges. The
+                    // report-writer will produce a generic-shape doc when the
+                    // BMC cells are empty — fine for smoke tests; production UX
+                    // should pass real canvas content via the mention mutation.
+                    const { EMPTY_SEEDED_STATE } = await import('../services/business-langgraph/state.js');
+                    const reportNode = await business.invokeReportWriterForMention({
+                        traceId,
+                        workspaceId: args.workspaceId,
+                        userId: ctx.userId,
+                        question: args.message ?? '基于当前画布生成商业报告',
+                        seed: EMPTY_SEEDED_STATE,
+                        insightNotes: [],
+                        knowledgeEvidence: []
+                    });
+                    if (!reportNode) {
+                        yield yieldEvent({ kind: 'error', errorMessage: '报告生成失败' });
+                        return;
+                    }
+                    const fullMarkdown = reportNode.content ?? '';
+                    // Split by H2 (`## ...`) or H3 (`### ...`) boundaries,
+                    // keeping the heading line with each section. The
+                    // report-writer prompt encourages 6 H2/H3 sections; if the
+                    // LLM produces a flat document, the whole thing yields as
+                    // one event (degraded but still correct).
+                    const sections = fullMarkdown
+                        .split(/(?=^#{2,3}\s)/m)
+                        .map((s) => s.trim())
+                        .filter((s) => s.length > 0);
+                    for (const section of sections) {
+                        // Extract the heading text — strip leading `## ` / `### ` / `### N. `
+                        const titleMatch = /^#{2,3}\s+(?:\d+\.\s*)?(.+?)$/m.exec(section);
+                        const title = titleMatch ? titleMatch[1].trim() : 'Section';
+                        yield yieldEvent({
+                            kind: 'section',
+                            sectionTitle: title,
+                            sectionBody: section
+                        });
+                        // Tiny delay so the client perceives progressive arrival even
+                        // when the upstream LLM returned everything at once.
+                        await new Promise((r) => setTimeout(r, 60));
+                    }
+                    yield yieldEvent({
+                        kind: 'completed',
+                        completeMarkdown: fullMarkdown,
+                        appendedNodeId: reportNode.id ?? null
+                    });
+                }
+                catch (err) {
+                    yield yieldEvent({
+                        kind: 'error',
+                        errorMessage: err instanceof Error ? err.message : String(err)
+                    });
+                }
+            },
+            resolve: (payload) => payload.reportWriterStream
         }
     }
 };

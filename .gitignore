@@ -68,6 +68,7 @@ wrangler.toml.backup
 *.tmp
 *.temp
 *.log
+__pycache__/
 
 # Prisma
 prisma/dev.db
@@ -76,6 +77,17 @@ prisma/dev.db-journal
 # Backup files
 *_backup_*
 *.backup
+*.bak
+*.bak-*
+*.broken-*
+*.reverted-snapshot
+~$*.docx
+
+# Local paper drafts / generated exports
+/exports/
+/docs/paper/archive/
+/docs/paper/drafts/*.docx
+/docs/paper/working-docx/
 
 # Local PostgreSQL data directory (when running PG locally for dev)
 /data/
@@ -87,4 +99,3 @@ prisma/dev.db-journal
 
 # Benchmark report artifacts (regenerated; not source)
 packages/server/benchmark/reports/
-

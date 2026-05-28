@@ -60,7 +60,7 @@ interface WireDrawerProps {
   defaultOpen?: boolean
 }
 
-const ROLE_TINT: Record<AgentByline, string> = {
+const ROLE_TINT: Partial<Record<AgentByline, string>> = {
   market:      'text-byline-market',
   product:     'text-byline-product',
   finance:     'text-byline-finance',
@@ -157,7 +157,7 @@ export function WireDrawer({
 // ────────────────────────────────────────────────────────────────────────
 
 function DispatchRow({ dispatch }: { dispatch: WireDispatch }) {
-  const tint = ROLE_TINT[dispatch.role]
+  const tint = ROLE_TINT[dispatch.role] ?? 'text-paper-ash3'
   const time = formatTime(dispatch.occurredAt)
   const phase = dispatch.kind === 'phase'
   const tool  = dispatch.kind === 'tool-call'
@@ -251,7 +251,7 @@ function DebateSide({
   dispatch: WireDispatch
   side: 'left' | 'right'
 }) {
-  const tint = ROLE_TINT[dispatch.role]
+  const tint = ROLE_TINT[dispatch.role] ?? 'text-paper-ash3'
   return (
     <div
       className={[

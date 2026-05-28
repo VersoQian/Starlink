@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { listAgents } from '../registries/agent-registry'
-import { Database, FileText, Globe, Pencil, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react'
+import { Database, FileText, Globe, Pencil, Plus, Sparkles, Trash2, Upload, X, type LucideIcon } from 'lucide-react'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
 
 const KB_LIST = /* GraphQL */ `
@@ -594,7 +594,7 @@ function SourceTabBtn({
   id: SourceTab
   current: SourceTab
   setTab: (t: SourceTab) => void
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
+  icon: LucideIcon
   label: string
 }) {
   const isActive = current === id

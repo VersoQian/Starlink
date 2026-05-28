@@ -26,6 +26,60 @@
 
 BEGIN;
 
+-- Fresh local databases may not have hit the lazy application DDL in
+-- kb-task-service / kb-store yet. Create the runtime KB tables here so
+-- this migration is deterministic when run from an empty pgvector DB.
+CREATE TABLE IF NOT EXISTS kb_definitions (
+  id            TEXT PRIMARY KEY,
+  workspace_id  TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'draft',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at  TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_definitions_workspace_id
+  ON kb_definitions (workspace_id);
+
+CREATE TABLE IF NOT EXISTS kb_documents (
+  id            TEXT PRIMARY KEY,
+  kb_id         TEXT NOT NULL,
+  workspace_id  TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  content_type  TEXT NOT NULL DEFAULT 'text/plain',
+  source_url    TEXT,
+  metadata      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_documents_kb_id
+  ON kb_documents (kb_id);
+CREATE INDEX IF NOT EXISTS idx_kb_documents_workspace_id
+  ON kb_documents (workspace_id);
+
+CREATE TABLE IF NOT EXISTS kb_chunks (
+  id           TEXT PRIMARY KEY,
+  kb_id        TEXT NOT NULL,
+  doc_id       TEXT NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
+  chunk_index  INTEGER NOT NULL,
+  content      TEXT NOT NULL,
+  embedding    VECTOR(1536),
+  metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_chunks_kb_id
+  ON kb_chunks (kb_id);
+CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc_id
+  ON kb_chunks (doc_id);
+CREATE INDEX IF NOT EXISTS idx_kb_chunks_embedding
+  ON kb_chunks USING ivfflat (embedding vector_cosine_ops)
+  WITH (lists = 100)
+  WHERE embedding IS NOT NULL;
+
 -- ---------------------------------------------------------------------
 -- kb_definitions  ·  owner + visibility
 -- ---------------------------------------------------------------------

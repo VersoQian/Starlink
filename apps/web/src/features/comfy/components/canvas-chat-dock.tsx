@@ -92,6 +92,18 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
   const chatMessages = useComfyStore((s) => s.chatMessages)
   const isProcessing = useComfyStore((s) => s.isOrchestratorProcessing)
   const chatReflecting = useComfyStore((s) => s.chatReflecting)
+  // Count BMC cells already on the canvas. Used to neutralise the
+  // "探索完毕 · 开始生成 BMC" CTA after a successful generation — the
+  // backend handler also refuses re-fires, but suppressing the button
+  // is the better UX (avoids mis-clicks that would otherwise trigger
+  // the ~5-min full pipeline run).
+  const bmcCardCount = useComfyStore((s) => {
+    let count = 0
+    s.macraNodes.forEach((n) => {
+      if (n.type === 'cc-bmc-card') count += 1
+    })
+    return count
+  })
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -277,15 +289,28 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
                       {msg.content}
                     </p>
                     {isLatestMetaCheck && onGraduate ? (
-                      <button
-                        type="button"
-                        onClick={onGraduate}
-                        className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 font-body text-[11px] font-bold text-white hover:bg-stratum-navy-soft transition-colors w-full justify-center"
-                      >
-                        <Sparkles className="h-3.5 w-3.5 text-stratum-sky" strokeWidth={2} fill="#89CEFF" />
-                        探索完毕 · 开始生成 BMC
-                        <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
-                      </button>
+                      bmcCardCount > 0 ? (
+                        // BMC already on canvas — don't offer to re-fire the
+                        // full 8-agent pipeline. Show a passive hint instead.
+                        <div
+                          className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-stratum-line/40 px-3 py-1.5 font-body text-[11px] font-bold text-stratum-muted w-full justify-center"
+                          aria-label="BMC 已生成，无需重新生成"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+                          BMC 已生成 · 用 @ 唤起 agent 补充
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={onGraduate}
+                          disabled={isProcessing}
+                          className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-stratum-navy px-3 py-1.5 font-body text-[11px] font-bold text-white hover:bg-stratum-navy-soft transition-colors w-full justify-center disabled:bg-stratum-muted disabled:cursor-not-allowed"
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-stratum-sky" strokeWidth={2} fill="#89CEFF" />
+                          {isProcessing ? '生成中…' : '探索完毕 · 开始生成 BMC'}
+                          {!isProcessing && <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />}
+                        </button>
+                      )
                     ) : null}
                   </div>
                 </div>

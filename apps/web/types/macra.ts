@@ -74,6 +74,7 @@ export type AgentStage = 'planning' | 'execution' | 'review' | 'decision'
 
 // ============== 节点元数据 ==============
 export interface NodeMetadata {
+  [key: string]: unknown
   source?: string                    // 数据来源（如"基于 NMPA 2024 新规"）
   confidence?: ConfidenceLevel       // 置信度
   agent_signature?: AgentType        // 创建此节点的 Agent
@@ -83,6 +84,8 @@ export interface NodeMetadata {
   tags?: string[]                    // 标签
   cultural_context?: string          // 文化假设/适配地域
   semantic_status?: 'pending' | 'confirmed' | 'needs-clarification'
+  wizardStep?: string                // Ideation wizard step id
+  wizardKind?: string                // Extracted insight category from the wizard
 }
 
 export interface KnowledgeEvidence {

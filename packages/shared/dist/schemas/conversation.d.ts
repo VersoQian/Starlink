@@ -1449,6 +1449,38 @@ export declare const conversationEventSchema: z.ZodDiscriminatedUnion<"type", [z
         nodeName: string;
         payloadKeys: string[];
     };
+}>, z.ZodObject<{
+    type: z.ZodLiteral<"persistence/warning">;
+    conversationId: z.ZodString;
+    payload: z.ZodObject<{
+        severity: z.ZodDefault<z.ZodEnum<["warning", "error"]>>;
+        source: z.ZodEnum<["canvas-graph", "conversation-summary", "conversation-completion"]>;
+        message: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        message: string;
+        source: "canvas-graph" | "conversation-summary" | "conversation-completion";
+        severity: "warning" | "error";
+    }, {
+        message: string;
+        source: "canvas-graph" | "conversation-summary" | "conversation-completion";
+        severity?: "warning" | "error" | undefined;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    type: "persistence/warning";
+    conversationId: string;
+    payload: {
+        message: string;
+        source: "canvas-graph" | "conversation-summary" | "conversation-completion";
+        severity: "warning" | "error";
+    };
+}, {
+    type: "persistence/warning";
+    conversationId: string;
+    payload: {
+        message: string;
+        source: "canvas-graph" | "conversation-summary" | "conversation-completion";
+        severity?: "warning" | "error" | undefined;
+    };
 }>]>;
 export declare const conversationMetadataSchema: z.ZodObject<{
     id: z.ZodString;

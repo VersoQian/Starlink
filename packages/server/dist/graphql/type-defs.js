@@ -65,6 +65,19 @@ export const typeDefs = gql `
     metadata: JSON
   }
 
+  """
+  P12 · single KB chunk lookup result. Used by the Evidence drawer
+  to show the supporting text for a [[ref:docId#chunk-N]] citation.
+  """
+  type KbChunkLookupResult {
+    docId: ID!
+    chunkIndex: Int!
+    content: String!
+    docTitle: String
+    kbId: ID!
+    kbName: String
+  }
+
   type EvidenceRef {
     evidenceId: ID!
     docId: ID!
@@ -143,7 +156,19 @@ export const typeDefs = gql `
     id: ID!
     workspaceId: ID!
     userId: ID
+    """
+    P14 · canonical layer in the 5-level memory hierarchy (session /
+    workspace / user / global). Optional during the deprecation window;
+    may be absent on rows pre-dating migration 016.
+    """
+    layer: String
+    """P14 · cognitive-science facet (episodic / semantic / procedural)."""
+    facet: String
+    """P14 · business-term within (layer, facet) — bmc-summary, user-skill, etc."""
+    category: String
+    """@deprecated P14 P2 — use layer instead."""
     scope: String!
+    """@deprecated P14 P2 — use facet + category instead."""
     kind: String!
     title: String!
     content: String!
@@ -228,6 +253,12 @@ export const typeDefs = gql `
       - 'global'    every authenticated user across all workspaces
     """
     visibility: String!
+    """ P11.18 · Optional human description shown in upload modal. """
+    description: String
+    """ P11.18 · Total document count in this KB (computed). """
+    sourceCount: Int!
+    """ P11.18 · ISO timestamp of latest document ingest (or null if empty). """
+    lastIngestAt: String
   }
 
   type KbDocument {
@@ -536,6 +567,14 @@ export const typeDefs = gql `
     kbDocuments(workspaceId: ID!, kbId: ID!): [KbDocument!]!
     knowledgeBaseStatus(workspaceId: ID!, kbId: ID!): KnowledgeBaseStatus!
     knowledgeBaseSearch(workspaceId: ID!, kbId: ID!, query: String!, topK: Int): [KnowledgeEvidence!]!
+    """
+    P12 · fetch a specific KB chunk by docId (+ optional chunkIndex)
+    so the Evidence drawer can show the full snippet text when the
+    user clicks a [[ref:docId#chunk-N]] citation. Returns null if the
+    chunk doesn't exist or the caller has no read access. Auth: caller
+    must have workspace.read on the workspace owning the KB document.
+    """
+    kbChunkLookup(workspaceId: ID!, docId: ID!, chunkIndex: Int): KbChunkLookupResult
     workspaces: [WorkspaceDirectoryItem!]!
     workspaceAssets(workspaceId: ID!): [WorkspaceAsset!]!
     workspaceMetadataHistory(workspaceId: ID!): [WorkspaceMetadataHistoryEntry!]!
@@ -554,6 +593,14 @@ export const typeDefs = gql `
     conversationId: ID
     agentId: String!
     message: String!
+    """
+    P15 · Optional client-supplied prior user messages (the /chat seed
+    plus any follow-ups in the chat dock). Without this, the first
+    @-mention on a fresh canvas has no idea what the user's pitch was
+    — agents refuse and force the user to repeat. Each entry is one
+    user utterance, oldest first. Server caps the effective context.
+    """
+    priorChat: [String!]
   }
 
   type MentionAgentPayload {
@@ -820,6 +867,38 @@ export const typeDefs = gql `
   type Subscription {
     conversationProgress(workspaceId: ID!, conversationId: ID): ConversationEvent!
     flowExecutionProgress(executionId: ID!): FlowExecutionEvent!
+    """
+    P11.18 · Streaming report-writer. Emits events as the report
+    is generated section by section. Frontend opens this subscription
+    instead of (or alongside) the synchronous mentionAgent mutation
+    when it wants progressive UI rendering.
+
+    Event kinds:
+      - started: report generation kicked off, includes timestamp
+      - section: one section of the 6-section report (Executive Summary
+                 / Market / Product / Finance / Risk / Recommendation)
+                 with its markdown body
+      - completed: full report ready, includes the appended canvas node id
+      - error: generation failed, includes message
+    """
+    reportWriterStream(workspaceId: ID!, message: String): ReportWriterEvent!
+  }
+
+  enum ReportWriterEventKind {
+    started
+    section
+    completed
+    error
+  }
+
+  type ReportWriterEvent {
+    kind: ReportWriterEventKind!
+    timestampIso: String!
+    sectionTitle: String
+    sectionBody: String
+    completeMarkdown: String
+    appendedNodeId: ID
+    errorMessage: String
   }
 
   # ─── Ideation Coach (Wave F.6 + F.7) ─────────────────────────────────

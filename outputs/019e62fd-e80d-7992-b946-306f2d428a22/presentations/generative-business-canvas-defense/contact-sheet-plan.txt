@@ -1,0 +1,3 @@
+planned macro rhythm:
+1 cover image; 2 agenda timeline; 3 problem 2x2; 4 comparison; 5 contribution grid; 6-8 split evidence; 9 two-image user flow; 10 roster + role rail; 11 image-left coverage; 12 editable blackboard flow; 13-15 split mechanism slides; 16 editable pipeline; 17 image-right UI proof; 18-19 two-image implementation proof; 20 observability proof; 21 experiment cards; 22 metric/table; 23 editable bar chart; 24 ablation proof; 25 dark conclusion.
+card-grid count kept limited; no more than two consecutive same macro layouts.

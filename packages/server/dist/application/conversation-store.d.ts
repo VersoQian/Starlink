@@ -58,21 +58,7 @@ export declare class ConversationStore {
     }): Promise<ConversationRecord>;
     getConversation(id: string, userId?: string): Promise<ConversationRecord | null>;
     listConversationRuntimeEvents(workspaceId: string, userId: string, conversationId?: string): Promise<ConversationEvent[]>;
-    listConversationSessions(workspaceId: string, userId: string, limit?: number): Promise<{
-        status: "running" | "failed" | "completed" | "archived";
-        title: string;
-        id: string;
-        workspaceId: string;
-        createdAt: string;
-        updatedAt: string;
-        latestQuestion: string | null;
-        userId: string;
-        contextSnapshot: Record<string, unknown>;
-        completedAt: string | null;
-        heartbeatAt?: string | null | undefined;
-        ownerPid?: string | null | undefined;
-        failureReason?: string | null | undefined;
-    }[]>;
+    listConversationSessions(workspaceId: string, userId: string, limit?: number): Promise<ConversationSession[]>;
     listConversationMessages(workspaceId: string, userId: string, conversationId: string, limit?: number): Promise<ConversationMessage[]>;
     listWorkspaceMemories(workspaceId: string, userId: string, options?: {
         query?: string | null;
@@ -114,6 +100,7 @@ export declare class ConversationStore {
         agentId: string;
         message: string;
         conversationId?: string;
+        priorChat?: string[];
     }): Promise<MentionResult>;
     addNode(workspaceId: string, userId: string, input: {
         id?: string;
@@ -139,6 +126,21 @@ export declare class ConversationStore {
     private createBusinessStream;
     private persistConversationCompletion;
     private persistConversationFailure;
+    /**
+     * P12 · Persist canvas graph + surface failures as 'persistence/warning'
+     * events. Replaces the old silent `try { persistCanvasGraph } catch
+     * console.error` swallow in WorkspaceGraphStore. Caller no longer has
+     * to choose between "keep going on error" (data loss invisible to UI)
+     * vs "throw and abort the whole stream" — the stream continues with a
+     * yellow ⚠ bubble in the chat dock telling the user the canvas may
+     * not have been saved this round.
+     *
+     * Uses 'warning' severity by default: in-memory graph state is still
+     * coherent, only the canvas_graphs UPSERT failed. User can reload
+     * later to verify; for the active session, the in-memory graph is
+     * authoritative.
+     */
+    private persistGraphWithWarning;
     private publishEvent;
     private waitForDecisionApproval;
     /**

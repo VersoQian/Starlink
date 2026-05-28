@@ -28,10 +28,18 @@ import { rateLimitPlugin } from './middleware/rate-limit-plugin.js';
 import { telemetryPlugin } from './middleware/telemetry-plugin.js';
 import { pool, ensureExtensions, probeDatabaseHealth } from './infrastructure/db/pool.js';
 import { startCheckpointCleanupTimer } from './infrastructure/langgraph/checkpointer.js';
+import { startConversationCleanupTimer } from './application/conversation-cleanup.js';
+import { installErrorAggregator, getErrorSummary } from './infrastructure/observability/error-aggregator.js';
+import { getAllAgentSloSnapshots, hydrateAgentSloFromDb, startAgentSloFlushTimer, flushAgentSloToDb, startAgentSloRedisSync, shutdownAgentSloRedisSync } from './infrastructure/observability/agent-slo-tracker.js';
+import { renderPrometheusMetrics } from './infrastructure/observability/prometheus-export.js';
 import { describeEmbeddingConfig } from './services/embedding-service.js';
 import { assertProductionConfig, isProduction } from './infrastructure/config-validate.js';
 const PORT = Number(process.env.PORT ?? 4000);
 const STARTED_AT = Date.now();
+// P11.18 · install error aggregator BEFORE any other module emits
+// audit events so we don't miss boot-time signals. installErrorAggregator
+// is idempotent.
+installErrorAggregator();
 async function start() {
     // Boot-time production config gate. Fails fast (and crashes the
     // process) in production when any required secret is missing or
@@ -133,6 +141,64 @@ async function start() {
         const probe = await probeDatabaseHealth();
         res.status(probe.connected ? 200 : 503).json(probe);
     });
+    // P11.18 · /health/errors — Sentry-style top-N error fingerprints.
+    // Each fingerprint groups duplicate errors by hash(component + action
+    // + error.name + first 3 stack frames). Use ?topN=50 for more.
+    app.get('/health/errors', (req, res) => {
+        const topN = Math.max(1, Math.min(200, Number(req.query.topN) || 20));
+        res.status(200).json(getErrorSummary(topN));
+    });
+    // P11.18 · /health/agents — per-agent SLO snapshot. Returns latency
+    // p50/p95, error rate, fallback rate, plus a degraded boolean when
+    // error rate breaches AGENT_SLO_DEGRADED_THRESHOLD (default 30%).
+    app.get('/health/agents', async (_req, res) => {
+        const snapshots = getAllAgentSloSnapshots();
+        const anyDegraded = snapshots.some((s) => s.degraded);
+        // P15-fix #6 · surface cell-summarizer retry telemetry alongside
+        // the per-agent SLO. Module imported lazily so the route handler
+        // doesn't pin the summarizer module at server boot.
+        let cellSummarizer = null;
+        try {
+            const mod = await import('./agents/shared/cell-summarizer.js');
+            cellSummarizer = mod.getCellSummarizerSnapshot();
+        }
+        catch {
+            // never break /health on a missing telemetry hook
+        }
+        res.status(anyDegraded ? 503 : 200).json({
+            degradedCount: snapshots.filter((s) => s.degraded).length,
+            agents: snapshots,
+            cellSummarizer
+        });
+    });
+    // P11.18 · DEV-ONLY: inject synthetic SLO samples for visual testing.
+    // Requires NODE_ENV !== 'production'. Pass ?agent=&errors=&total= to
+    // populate the in-memory ring with a controlled mix. Lets us screenshot
+    // the degraded-red chip path without crashing real agents.
+    if (process.env.NODE_ENV !== 'production') {
+        app.post('/internal/dev/inject-slo', async (req, res) => {
+            const agentId = String(req.query.agent ?? 'demo-agent');
+            const total = Math.max(1, Math.min(200, Number(req.query.total) || 12));
+            // Important: don't use `|| 6` — that treats explicit `errors=0` as
+            // falsy. Use ?? to honour 0 as "inject pure successes for the
+            // healthy-state demo".
+            const errorsRaw = req.query.errors == null ? 6 : Number(req.query.errors);
+            const errors = Math.max(0, Math.min(total, errorsRaw));
+            const { recordAgentInvocation } = await import('./infrastructure/observability/agent-slo-tracker.js');
+            for (let i = 0; i < total; i++) {
+                recordAgentInvocation(agentId, 50 + Math.floor(Math.random() * 100), i < errors ? 'error' : 'success');
+            }
+            res.json({ injected: total, errors, agentId });
+        });
+    }
+    // P11.18 · /metrics — Prometheus text-format export. Scrape-friendly
+    // for any Prom-based stack (Grafana, VictoriaMetrics, OTel-collector
+    // prometheus receiver). Returns content-type text/plain; version=0.0.4
+    // per Prometheus exposition spec.
+    app.get('/metrics', (_req, res) => {
+        res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+        res.status(200).send(renderPrometheusMetrics());
+    });
     app.use('/internal', internalRouter);
     app.use('/kb', kbProxyRouter);
     const schema = makeExecutableSchema({ typeDefs, resolvers });
@@ -160,6 +226,19 @@ async function start() {
     // cleanly on shutdown. Override via LANGGRAPH_CHECKPOINT_TTL_MS /
     // LANGGRAPH_CHECKPOINT_CLEANUP_INTERVAL_MS env.
     startCheckpointCleanupTimer();
+    // P11.18 · arm conversation_messages TTL cleanup. Default every 6h,
+    // drops messages older than 90d. Override via CONVERSATION_MESSAGE_TTL_MS /
+    // CONVERSATION_CLEANUP_INTERVAL_MS env. Disable via CONVERSATION_CLEANUP_ENABLED=false.
+    startConversationCleanupTimer();
+    // P11.18 · agent SLO persistence. Hydrate cumulative totals from PG so
+    // restart doesn't lose lifetime counters; arm periodic flush every 5min.
+    // Window stats (p50/p95) are intentionally NOT persisted — "recent" by
+    // definition rebuilds from new invocations.
+    void hydrateAgentSloFromDb();
+    startAgentSloFlushTimer();
+    // P11.18 · F4 · cross-gateway SLO sync via Redis pub/sub.
+    // Disabled by default; enable with REDIS_URL + AGENT_SLO_REDIS_ENABLED=true.
+    void startAgentSloRedisSync();
     /**
      * P11.18 · graceful shutdown drain.
      *
@@ -210,6 +289,21 @@ async function start() {
         }
         else {
             console.log('[server] drain complete · all in-flight streams finished');
+        }
+        // P11.18 · final flush of agent SLO totals before exit so the
+        // last few minutes of activity persist across restart.
+        try {
+            await flushAgentSloToDb();
+        }
+        catch {
+            // best-effort; never block shutdown on this
+        }
+        // P11.18 · F4 · disconnect Redis sync cleanly.
+        try {
+            await shutdownAgentSloRedisSync();
+        }
+        catch {
+            // best-effort
         }
         await shutdownContextServices();
         process.exit(0);

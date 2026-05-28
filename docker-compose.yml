@@ -1,13 +1,14 @@
-# Starlink production / staging stack.
+# Starlink local development stack.
 #
 # Usage:
-#   docker compose up -d                 # full stack: PG + Redis + server
+#   docker compose up -d                 # full stack: PG + Redis + server + web
 #   docker compose up -d postgres redis  # deps only (server runs locally via pnpm dev)
 #   docker compose logs -f server        # tail server logs
 #
 # First boot: PG runs the pgvector init in initdb hook (CREATE EXTENSION vector).
 # Migration is on the user — run `pnpm --filter @starlink/server db:migrate`
-# from the host once the stack is up, with DATABASE_URL pointed at port 5432.
+# from the host once the stack is up. This file intentionally matches
+# packages/server/.env.pg-local: localhost:5431, user sheng, database kb_dev.
 
 services:
   postgres:
@@ -15,16 +16,16 @@ services:
     container_name: starlink-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: starlink
-      POSTGRES_PASSWORD: starlink_dev
-      POSTGRES_DB: starlink
+      POSTGRES_USER: sheng
+      POSTGRES_DB: kb_dev
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5432:5432"
+      - "5431:5432"
     volumes:
       - starlink-pg-data:/var/lib/postgresql/data
       - ./scripts/postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U starlink -d starlink"]
+      test: ["CMD-SHELL", "pg_isready -U sheng -d kb_dev"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -56,7 +57,7 @@ services:
         condition: service_healthy
     environment:
       # Connection — point at the in-network service names, NOT host:5432
-      DATABASE_URL: postgres://starlink:starlink_dev@postgres:5432/starlink
+      DATABASE_URL: postgres://sheng@postgres:5432/kb_dev
       REDIS_URL: redis://redis:6379
       PORT: "4000"
       NODE_ENV: production
@@ -86,6 +87,34 @@ services:
       interval: 30s
       timeout: 5s
       start_period: 10s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Browser-side GraphQL must use the host-mapped URL, not the
+        # Docker-internal service name, because the user's browser runs
+        # outside the compose network.
+        NEXT_PUBLIC_GRAPHQL_URL: ${NEXT_PUBLIC_GRAPHQL_URL:-http://localhost:4000/graphql}
+    container_name: starlink-web
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_GRAPHQL_URL: ${NEXT_PUBLIC_GRAPHQL_URL:-http://localhost:4000/graphql}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
       retries: 3
 
 volumes:

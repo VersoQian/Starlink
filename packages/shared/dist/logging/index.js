@@ -1,9 +1,40 @@
+const auditSinks = [];
+export function registerAuditSink(sink) {
+    auditSinks.push(sink);
+    return () => {
+        const i = auditSinks.indexOf(sink);
+        if (i >= 0)
+            auditSinks.splice(i, 1);
+    };
+}
+export function clearAuditSinksForTest() {
+    auditSinks.length = 0;
+}
+function notifySinks(level, component, event) {
+    for (const sink of auditSinks) {
+        try {
+            sink(level, component, event);
+        }
+        catch {
+            // Defensive: a sink failure must never crash the producing call.
+        }
+    }
+}
 export function createAuditLogger(component) {
     const prefix = `[audit:${component}]`;
     return {
-        info: (event) => console.info(prefix, formatEvent('INFO', event)),
-        warn: (event) => console.warn(prefix, formatEvent('WARN', event)),
-        error: (event) => console.error(prefix, formatEvent('ERROR', event))
+        info: (event) => {
+            console.info(prefix, formatEvent('INFO', event));
+            notifySinks('INFO', component, event);
+        },
+        warn: (event) => {
+            console.warn(prefix, formatEvent('WARN', event));
+            notifySinks('WARN', component, event);
+        },
+        error: (event) => {
+            console.error(prefix, formatEvent('ERROR', event));
+            notifySinks('ERROR', component, event);
+        }
     };
 }
 function formatEvent(level, event) {

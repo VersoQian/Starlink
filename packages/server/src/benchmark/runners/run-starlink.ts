@@ -6,6 +6,7 @@ import { loadAllTools } from '../../tool-registry/loader.js'
 import { setToolRegistryForAgents } from '../../agents/shared/register-helpers.js'
 import { loadYamlAgents } from '../../agents/index.js'
 import { computePerAgentContribution } from '../eval/per-agent-contribution.js'
+import { ablationContext } from '../../services/ablation-context.js'
 
 let benchBootstrapPromise: Promise<void> | undefined
 
@@ -66,58 +67,74 @@ export async function runStarlink(
 
   process.env.ORCHESTRATION_MODE = 'registry'
   process.env.HITL_ENABLED = 'false'
-  // Per-call ablation gates. Reset at function entry so a previous
-  // ablation run doesn't leak into the next variant.
-  if (options.noCritic) process.env.ABLATION_DISABLE_CRITIC = 'true'
-  else delete process.env.ABLATION_DISABLE_CRITIC
-  if (options.noDebate) process.env.ABLATION_DISABLE_DEBATE = 'true'
-  else delete process.env.ABLATION_DISABLE_DEBATE
-
+  // Benchmark runs must be controlled and offline with respect to live
+  // workspace state. The YC cases already pass seed KB snippets through
+  // `knowledgeEvidence`; allowing agents to call live KB / memory tools makes
+  // the ablation depend on Postgres availability and can introduce timeouts.
+  process.env.BENCHMARK_DISABLE_LIVE_KB = 'true'
+  process.env.BENCHMARK_DISABLE_MEMORY_TOOLS = 'true'
+  process.env.BENCHMARK_DISABLE_PERSISTENCE = 'true'
+  process.env.BENCHMARK_DISABLE_STREAM_HEARTBEAT = 'true'
+  process.env.HANDOFF_LOG_PERSIST = 'false'
+  process.env.LANGGRAPH_CHECKPOINTER_ENABLED = 'false'
+  process.env.MEMORY_READ_ENABLED = 'false'
+  process.env.MEMORY_WRITE_ENABLED = 'false'
+  // Per-call ablation gates via AsyncLocalStorage so concurrent runs
+  // don't race on shared process.env.
   await ensureBenchmarkBootstrapped()
 
   const service = new BusinessLangGraphService()
   const bmcNodes: unknown[] = []
   let err: string | undefined
 
-  try {
-    const knowledgeEvidence = options.noRag
-      ? []
-      : (c.input.workspace_knowledge ?? []).map((k) => ({
-          docId: k.doc_id,
-          snippet: k.content,
-          score: 1
-        }))
-    const stream = service.streamConversation({
-      workspaceId: `bench-${c.case_id}-${variant}`,
-      userId: 'benchmark-runner',
-      question: c.input.question,
-      traceId,
-      knowledgeEvidence: knowledgeEvidence as Parameters<typeof service.streamConversation>[0]['knowledgeEvidence']
-    })
+  const knowledgeEvidence = options.noRag
+    ? []
+    : (c.input.workspace_knowledge ?? []).map((k) => ({
+        docId: k.doc_id,
+        snippet: k.content,
+        score: 1
+      }))
 
-    for await (const update of stream) {
-      if (update.type === 'delta' && update.delta.nodes) {
-        for (const n of update.delta.nodes) {
-          // GraphBuilder.addMacraNode produces canvas nodes with macraType
-          // and domain stuffed inside data.meta — the original CC-BMC card
-          // shape lives one level deeper than the canvas wrapper.
-          const meta = (n as { data?: { meta?: { macraType?: string; domain?: string } } })
-            ?.data?.meta
-          if (!meta) continue
-          if (meta.macraType === 'cc-bmc-card' || (meta.macraType && meta.domain)) {
-            bmcNodes.push({
-              ...n,
-              // Project a flat shape the metrics expect ({ domain, content, ... }).
-              domain: meta.domain,
-              content: ((n as { data?: { content?: string } }).data?.content) ?? ''
-            })
+  try {
+    const streamResult = await ablationContext.run(
+      {
+        noCritic: options.noCritic === true,
+        noDebate: options.noDebate === true
+      },
+      async () => {
+        const localNodes: unknown[] = []
+        let localErr: string | undefined
+        const gen = service.streamConversation({
+          workspaceId: `bench-${c.case_id}-${variant}`,
+          userId: 'benchmark-runner',
+          question: c.input.question,
+          traceId,
+          knowledgeEvidence: knowledgeEvidence as Parameters<typeof service.streamConversation>[0]['knowledgeEvidence']
+        })
+        for await (const update of gen) {
+          if (update.type === 'delta' && update.delta.nodes) {
+            for (const n of update.delta.nodes) {
+              const meta = (n as { data?: { meta?: { macraType?: string; domain?: string } } })
+                ?.data?.meta
+              if (!meta) continue
+              if (meta.macraType === 'cc-bmc-card' || (meta.macraType && meta.domain)) {
+                localNodes.push({
+                  ...n,
+                  domain: meta.domain,
+                  content: ((n as { data?: { content?: string } }).data?.content) ?? ''
+                })
+              }
+            }
+          }
+          if (update.type === 'status' && update.status === 'failed') {
+            localErr = update.message ?? 'unknown failure'
           }
         }
+        return { bmcNodes: localNodes, err: localErr }
       }
-      if (update.type === 'status' && update.status === 'failed') {
-        err = update.message ?? 'unknown failure'
-      }
-    }
+    )
+    bmcNodes.push(...streamResult.bmcNodes)
+    err = streamResult.err
   } catch (e) {
     err = (e as Error).message
   }
@@ -137,8 +154,9 @@ export async function runStarlink(
     output: {
       bmc_nodes: bmcNodes,
       handoff_count: handoffs.length,
+      handoffs,
       per_agent_contribution: perAgentContribution
-    },
+    } as BenchmarkRun['output'] & { handoffs: typeof handoffs },
     error: err
   }
 }
