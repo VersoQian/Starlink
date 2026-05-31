@@ -12,9 +12,11 @@ import {
   SystemMessage,
   HumanMessage,
   type AIMessage,
-  type BaseMessage
+  type BaseMessage,
+  type ToolMessage
 } from '@langchain/core/messages'
 import type { StructuredToolInterface } from '@langchain/core/tools'
+import { nanoid } from 'nanoid'
 import { deriveSnippetId, type KnowledgeEvidence } from '@starlink/shared'
 
 import type { AgentProfile } from '../../capabilities/profile-schema.js'
@@ -119,7 +121,19 @@ export function makeBmcGeneratorState() {
      * to the mention-router, which uses it as a friendly chat reply
      * instead of the generic "暂未给出新的维度更新" refusal.
      */
-    chatFallbackText: Annotation<string>({ reducer: (_a, b) => b, default: () => '' })
+    chatFallbackText: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+    /**
+     * P15.4 · evidence extracted from tool-call results during this
+     * ReAct session (web_search, url-fetch). These entries didn't
+     * come from pre-generation KB retrieval — they were discovered
+     * by the agent at runtime. Upstream callers merge them into
+     * knowledgeEvidence before citation parsing & broadcast so the
+     * frontend EvidenceDrawer can display the actual source content.
+     */
+    discoveredEvidence: Annotation<KnowledgeEvidence[]>({
+      reducer: (_a, b) => b,
+      default: () => []
+    })
   })
 }
 
@@ -259,6 +273,118 @@ function buildSystemPrompt(profile: AgentProfile, state: BmcGeneratorStateType):
 
 // ============== Subgraph factory ==============
 
+/**
+ * P15.4 · Walk the ReAct session messages and extract discoverable evidence
+ * from data-source tool calls (web-search, url-fetch).
+ *
+ * For each web_search / web-search tool call that returned results, we create
+ * synthetic KnowledgeEvidence entries so that:
+ *   1. Citation parsing (`applyCitationParsing`) can match [[ref:...]] tokens
+ *      against these entries instead of throwing them away as invalidRefs.
+ *   2. The frontend EvidenceDrawer can display the actual search result snippet
+ *      (title, URL, content) instead of showing "原文不可见".
+ *
+ * Synthetic docIds use the format `ds-{nanoid(8)}` (ds = data source) so they
+ * won't collide with kb_chunks docIds. snippetId is chunk-0.
+ */
+function extractDiscoveredEvidence(
+  messages: BaseMessage[],
+  traceId: string
+): KnowledgeEvidence[] {
+  const evidence: KnowledgeEvidence[] = []
+  // Build a map from tool_call_id → ToolMessage for fast lookup.
+  const toolMsgMap = new Map<string, ToolMessage>()
+  for (const msg of messages) {
+    if (msg._getType() === 'tool') {
+      const tm = msg as ToolMessage
+      const tcId = tm.tool_call_id as string
+      if (tcId) toolMsgMap.set(tcId, tm)
+    }
+  }
+
+  for (const msg of messages) {
+    if (msg._getType() !== 'ai') continue
+    const aiMsg = msg as AIMessage
+    const toolCalls = aiMsg.tool_calls ?? []
+    for (const tc of toolCalls) {
+      const name = (tc as { name?: string }).name ?? ''
+      // Normalise: tool adapter sanitizes dots → underscores for the wire,
+      // but the original name still uses dots. Match both.
+      const isWebSearch =
+        name === 'web-search' ||
+        name === 'web_search' ||
+        name === 'webSearch'
+      if (!isWebSearch) continue
+
+      const tcId = (tc as { id?: string }).id
+      if (!tcId) continue
+
+      const toolMsg = toolMsgMap.get(tcId)
+      if (!toolMsg) continue
+
+      const content = typeof toolMsg.content === 'string'
+        ? toolMsg.content
+        : Array.isArray(toolMsg.content)
+          ? toolMsg.content.map((part) => (part as { text?: string }).text ?? '').join('')
+          : ''
+
+      if (!content) continue
+
+      // Parse the tool response JSON. It's wrapped in JSON.stringify by the
+      // lc-tool-adapter, so the raw content is itself a JSON string.
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(content)
+      } catch {
+        continue
+      }
+
+      const obj = parsed as Record<string, unknown> | undefined
+      if (!obj) continue
+
+      // Handle both { results: [...] } (web-search output) and
+      // { ok: false, error: "..." } (failed tool calls → skip).
+      if (obj.ok === false) continue
+
+      const results = obj.results as Array<Record<string, unknown>> | undefined
+      if (!Array.isArray(results) || results.length === 0) continue
+
+      const query = (obj.query as string) ?? ''
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i]
+        const title = (r.title as string) ?? ''
+        const url = (r.url as string) ?? ''
+        const snippet = (r.snippet as string) ?? ''
+        const domain = (r.domain as string) ?? ''
+        if (!title && !snippet) continue
+
+        const docId = `ds-${nanoid(8)}`
+        const snippetId = 'chunk-0'
+        evidence.push({
+          docId,
+          snippet: snippet || title,
+          score: (r.score as number) ?? 0.5,
+          metadata: {
+            // Standard KnowledgeEvidence metadata fields.
+            title: title || domain || query,
+            snippetId,
+            chunkIndex: 0,
+            // P15.4 extensions: url + domain so the EvidenceDrawer can render
+            // a clickable source link even when kbChunkLookup has no entry.
+            url,
+            domain,
+            provider: (r.provider as string) ?? (obj.provider as string) ?? '',
+            sourceQuery: query,
+            sourceKind: 'web-search'
+          }
+        })
+      }
+    }
+  }
+
+  return evidence
+}
+
 export function buildBmcGeneratorSubgraph(
   profile: AgentProfile,
   model: BusinessModel | null,
@@ -322,6 +448,16 @@ export function buildBmcGeneratorSubgraph(
   const parseNode = async (
     state: BmcGeneratorStateType
   ): Promise<Partial<BmcGeneratorStateType>> => {
+    // P15.4 · extract evidence from web_search / url-fetch tool calls
+    // made during the ReAct session. These entries will be merged into
+    // knowledgeEvidence by upstream callers before citation parsing, so
+    // [[ref:...]] tokens that reference web search results won't be
+    // discarded as invalidRefs.
+    const discoveredEvidence = extractDiscoveredEvidence(
+      state.messages,
+      state.traceId
+    )
+
     const lastAI = [...state.messages]
       .reverse()
       .find((m) => m._getType() === 'ai') as AIMessage | undefined
@@ -330,11 +466,6 @@ export function buildBmcGeneratorSubgraph(
     const content = readModelText(lastAI)
     const nodes = extractAndParseJSON(content, cfg.loggerName)
     if (nodes.length === 0) {
-      // P11.12 · Fix B chatFallback. Agent wrote prose (likely a clarifying
-      // question per the soften-prompt path) instead of JSON cells. Salvage
-      // the prose as chatFallbackText so mention-router can show it to user.
-      // Trim to 800 chars to bound payload — agent prompts limit to ~80 chars
-      // anyway but truncate defensively.
       const fallback = (content || '').trim().slice(0, 800)
       return {
         [cfg.outputField]: [],
@@ -348,11 +479,7 @@ export function buildBmcGeneratorSubgraph(
       round: state.roundNumber
     })
 
-    // P11.11 · Sub-agent visibility. Walk all AIMessages in the ReAct
-    // session and collect tool names invoked. Attach to each generated
-    // node's metadata.subAgentsInvoked so the frontend drawer can render
-    // "本 cell 由以下 sub-agent 协作生成: persona-clusterer / market-sizer / ...".
-    // The metadata schema is .passthrough() so this extra field is preserved.
+    // P11.11 · Sub-agent visibility.
     const subAgentsInvoked: string[] = []
     const seen = new Set<string>()
     for (const msg of state.messages) {
@@ -367,17 +494,36 @@ export function buildBmcGeneratorSubgraph(
       }
     }
 
-    if (subAgentsInvoked.length > 0) {
-      for (const node of validated) {
-        const existing = (node.metadata ?? {}) as Record<string, unknown>
-        ;(node.metadata as Record<string, unknown>) = {
-          ...existing,
-          subAgentsInvoked
-        }
+    // P15.4 · attach discovered evidence to node metadata so
+    // conversation-store can broadcast it to the frontend.
+    const evidenceMeta =
+      discoveredEvidence.length > 0
+        ? {
+            discoveredEvidence: discoveredEvidence.map((e) => ({
+              docId: e.docId,
+              snippet: e.snippet.slice(0, 500),
+              score: e.score,
+              metadata: e.metadata
+            }))
+          }
+        : null
+
+    for (const node of validated) {
+      const existing = (node.metadata ?? {}) as Record<string, unknown>
+      const enriched: Record<string, unknown> = { ...existing }
+      if (subAgentsInvoked.length > 0) {
+        enriched.subAgentsInvoked = subAgentsInvoked
       }
+      if (evidenceMeta) {
+        enriched.discoveredEvidence = evidenceMeta.discoveredEvidence
+      }
+      ;(node.metadata as Record<string, unknown>) = enriched
     }
 
-    return { [cfg.outputField]: validated } as Partial<BmcGeneratorStateType>
+    return {
+      [cfg.outputField]: validated,
+      discoveredEvidence
+    } as Partial<BmcGeneratorStateType>
   }
 
   return new StateGraph(BmcGeneratorState)

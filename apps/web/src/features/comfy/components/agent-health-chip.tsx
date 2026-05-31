@@ -27,9 +27,12 @@ type AgentSnapshot = {
   degraded: boolean
 }
 
+type ToolSnapshot = AgentSnapshot
+
 type HealthResponse = {
   degradedCount: number
   agents: AgentSnapshot[]
+  tools?: ToolSnapshot[]
 }
 
 const POLL_MS = 30_000
@@ -167,6 +170,31 @@ export function AgentHealthChip() {
               </li>
             ))}
           </ul>
+
+          {data.tools && data.tools.length > 0 && (
+            <>
+              <div className="border-t-[1px] border-stratum-line px-4 py-2 font-mono text-[9px] uppercase tracking-[0.18em] text-stratum-muted">
+                TOOLS · {data.tools.length} tracked
+              </div>
+              <ul className="divide-y divide-stratum-line">
+                {data.tools.map((t) => (
+                  <li key={t.agentId} className="px-4 py-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-mono text-[11px] font-medium text-stratum-ink">
+                        {t.agentId}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 grid grid-cols-3 gap-x-2 font-mono text-[10px] tabular-nums text-stratum-muted">
+                      <span>p50: <span className="text-stratum-ink">{t.latencyP50Ms}ms</span></span>
+                      <span>p95: <span className="text-stratum-ink">{t.latencyP95Ms}ms</span></span>
+                      <span>calls: <span className="text-stratum-ink">{t.totals.invocations}</span></span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
           <div className="border-t-[1px] border-stratum-line px-4 py-2 font-mono text-[9px] uppercase tracking-[0.14em] text-stratum-muted">
             polled every {POLL_MS / 1000}s · /health/agents
           </div>

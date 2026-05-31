@@ -11,6 +11,9 @@
 
 import { z } from 'zod'
 
+/** Maximum content length (chars) for the coach's question. */
+export const COACH_CONTENT_MAX_CHARS = 640
+
 export const IDEATION_NODE_KINDS = [
   'core-idea',
   'customer-pain',
@@ -108,8 +111,8 @@ export const ReflectionRequestSchema = z.object({
   /**
    * P10 fix D · how many user messages have been sent in this session.
    * After 4+ messages without canvas progress, the prompt nudges the LLM
-   * toward `meta` scaffold + a graduation suggestion (try /wizard or
-   * trigger BMC pipeline) instead of more why/how loops.
+   * toward `meta` scaffold and a clearer organizing question instead of
+   * more why/how loops.
    */
   userTurnCount: z.number().int().nonnegative().optional(),
   /**
@@ -120,14 +123,21 @@ export const ReflectionRequestSchema = z.object({
    * never fills this. See `packages/shared/src/user-skill/prompts.ts`
    * `renderUserSkillBlock` for the format.
    */
-  userSkillBlock: z.string().optional()
+  userSkillBlock: z.string().optional(),
+  /**
+   * P15 · Client-computed dimension coverage heatmap. Keys are dimension
+   * identifiers (BMC/ideation); values are integer mention counts from
+   * scanning recent chat + canvas text. Dimensions with count=0 are
+   * "unexplored" and will be prioritised by the prompt builder.
+   */
+  dimensionCoverage: z.record(z.string(), z.number()).optional()
 })
 
 export type ReflectionRequest = z.infer<typeof ReflectionRequestSchema>
 
 export const ReflectionResponseSchema = z.object({
   scaffold: ScaffoldKindSchema,
-  content: z.string().min(8).max(500),
+  content: z.string().min(8).max(700),
   metaIdFired: z.string().nullable().optional(),
   source: z.enum(['llm', 'scripted', 'error']),
   latencyMs: z.number().int().nonnegative().optional()

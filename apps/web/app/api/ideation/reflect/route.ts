@@ -4,10 +4,13 @@ import {
   ReflectionResponseSchema,
   type ReflectionRequest,
   type ReflectionResponse,
-  type ScaffoldKind,
+  COACH_SCRIPTED_PIVOT_CONTENT,
   COACH_SYSTEM_PROMPT,
   buildCoachUserMessage,
-  parseCoachReply
+  isCoachMessageRepeat,
+  parseCoachReply,
+  reflectionFallback,
+  shouldScriptCoachPivot
 } from '@starlink/shared'
 
 /**
@@ -40,56 +43,6 @@ const DEEPSEEK_MODEL = process.env.LLM_MODEL ?? 'deepseek-chat'
 const TIMEOUT_MS = 12_000
 
 // =============================================================================
-// Prompt + parser are now in `@starlink/shared/ideation-coach` (Wave F).
-// COACH_SYSTEM_PROMPT, buildCoachUserMessage, parseCoachReply imported above.
-// =============================================================================
-// Fallback (graceful degradation when LLM is unavailable)
-// =============================================================================
-
-/**
- * Server-side fallback when the coach LLM call fails (timeout / 5xx).
- *
- * Kept in sync with the canonical fallback in
- * `packages/server/src/services/ideation-coach-service.ts` — both
- * surface a degraded-mode banner + an event-anchored body so users
- * don't see a generic "已有节点的关系" template that ignores context.
- */
-function fallbackReflection(input: ReflectionRequest, latencyMs: number): ReflectionResponse {
-  const banner = '_(AI 教练暂时不可达，以下是脚本回复。点 重试 可再试一次。)_\n\n'
-  const event = input.event
-  let scaffold: ScaffoldKind = 'why'
-  let body: string
-  switch (event.type) {
-    case 'node-added': {
-      const label = (event.label ?? '').trim().slice(0, 40)
-      body = label
-        ? `刚加了 "${label}" (${event.kind})。用一句话说说：为什么是这个，而不是其他类似选项？`
-        : `刚加了一个 ${event.kind} 节点。为什么是这个？`
-      break
-    }
-    case 'node-linked': {
-      body = `你把 ${event.fromKind} → ${event.toKind} 连起来了。这条连线代表 "导致" / "支撑" / "包含" 中哪一种？`
-      break
-    }
-    case 'meta-check': {
-      scaffold = 'meta'
-      const counts = Object.entries(input.canvas?.nodeCountByKind ?? {})
-        .filter(([, n]) => n > 0)
-        .map(([k, n]) => `${k}=${n}`)
-        .join(', ')
-      body = counts
-        ? `当前画布: ${counts}。退一步看：哪个维度最不确定 / 最需要补证据？`
-        : '退一步看你的画布：当前最薄弱的环节是什么？'
-      break
-    }
-    default: {
-      body = '能再具体一点吗 — 这是基于什么观察 / 数据 / 经历？'
-    }
-  }
-  return { scaffold, content: banner + body, source: 'error', latencyMs }
-}
-
-// =============================================================================
 // DeepSeek call
 // =============================================================================
 
@@ -105,7 +58,7 @@ async function callDeepSeek(
   systemPrompt: string,
   userPrompt: string,
   signal: AbortSignal
-): Promise<{ scaffold: ScaffoldKind; content: string }> {
+): Promise<{ scaffold: ReflectionResponse['scaffold']; content: string }> {
   if (!DEEPSEEK_KEY) {
     throw new Error('DEEPSEEK_API_KEY (or LLM_API_KEY) not configured')
   }
@@ -122,8 +75,7 @@ async function callDeepSeek(
         { role: 'user', content: userPrompt }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.7,
-      max_tokens: 400
+      temperature: 0.7
     }),
     signal
   })
@@ -160,6 +112,33 @@ export async function POST(request: Request) {
     )
   }
 
+  // P15.6 · Short-answer deflection detection. When user sends < 15
+  // characters, skip the LLM call and return a scripted pivot. Saves cost
+  // + latency + guarantees the coach doesn't hammer the same topic.
+  if (parsedBody.event.type === 'user-message') {
+    const lastUserMsg = [...parsedBody.recentChat].reverse().find((message) => message.role === 'user')
+    if (lastUserMsg && isCoachMessageRepeat(lastUserMsg.content, parsedBody.event.label)) {
+      return NextResponse.json({
+        scaffold: 'meta',
+        content:
+          '我注意到你在围绕同一个想法反复确认 — 这说明核心方向开始稳定了。\n\n' +
+          '我们可以继续向下拆解。接下来，你更想先确认目标客户、核心价值，还是最小验证方式？',
+        source: 'scripted',
+        latencyMs: Date.now() - startedAt
+      } satisfies ReflectionResponse)
+    }
+    const trimmed = parsedBody.event.label.trim()
+    if (shouldScriptCoachPivot(trimmed)) {
+      const latencyMs = Date.now() - startedAt
+      return NextResponse.json({
+        scaffold: 'meta',
+        content: COACH_SCRIPTED_PIVOT_CONTENT,
+        source: 'scripted',
+        latencyMs
+      } satisfies ReflectionResponse)
+    }
+  }
+
   // 12 s timeout
   const ac = new AbortController()
   const timeoutId = setTimeout(() => ac.abort(), TIMEOUT_MS)
@@ -184,7 +163,7 @@ export async function POST(request: Request) {
     const latencyMs = Date.now() - startedAt
     const errMsg = err instanceof Error ? err.message : String(err)
     console.warn('[ideation-reflect] LLM call failed, returning fallback', { errMsg, latencyMs })
-    const fallback = fallbackReflection(parsedBody, latencyMs)
+    const fallback = reflectionFallback(parsedBody, latencyMs)
     return NextResponse.json({ ...fallback, _diagnostic: errMsg })
   }
 }

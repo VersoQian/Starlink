@@ -116,8 +116,7 @@ async function callDeepSeek(
         { role: 'user', content: userPrompt }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.6, // a bit lower than coach — wizard wants stability
-      max_tokens: 600
+      temperature: 0.6 // a bit lower than coach — wizard wants stability
     }),
     signal
   })

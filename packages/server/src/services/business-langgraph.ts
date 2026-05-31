@@ -2674,10 +2674,10 @@ ${workspaceContext}${crossContext}${knowledgeContext}${this.getRevisionSuffix(st
     // accept.
     let verdict: ModeratorVerdict = highCount > 0 && !atCap ? 'continue' : 'accept'
     let narration = atCap
-      ? `已到达最大修订轮次（第 ${round} 轮，含 ${highCount} 个高、${moderateCount} 个中、${lowCount} 个低严重性冲突），按既有画布定稿。`
+      ? `已到达最大修订轮次（第 ${round} 轮，含 ${highCount} 个高、${moderateCount} 个中、${lowCount} 个低严重性冲突），画布已定稿。你可以查看左侧节点面板，在对话框告诉我需要调整的地方。`
       : highCount > 0
         ? `本轮检出 ${highCount} 个高严重性冲突，建议进入第 ${round + 1} 轮修订。`
-        : `本轮检出 ${conflicts.length} 个低/中严重性问题，画布逻辑自洽，可接受当前版本。`
+        : `BMC 生成完成 — ${conflicts.length} 个低/中严重性问题已自动解决，画布定稿。点击左侧节点查看各维度卡片，或打开对话框告诉我你想深入分析的维度。`
 
     if (this.model) {
       try {
@@ -2706,11 +2706,18 @@ ${conflictDigest || '（无冲突）'}
 - "continue" = 仍有需要 generator 修订的高/中严重性冲突，应进入下一轮
 - "accept" = 冲突可接受或已达最大轮次，画布定稿
 
-输出 JSON: { "verdict": "continue" | "accept", "narration": "1-2 句给用户看的研讨会决策说明，含具体数字" }`
+输出 JSON: { "verdict": "continue" | "accept", "narration": "给用户的决策说明" }
+
+### narration 要求（P15.5 · 用户引导）
+- 如果 verdict="continue": 简述为什么还需要一轮 + 主要的待修订项（≤ 60 字）
+- 如果 verdict="accept": **必须包含引导语**，先简要宣布画布定稿，再加一句具体的查看/反馈引导，例如：
+  "画布已定稿 — ${bmcCount}/9 个维度已填充。点击左上角 Chat 按钮打开对话框，告诉我你想调整哪里，或者回到左侧节点逐项检查数据和来源标注。"
+  "BMC 首轮生成完成 ✓ 你可以：① 在左侧节点面板展开任意卡片查看细节 ② 点击 [N] 引用标查看数据来源 ③ 在对话框告诉我你想深入哪个维度"
+  引导语要具体、可操作、不空洞。`
 
         const moderatorSchema = z.object({
           verdict: z.enum(['continue', 'accept']),
-          narration: z.string().min(8).max(240)
+          narration: z.string().min(8).max(400)
         })
 
         const structured = this.model.withStructuredOutput(moderatorSchema, {
@@ -2749,6 +2756,12 @@ ${conflictDigest || '（无冲突）'}
         agent_signature: 'Moderator',
         confidence: 'medium',
         source: 'moderator-verdict',
+        // P15-fix · Moderator MUST emit stage so conversation-store's
+        // extractRuntimeInfo can detect 'decision' and trigger publishPhaseChanged.
+        // Without this, inferPhase('Moderator') falls through to 'execution',
+        // latestDecision stays empty, phase.changed('decision') never fires,
+        // and the frontend stage-strip shows REVIEW as running forever.
+        stage: verdict === 'accept' ? 'decision' : 'review',
         tags: [verdict, `round-${round}`]
       }
     }

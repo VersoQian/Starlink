@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { addEdge, applyEdgeChanges, applyNodeChanges } from 'reactflow'
 import type { Node, Edge, Connection, NodeChange, EdgeChange, ReactFlowInstance } from 'reactflow'
 import { getGraphQLClient } from '@/shared/lib/graphql-client'
+import { computeDimensionCoverage } from '@starlink/shared'
 import { watchConversation } from '@/shared/lib/conversation-sync-engine'
 import { applyCanvasLayout } from './canvas-layout-registry'
 import { fetchWorkspaceGraphSnapshot } from '@/features/workspace/hooks/use-workspace-graph'
@@ -595,6 +596,10 @@ interface MacraState {
   setChatInput: (input: string) => void
   setChatMessages: (messages: ChatMessage[] | ((msgs: ChatMessage[]) => ChatMessage[])) => void
   appendChatMessage: (message: Omit<ChatMessage, 'timestamp'>) => void
+  /** KB selected for the current conversation. When set, startConversation
+   *  uses it as the RAG source; when undefined, no KB augmentation. */
+  selectedKbId: string | undefined
+  setSelectedKbId: (kbId: string | undefined) => void
 
   /** In-chat 7-step wizard state. See WizardChatState comments. */
   wizardChat: WizardChatState
@@ -696,7 +701,7 @@ interface MacraState {
   // + 最近 chat 历史 + 用户新消息打包发过去，返回单条 scaffold 类型的反问
   // (why / how / so_what / evidence_needed / meta)。和 callLangGraph 区
   // 别：那个是触发 8-agent BMC 生成 pipeline；这个是单轮反思教练，不动节点。
-  reflectOnChat: (userMessage: string) => Promise<void>
+  reflectOnChat: (userMessage: string, _kbId?: string) => Promise<void>
 
   // Shared graph-delta application. WS `graph/diff` events and the
   // mention-hydrate path both funnel through this so writes never
@@ -855,6 +860,7 @@ export const useComfyStore = create<MacraState>((set, get) => ({
   toolRunStates: {},
   chatInput: '',
   chatMessages: createInitialChatMessages(),
+  selectedKbId: undefined,
   wizardChat: { active: false, stepIndex: 0, history: [], prefill: {} },
   detailPanel: {
     isOpen: false,
@@ -1019,6 +1025,11 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       }
     ])
+  },
+
+  setSelectedKbId: (kbId) => {
+    if (get().selectedKbId === kbId) return
+    set({ selectedKbId: kbId })
   },
 
   startWizardInChat: async (workspaceId, withKbPrefill = true) => {
@@ -1294,10 +1305,10 @@ ${firstStep.description}${draftHint}
             isWizard: true
           })
         }
-        // Sprint 2.3 · STRONG seed framing — 7 答案是用户亲口确认的事
-        // 实，agents 不能改写、只能扩展/反驳。这避免初始 BMC 输出偏离
-        // 用户的实际意图。
-        const seed = `[用户亲述 · 不可改写] 以下 7 段是用户通过结构化向导逐步确认的商业意图。请将每段视作 ground-truth user-attested fact，agents 在生成 BMC 时必须严格基于这些事实展开（可以扩展、补充、反驳，但不能改写或忽略）：\n\n${summary}\n\n---\n\n请基于以上结构化输入生成完整 BMC（9 维度），并在每个 cell 中明确引用对应的 wizard 答案编号。`
+        // Preserve the user's intent without conflating user-confirmed
+        // assumptions with externally supported facts. Downstream agents
+        // may add evidence, identify gaps, or challenge an assumption.
+        const seed = `[用户确认的分析输入 · 保留原意] 以下 7 段是用户通过结构化向导逐步确认的商业意图、假设和观察。agents 在生成 BMC 时必须保留这些输入的原意，并明确区分“用户假设”“可检索证据”和“系统推断”。可以扩展、补充、质疑或指出证据缺口，但不能静默忽略用户输入：\n\n${summary}\n\n---\n\n请基于以上结构化输入生成完整 BMC（9 维度），并在每个 cell 中明确引用对应的 wizard 答案编号。`
         try {
           const startMod = await import('@/shared/lib/graphql-client')
           const kickResp = await startMod.getGraphQLClient().request<{
@@ -2002,12 +2013,33 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
           applyGraph(payload as WorkspaceGraphResponse)
         },
         onGraphDiff: (payload) => {
-          get().applyGraphDelta(payload as {
+          const delta = payload as {
             nodes?: CanvasNode[]
             edges?: CanvasEdge[]
             removedNodeIds?: string[]
             removedEdgeIds?: string[]
-          })
+          }
+          get().applyGraphDelta(delta)
+          // P15.5 · moderator narration → chat message.
+          // When the moderator emits a verdict insight-note, surface it
+          // as an assistant chat message so the user sees the completion
+          // prompt (with concrete next steps) in the chat dock, not just
+          // as a silent canvas node.
+          const newNodes = delta.nodes ?? []
+          for (const node of newNodes) {
+            const nd = (node.data ?? {}) as Record<string, unknown>
+            const meta = (nd.metadata ?? {}) as Record<string, unknown>
+            if (
+              meta.agent_signature === 'Moderator' &&
+              typeof nd.content === 'string' &&
+              nd.content.trim().length > 0
+            ) {
+              get().appendChatMessage({
+                role: 'assistant',
+                content: nd.content.trim()
+              })
+            }
+          }
         },
         onEvidence: (payload) => {
           const evidence = payload as KnowledgeEvidence[]
@@ -2342,6 +2374,25 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               for (const n of delta.nodes) {
                 const m = extractMacraNodeData(n)
                 if (m) newMacra.set(n.id, m)
+                // P15.5 · moderator narration → chat message (hydrate path).
+                const nd2 = (n.data ?? {}) as Record<string, unknown>
+                const meta2 = (nd2.metadata ?? {}) as Record<string, unknown>
+                const ndContent = nd2.content as string | undefined
+                if (
+                  meta2.agent_signature === 'Moderator' &&
+                  typeof ndContent === 'string' &&
+                  ndContent.trim().length > 0 &&
+                  !s.chatMessages.some((cm) => cm.content === ndContent.trim())
+                ) {
+                  s.chatMessages = [
+                    ...s.chatMessages,
+                    {
+                      role: 'assistant' as const,
+                      content: ndContent.trim(),
+                      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                    }
+                  ]
+                }
               }
             }
             return {
@@ -2470,7 +2521,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
   },
 
   // ============== Socratic Coach (reflectOnIdeation) ==============
-  reflectOnChat: async (userMessage: string) => {
+  reflectOnChat: async (userMessage: string, _kbId?: string) => {
     const trimmed = userMessage.trim()
     if (!trimmed) return
 
@@ -2513,8 +2564,16 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       .map((m) => m.scaffold as string)
 
     // P10 fix D · count user messages in this session for graduation
-    // pressure (after 4+ msgs and sparse canvas, suggest /wizard).
+    // pressure (after 4+ msgs and sparse canvas, ask an organizing question).
     const userTurnCount = state.chatMessages.filter((m) => m.role === 'user').length
+
+    // ── P15 · Dimension coverage heatmap ──
+    // Scan recent chat + canvas labels for BMC/ideation dimension keywords.
+    // The prompt builder uses this to prioritise zero-coverage dimensions.
+    const dimensionCoverage = computeDimensionCoverage(
+      recentChat,
+      canvasNodes.map((n) => `${n.label} ${n.content}`)
+    )
 
     try {
       const client = getGraphQLClient()
@@ -2545,6 +2604,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
             userTurnCount,
             firedMetaIds: [],
             workspaceId: state.workspaceId,
+            dimensionCoverage,
           },
         }
       )
@@ -2610,6 +2670,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
                 recentChat,
                 firedMetaIds: [],
                 workspaceId: fresh.workspaceId,
+                dimensionCoverage,
               },
             }
           )
@@ -3074,6 +3135,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
       toolRunStates: {},
       chatInput: '',
       chatMessages: createInitialChatMessages(),
+      selectedKbId: undefined,
       detailPanel: {
         isOpen: false,
         nodeId: null

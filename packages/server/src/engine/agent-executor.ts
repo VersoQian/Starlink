@@ -3,10 +3,13 @@
  * An Agent node uses this to autonomously decide which tools to call.
  */
 
+import { createAuditLogger } from '@starlink/shared'
 import type { AgentEvent, ExecutionContext, ToolContext } from '@starlink/shared'
 import type { ToolRegistry } from '../tool-registry/registry.js'
 import { LLMClient } from '../services/llm-client.js'
 import type { LLMMessage, LLMToolSchema } from '../services/llm-client.js'
+
+const toolAuditLogger = createAuditLogger('packages/server:engine:agent-executor:tool-call')
 
 const MAX_ROUNDS = 10
 
@@ -126,10 +129,28 @@ export class AgentExecutor {
             toolSloStatus = 'error'
             return { call, errMsg: err instanceof Error ? err.message : String(err) }
           } finally {
+            const durationMs = Date.now() - toolSloStart
             try {
-              recordAgentInvocation(`tool:${call.name}`, Date.now() - toolSloStart, toolSloStatus)
+              recordAgentInvocation(`tool:${call.name}`, durationMs, toolSloStatus)
             } catch {
               // SLO never blocks tool path
+            }
+            // Per-call audit log so we can trace who called what tool in which workflow
+            try {
+              toolAuditLogger.info({
+                action: 'tool-call',
+                workflowId: sharedToolCtx.workspaceId,
+                userId: sharedToolCtx.userId,
+                metadata: {
+                  toolName: call.name,
+                  executionId: sharedToolCtx.executionId,
+                  durationMs,
+                  status: toolSloStatus,
+                  argsSummary: JSON.stringify(call.args).slice(0, 200)
+                }
+              })
+            } catch {
+              // audit log never blocks tool path
             }
           }
         })

@@ -16,6 +16,7 @@
  */
 
 export * from './schemas.js'
+export * from './policy.js'
 export * from './prompts.js'
 export * from './parser.js'
 export * from './wizard-schemas.js'

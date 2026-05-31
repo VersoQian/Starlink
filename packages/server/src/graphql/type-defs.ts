@@ -972,6 +972,13 @@ export const typeDefs = gql`
     no block (current behaviour preserved).
     """
     workspaceId: ID
+    """
+    P15 · Client-computed dimension coverage heatmap. Keys are dimension
+    identifiers (BMC/ideation); values are integer mention counts from
+    scanning recent chat + canvas text. Dimensions with count=0 will be
+    prioritised as unexplored. Optional — omitted for older clients.
+    """
+    dimensionCoverage: JSON
   }
 
   type IdeationReflection {

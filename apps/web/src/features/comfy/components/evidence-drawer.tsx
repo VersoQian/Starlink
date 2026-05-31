@@ -158,6 +158,16 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
     ?? (serverChunk ? `chunk-${serverChunk.chunkIndex}` : '')
   const referenceCount = referencingCardIds?.length ?? 0
 
+  // P15.4 · extract search-source metadata exposed by the server-side
+  // evidence pipeline. web_search / url-fetch results carry url + domain +
+  // provider + sourceQuery fields in metadata so the drawer can render a
+  // clickable source link even when kbChunkLookup returns null.
+  const sourceUrl = (metadata?.url as string | undefined) ?? ''
+  const sourceDomain = (metadata?.domain as string | undefined) ?? ''
+  const sourceProvider = (metadata?.provider as string | undefined) ?? ''
+  const sourceQuery = (metadata?.sourceQuery as string | undefined) ?? ''
+  const sourceKind = (metadata?.sourceKind as string | undefined) ?? ''
+
   const handleLocateCards = () => {
     if (referencingCardIds && referencingCardIds.length > 0) {
       highlightCards(referencingCardIds)
@@ -234,13 +244,59 @@ export function EvidenceDrawer({ conversationId, className }: EvidenceDrawerProp
             原文片段 · ORIGINAL SNIPPET
           </p>
           <div className="border-[0.5px] border-stratum-line bg-stratum-surface-low px-4 py-3 font-body text-[13px] leading-[1.6] text-stratum-ink max-w-measure-body">
-            {snippetText || (
+            {snippetText ? (
+              snippetText
+            ) : sourceUrl ? (
+              // P15.4 · web search evidence: snippet may be empty but we have
+              // url/title/domain. Show a clickable source link instead of "不可见".
+              <div className="space-y-2">
+                <p className="text-stratum-muted text-[11px]">
+                  搜索结果内容未持久化，但可点击前往原始来源：
+                </p>
+                <a
+                  href={sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block text-sky-600 underline text-[12px] break-all hover:text-sky-800"
+                >
+                  {sourceDomain ? `${sourceDomain} › ` : ''}{title || sourceUrl}
+                </a>
+                {sourceProvider ? (
+                  <p className="text-[10px] text-stratum-muted">
+                    搜索提供商: {sourceProvider}{sourceQuery ? ` · 查询: "${sourceQuery}"` : ''}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
               <span className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted">
                 — 该 evidence 原文在当前会话中不可见 —
               </span>
             )}
           </div>
         </div>
+        {/* P15.4 · extra metadata section when evidence is a web search / url-fetch result */}
+        {sourceUrl ? (
+          <div>
+            <p className="font-instr text-[10px] uppercase tracking-kicker text-stratum-muted mb-2">
+              数据来源 · SOURCE
+            </p>
+            <div className="border-[0.5px] border-stratum-line bg-stratum-surface-low px-4 py-3 font-body text-[13px] leading-[1.6] text-stratum-ink max-w-measure-body">
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sky-600 underline break-all hover:text-sky-800"
+              >
+                {sourceUrl}
+              </a>
+              {sourceDomain ? (
+                <p className="mt-1 text-[11px] text-stratum-muted">
+                  域名: {sourceDomain}{sourceProvider ? ` · 通过 ${sourceProvider}` : ''}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {/* Reverse lookup — which BMC cards reference this evidence */}
         <div>

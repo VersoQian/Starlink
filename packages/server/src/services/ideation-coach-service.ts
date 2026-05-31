@@ -13,8 +13,12 @@
 
 import {
   COACH_SYSTEM_PROMPT,
+  COACH_SCRIPTED_PIVOT_CONTENT,
   buildCoachUserMessage,
+  isCoachMessageRepeat,
   parseCoachReply,
+  reflectionFallback,
+  shouldScriptCoachPivot,
   type ReflectionRequest,
   type ReflectionResponse,
   type ScaffoldKind,
@@ -28,6 +32,8 @@ import {
   WIZARD_STEP_TO_KIND,
   nextWizardStep
 } from '@starlink/shared'
+
+export { reflectionFallback } from '@starlink/shared'
 
 const DEEPSEEK_URL =
   process.env.DEEPSEEK_BASE_URL?.replace(/\/+$/, '') ?? 'https://api.deepseek.com/v1'
@@ -47,7 +53,7 @@ async function callDeepSeek<T>(
   systemPrompt: string,
   userPrompt: string,
   parser: (raw: string) => T,
-  options: { temperature?: number; maxTokens?: number } = {}
+  options: { temperature?: number } = {}
 ): Promise<T> {
   if (!DEEPSEEK_KEY) {
     throw new Error('DEEPSEEK_API_KEY (or LLM_API_KEY) not configured')
@@ -68,8 +74,7 @@ async function callDeepSeek<T>(
           { role: 'user', content: userPrompt }
         ],
         response_format: { type: 'json_object' },
-        temperature: options.temperature ?? 0.7,
-        max_tokens: options.maxTokens ?? 400
+        temperature: options.temperature ?? 0.7
       }),
       signal: ac.signal
     })
@@ -87,103 +92,6 @@ async function callDeepSeek<T>(
   }
 }
 
-// =============================================================================
-// Coach reflection
-// =============================================================================
-
-/**
- * Fallback when the coach LLM call fails (network error / timeout / parse).
- *
- * Each branch:
- *   - References the actual event payload (node label / from-to kinds) so
- *     the reply is at least anchored to what just happened, not a generic
- *     "已有节点的关系".
- *   - Tells the user the AI is in degraded mode so they know the response
- *     is scripted (not blamed on LLM quality).
- *   - Suggests a concrete next action they can take without LLM help.
- *
- * Source field stays 'error' so the chat dock bubble can render a
- * "重试" affordance and a warning tint.
- */
-export function reflectionFallback(
-  request: ReflectionRequest,
-  latencyMs: number
-): ReflectionResponse {
-  const banner = '_(AI 教练暂时不可达，以下是脚本回复。点 重试 可再试一次。)_\n\n'
-  const event = request.event
-  let scaffold: ScaffoldKind = 'why'
-  let body: string
-
-  switch (event.type) {
-    case 'node-added': {
-      scaffold = 'why'
-      const label = (event.label ?? '').trim().slice(0, 40)
-      const kind = event.kind
-      body = label
-        ? `刚加了 "${label}" (${kind})。用一句话说说：为什么是这个，而不是其他类似选项？`
-        : `刚加了一个 ${kind} 节点。用一句话说说为什么是这个，而不是其他类似选项？`
-      break
-    }
-    case 'node-linked': {
-      scaffold = 'why'
-      body = `你把 ${event.fromKind} → ${event.toKind} 连起来了。这条连线代表 "导致" / "支撑" / "包含" 中哪一种？`
-      break
-    }
-    case 'meta-check': {
-      scaffold = 'meta'
-      const counts = Object.entries(request.canvas?.nodeCountByKind ?? {})
-        .filter(([, n]) => n > 0)
-        .map(([k, n]) => `${k}=${n}`)
-        .join(', ')
-      body = counts
-        ? `当前画布: ${counts}。退一步看：哪个维度最不确定 / 最需要补证据？`
-        : '退一步看你的画布：当前最薄弱的环节是什么？哪个节点你最不确定？'
-      break
-    }
-    case 'user-message': {
-      scaffold = 'why'
-      const said = (event.label ?? '').trim().slice(0, 60)
-      body = said
-        ? `你刚说："${said}"。能再具体一点吗 — 这是基于什么观察 / 数据 / 经历？`
-        : '你刚发了一条消息，但 AI 教练暂时无法理解上下文。能用一句话再说一次你的核心问题吗？'
-      break
-    }
-    default: {
-      scaffold = 'why'
-      body = '退一步看你的画布：当前最薄弱的环节是什么？'
-    }
-  }
-  return { scaffold, content: banner + body, source: 'error', latencyMs }
-}
-
-/**
- * P10 fix C · cheap string-similarity check for repetition detection.
- * Uses normalized character bigram overlap (Sørensen–Dice on bigrams).
- * Threshold ~0.85 for "essentially the same message".
- */
-function isMessageRepeat(a: string, b: string): boolean {
-  const na = a.trim().toLowerCase()
-  const nb = b.trim().toLowerCase()
-  if (!na || !nb) return false
-  if (na === nb) return true
-  // Quick fail if length diverges too much
-  const lenRatio = Math.min(na.length, nb.length) / Math.max(na.length, nb.length)
-  if (lenRatio < 0.5) return false
-  // Bigram Dice similarity
-  const bigrams = (s: string): Set<string> => {
-    const out = new Set<string>()
-    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2))
-    return out
-  }
-  const A = bigrams(na)
-  const B = bigrams(nb)
-  if (A.size === 0 || B.size === 0) return false
-  let intersection = 0
-  for (const g of A) if (B.has(g)) intersection += 1
-  const dice = (2 * intersection) / (A.size + B.size)
-  return dice >= 0.85
-}
-
 /**
  * Generate one reflection for the GraphQL `reflectOnIdeation` mutation.
  */
@@ -196,15 +104,30 @@ export async function reflectOnIdeation(
   // sent essentially the same thing as their previous turn, the Coach
   // should NOT loop back to the same Socratic question — instead gently
   // switch from extraction to organization. Saves an LLM call AND breaks
-  // the WHY/WHY loop without making /wizard feel like a correction.
+  // the WHY/WHY loop while keeping the conversation in the default Coach path.
   if (request.event.type === 'user-message') {
     const lastUserMsg = [...request.recentChat].reverse().find((m) => m.role === 'user')
-    if (lastUserMsg && isMessageRepeat(lastUserMsg.content, request.event.label)) {
+    if (lastUserMsg && isCoachMessageRepeat(lastUserMsg.content, request.event.label)) {
       return {
         scaffold: 'meta',
         content:
-          '我注意到你在围绕同一个想法反复确认 — 这其实是好信号，说明核心方向开始稳定了。\n\n' +
-          '你可以继续自由描述，我会边聊边归纳；如果想更快补齐客户、价值、渠道、收入等关键维度，也可以输入 `/wizard` 走 7 步结构化引导。',
+          '我注意到你在围绕同一个想法反复确认 — 这说明核心方向开始稳定了。\n\n' +
+          '我们可以继续向下拆解。接下来，你更想先确认目标客户、核心价值，还是最小验证方式？',
+        source: 'scripted',
+        latencyMs: Date.now() - startedAt
+      }
+    }
+
+    // P15.6 · Short-answer deflection detection. When user sends < 15
+    // characters, they're almost certainly not engaging with the question.
+    // Skip the LLM call entirely — return a scripted pivot that gently
+    // moves to a different topic. Saves cost + latency + guarantees the
+    // coach doesn't hammer the same topic with a different scaffold.
+    const trimmed = request.event.label.trim()
+    if (shouldScriptCoachPivot(trimmed)) {
+      return {
+        scaffold: 'meta',
+        content: COACH_SCRIPTED_PIVOT_CONTENT,
         source: 'scripted',
         latencyMs: Date.now() - startedAt
       }
@@ -217,7 +140,7 @@ export async function reflectOnIdeation(
       COACH_SYSTEM_PROMPT,
       userPrompt,
       parseCoachReply,
-      { temperature: 0.7, maxTokens: 400 }
+      { temperature: 0.7 }
     )
     return {
       scaffold: reply.scaffold,
@@ -299,7 +222,7 @@ export async function processIdeationWizardStep(
       WIZARD_SYSTEM_PROMPT,
       userPrompt,
       parseWizardReply,
-      { temperature: 0.6, maxTokens: 600 }
+      { temperature: 0.6 }
     )
     return {
       extracted: {

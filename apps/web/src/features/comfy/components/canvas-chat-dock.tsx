@@ -20,6 +20,8 @@ import { MessageCircle, Send, Sparkles, X, ArrowRight, Copy, RefreshCw, Check, C
 import { useComfyStore } from '../store'
 import { useResizableDrawer, ResizeHandle } from '@/shared/hooks/use-resizable-drawer'
 import { CanvasUserSkillChip } from './canvas-user-skill-chip'
+import { KbSelector } from '../../knowledge/components/kb-selector'
+import { useKnowledgeBases } from '../../knowledge/hooks/use-knowledge-bases'
 import { MentionAutocomplete } from './mention-autocomplete'
 import { getAgent } from '../registries/agent-registry'
 import { renderAgentOutput } from '../registries/agent-output-renderer-registry'
@@ -32,6 +34,9 @@ type Props = {
   /** Called when user clicks the meta-check "graduate to BMC" CTA. */
   onGraduate?: () => void
   workspaceId: string
+  /** KB selected for RAG-augmented BMC generation on canvas. */
+  selectedKbId: string | undefined
+  onKbChange: (kbId: string | undefined) => void
 }
 
 /**
@@ -115,7 +120,7 @@ const AGENT_SIGNATURE_MAP: Record<string, string> = {
   'moderator': 'Moderator',
 }
 
-export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId }: Props) {
+export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId, selectedKbId, onKbChange }: Props) {
   const chatInput = useComfyStore((s) => s.chatInput)
   const setChatInput = useComfyStore((s) => s.setChatInput)
   const chatMessages = useComfyStore((s) => s.chatMessages)
@@ -135,6 +140,8 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
     })
     return count
   })
+
+  const { data: knowledgeBases = [] } = useKnowledgeBases(workspaceId)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -230,6 +237,23 @@ export function CanvasChatDock({ open, onToggle, onSend, onGraduate, workspaceId
       <div className="px-3 pt-2 pb-1">
         <CanvasUserSkillChip workspaceId={workspaceId} />
       </div>
+
+      {/* KB selector for RAG-augmented BMC generation on canvas */}
+      {knowledgeBases.length > 0 && (
+        <div className="px-3 pb-1">
+          <div className="flex items-center gap-2">
+            <span className="font-body text-[10px] text-stratum-muted shrink-0">
+              KB
+            </span>
+            <KbSelector
+              knowledgeBases={knowledgeBases}
+              value={selectedKbId}
+              onChange={onKbChange}
+              className="flex-1"
+            />
+          </div>
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-stratum-surface-low/30">
         {chatMessages.length === 0 ? (

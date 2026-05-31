@@ -87,7 +87,9 @@ registerPanel({
   slot: 'overlay',
   order: 10,
   component: HitlDecisionOverlayPanel,
-  visibleWhen: (context) => context.stage === 'review' || context.hasPendingInterrupt
+  // P15-fix · HITL now auto-opens the chat dock — no need for a blocking
+  // full-screen overlay that prevents the user from seeing context.
+  visibleWhen: () => false
 })
 
 registerPanel({

@@ -1153,6 +1153,7 @@ export const resolvers = {
           priorScaffolds?: string[] | null
           userTurnCount?: number | null
           workspaceId?: string | null
+          dimensionCoverage?: Record<string, number> | null
         }
       },
       context: GraphQLContext

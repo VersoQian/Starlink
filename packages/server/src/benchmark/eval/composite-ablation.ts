@@ -670,8 +670,8 @@ function buildExperimentCases(args: string[]): ExperimentCase[] {
   const preferKb = [...selected].sort((a, b) =>
     (b.workspace_knowledge?.length ?? 0) - (a.workspace_knowledge?.length ?? 0)
   )
-  const normalCount = parseIntArg(args, '--normal-count', args.includes('--all') ? preferKb.length : 2)
-  const conflictCount = parseIntArg(args, '--conflict-count', args.includes('--all') ? 6 : 2)
+  const normalCount = parseIntArg(args, '--normal-count', args.includes('--all') ? preferKb.length : 6)
+  const conflictCount = parseIntArg(args, '--conflict-count', args.includes('--all') ? 6 : 6)
   const normalOffset = parseIntArg(args, '--normal-offset', 0)
   const conflictOffset = parseIntArg(args, '--conflict-offset', 0)
   const normalBases = preferKb.slice(normalOffset, normalOffset + normalCount)
@@ -956,7 +956,7 @@ async function main() {
   }
 
   console.error(`[composite-ablation] profile=${plan.profile}; ${plan.plannedRuns.length} planned Starlink run(s)`)
-  console.error(`[composite-ablation] judge=${judgeMode}; default smoke is 2 normal + 2 conflict cases unless --all or counts are provided`)
+  console.error(`[composite-ablation] judge=${judgeMode}; default is 6 normal + 6 conflict cases (12 total) unless --all or counts are provided`)
   console.error(`[composite-ablation] quality gate: minDims=${minDims}, maxRunAttempts=${maxRunAttempts}`)
   console.error(`[composite-ablation] partial checkpoint: ${partialPath}`)
   console.error('')

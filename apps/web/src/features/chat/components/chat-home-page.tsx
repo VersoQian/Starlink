@@ -15,6 +15,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Database, ListChecks, Send, Sparkles } from 'lucide-react'
 import { ConversationRail } from './conversation-rail'
 import { KbUploadModal } from '../../comfy/components/kb-upload-modal'
+import { KbSelector } from '../../knowledge/components/kb-selector'
+import { useKnowledgeBases } from '../../knowledge/hooks/use-knowledge-bases'
 import {
   type ConversationBucket,
   type ConversationSnapshot,
@@ -47,6 +49,8 @@ export function ChatHomePage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [kbModalOpen, setKbModalOpen] = useState(false)
+  const { data: knowledgeBases = [] } = useKnowledgeBases(DEFAULT_WORKSPACE_ID)
+  const [selectedKbId, setSelectedKbId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     setBucket(loadBucket(HOMEPAGE_BUCKET_ID))
@@ -134,6 +138,11 @@ export function ChatHomePage() {
       // sessionStorage (not localStorage) so refresh on /canvas without
       // a stashed seed = stale conversation, not infinite re-fire.
       window.sessionStorage.setItem('starlink_pending_seed', trimmed)
+      if (selectedKbId) {
+        window.sessionStorage.setItem('starlink_pending_kb_id', selectedKbId)
+      } else {
+        window.sessionStorage.removeItem('starlink_pending_kb_id')
+      }
       // Navigate to the NEW conversation's canvas (not the default
       // workspace) so each submit gets its own isolated canvas state.
       // Previously hard-coded to DEFAULT_WORKSPACE_ID → every submit
@@ -211,6 +220,18 @@ export function ChatHomePage() {
               <p className="font-body text-[14px] leading-relaxed text-stratum-muted max-w-[520px]">
                 用一句话描述，按 Enter 后 8 个 agent 会进入画布协作生成 BMC，并通过苏格拉底式反问帮你拆解 9 个维度。
               </p>
+            </div>
+
+            {/* KB selector — choose a knowledge base for RAG-augmented BMC generation */}
+            <div className="mb-3 flex items-center gap-2">
+              <span className="font-body text-[11px] text-stratum-muted shrink-0">
+                知识库（可选）：
+              </span>
+              <KbSelector
+                knowledgeBases={knowledgeBases}
+                value={selectedKbId}
+                onChange={setSelectedKbId}
+              />
             </div>
 
             <div className="rounded-2xl border border-stratum-line bg-white shadow-md focus-within:border-stratum-blue focus-within:shadow-lg focus-within:ring-4 focus-within:ring-stratum-blue/15 transition-all">

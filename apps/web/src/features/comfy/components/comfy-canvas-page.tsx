@@ -63,6 +63,8 @@ export function CanvasPage({
   const onConnect = useComfyStore((state) => state.onConnect)
   const setNodes = useComfyStore((state) => state.setNodes)
   const callLangGraph = useComfyStore((state) => state.callLangGraph)
+  const selectedKbId = useComfyStore((state) => state.selectedKbId)
+  const setSelectedKbId = useComfyStore((state) => state.setSelectedKbId)
   const isOrchestratorProcessing = useComfyStore((state) => state.isOrchestratorProcessing)
   const callCritic = useComfyStore((state) => state.callCritic)
   const setWorkspaceId = useComfyStore((state) => state.setWorkspaceId)
@@ -274,6 +276,10 @@ export function CanvasPage({
   useEffect(() => {
     if (pendingDecisionRequest) {
       setWorkflowStage('review', 'decision-requested')
+      // P15-fix · Auto-open chat dock when HITL triggers so the user
+      // immediately sees the critic's conflicts and decision context,
+      // rather than staring at a "点开聊天" button that does nothing.
+      setChatOpen(true)
       return
     }
 
@@ -399,6 +405,12 @@ export function CanvasPage({
       // what AI Synthesis button is for once user is ready to graduate.
       if (typeof window === 'undefined') return
       const pendingSeed = window.sessionStorage.getItem('starlink_pending_seed')
+      // Restore KB choice from /chat homepage if present
+      const pendingKbId = window.sessionStorage.getItem('starlink_pending_kb_id')
+      if (pendingKbId) {
+        window.sessionStorage.removeItem('starlink_pending_kb_id')
+        setSelectedKbId(pendingKbId)
+      }
       if (pendingSeed && pendingSeed.trim()) {
         window.sessionStorage.removeItem('starlink_pending_seed')
         setChatOpen(true)
@@ -406,7 +418,7 @@ export function CanvasPage({
         // when the user is ready to generate the BMC.
         setSeedInput(pendingSeed)
         setStoreChatInput('')
-        await reflectOnChatStore(pendingSeed).catch((err) => {
+        await reflectOnChatStore(pendingSeed, pendingKbId ?? undefined).catch((err) => {
           console.warn('[canvas] initial Socratic reflect failed', err)
         })
       }
@@ -532,8 +544,8 @@ export function CanvasPage({
       return
     }
 
-    await reflectOnChat(chatInput)
-  }, [reflectOnChat, isOrchestratorProcessing, workspaceId])
+    await reflectOnChat(chatInput, selectedKbId)
+  }, [reflectOnChat, isOrchestratorProcessing, workspaceId, selectedKbId])
 
   // Mode A graduation — user clicks the meta-check CTA after AI deems
   // the conversation has explored enough dimensions. Stitches the seed
@@ -570,10 +582,10 @@ export function CanvasPage({
       .join('\n\n')
     const baseSeed = seedInput.trim() || '探索阶段已完成，根据下方对话历史生成 BMC'
     const fullSeed = `${baseSeed}\n\n## 探索阶段对话\n${stitched}`
-    await callLangGraph(fullSeed, 'seed').catch((err) => {
+    await callLangGraph(fullSeed, 'seed', selectedKbId).catch((err) => {
       console.error('[graduate] BMC pipeline failed', err)
     })
-  }, [appendChatMessage, callLangGraph, isOrchestratorProcessing, seedInput])
+  }, [appendChatMessage, callLangGraph, isOrchestratorProcessing, seedInput, selectedKbId])
 
   const handleRunCritic = useCallback(async () => {
     // P12 fix M2 · empty-canvas guard. Re-Calc on empty BMC returns
@@ -834,6 +846,8 @@ export function CanvasPage({
                 onSend={handleSendChat}
                 onGraduate={handleGraduateToBmc}
                 workspaceId={workspaceId}
+                selectedKbId={selectedKbId}
+                onKbChange={setSelectedKbId}
               />
               <CanvasCitationPanel
                 open={citationOpen}

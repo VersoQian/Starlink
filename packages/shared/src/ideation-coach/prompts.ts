@@ -11,6 +11,153 @@
  */
 
 import type { ReflectionRequest } from './schemas.js'
+import { COACH_CONTENT_MAX_CHARS } from './schemas.js'
+import {
+  COACH_DEFLECTION_HINT_THRESHOLD,
+  shouldHintCoachDeflection
+} from './policy.js'
+
+// =============================================================================
+// Dimension coverage heatmap
+// =============================================================================
+
+/**
+ * Each dimension has a `key` (the heatmap bucket name), a `label` (human
+ * name), and `patterns` — substring arrays to match in chat/canvas text
+ * (case-insensitive). The 9 BMC dimensions derive from the BMC domain
+ * model; the pre-BMC entries cover the 7-step wizard. Revenue is already
+ * represented by the BMC `revenue-streams` bucket.
+ */
+export const DIMENSION_KEYWORDS: Array<{
+  key: string
+  label: string
+  patterns: string[]
+}> = [
+  // ── BMC 9 dimensions ──
+  {
+    key: 'customer-segments',
+    label: '客户细分',
+    patterns: ['客户细分', '客户群', '目标用户', '用户画像', '细分', 'target customer', 'ICP', 'ideal customer', '目标客户', '消费者', 'B2B', 'B2C', 'SMB', 'mid-market', 'enterprise', '用户类型', '客群'],
+  },
+  {
+    key: 'value-proposition',
+    label: '价值主张',
+    patterns: ['价值主张', '价值定位', 'value prop', 'unique value', '核心价值', '差异化', '竞争壁垒', '护城河', 'USP', 'unique selling', '为什么是你', '为什么选你', '解决什么', '定位', '价值点'],
+  },
+  {
+    key: 'channels',
+    label: '渠道通路',
+    patterns: ['渠道通路', '渠道', '通路', 'channel', '分销', '获客渠道', '线上', '线下', '直销', '代理商', '经销商', '平台', '广告投放', 'SEO', 'SEM', '引流', '触达', '推广方式'],
+  },
+  {
+    key: 'customer-relationships',
+    label: '客户关系',
+    patterns: ['客户关系', 'customer rel', '粘性', '留存', '复购', '续费率', 'NPS', '净推荐值', '客服', '售后', '社区', '会员', '订阅', '忠诚度', '流失', 'churn', 'LTV', '用户生命周期'],
+  },
+  {
+    key: 'revenue-streams',
+    label: '收入来源',
+    patterns: ['收入来源', '营收', '收入', 'revenue', '定价', '定价策略', '付费', '抽成', '佣金', '广告收入', 'license', 'SaaS', '一次性', '年费', '月费', 'freemium', '免费增值', 'ARR', 'MRR', '客单价'],
+  },
+  {
+    key: 'key-resources',
+    label: '核心资源',
+    patterns: ['核心资源', 'key resource', '资产', '技术壁垒', '专利', 'IP', '域名', '数据', '人才', '团队', '供应链', '生产能力', '品牌', '用户基础', '独家', '牌照', '资质'],
+  },
+  {
+    key: 'key-activities',
+    label: '关键业务',
+    patterns: ['关键业务', 'key activ', '日常运营', '核心流程', '生产', '研发', '开发', '交付', '运营', '维护', '迭代', '内容生产', '营销', '销售', 'BD', '商务拓展', '招聘', '融资', '路演'],
+  },
+  {
+    key: 'key-partnerships',
+    label: '重要合作',
+    patterns: ['重要合作', '合作', '伙伴', 'partner', '战略合作', '联盟', '供应商', '外包', '代工厂', '渠道合作', '技术合作', '联合', '生态', '上下游', '绑定', '独家合作', '互补'],
+  },
+  {
+    key: 'cost-structure',
+    label: '成本结构',
+    patterns: ['成本结构', '成本', 'cost', '固定成本', '可变成本', '烧钱', '利润率', '毛利', 'gross margin', '单位经济', 'unit eco', 'CAC', '获客成本', 'ROI', '回报周期', '盈亏', 'break even', '现金流', '预算', '资金'],
+  },
+  // ── Ideation dimensions (pre-BMC 7-step wizard) ──
+  {
+    key: 'core-idea',
+    label: '核心想法',
+    patterns: ['核心想法', '创意', '点子', '想法', 'core idea', '概念', '做什么', '产品', '服务', 'solution'],
+  },
+  {
+    key: 'customer-pain',
+    label: '客户痛点',
+    patterns: ['痛点', 'paint point', '问题', '需求', '困扰', '不便', '低效', '浪费', '想要', '期望'],
+  },
+  {
+    key: 'value-angle',
+    label: '价值切入',
+    patterns: ['价值切入', '价值角度', '独特价值', '为什么是你', 'value angle', '差异点', '替代方案', '更好在哪里'],
+  },
+  {
+    key: 'hypothesis',
+    label: '假设与验证',
+    patterns: ['假设', '验证', 'hypothesis', '实验', 'AB test', 'A/B', '可证伪', 'falsifiable', '猜测', '推测', '测试', '数据验证', '访谈'],
+  },
+  {
+    key: 'validation-channel',
+    label: '验证路径',
+    patterns: ['验证路径', '验证渠道', 'validation channel', 'MVP', '最小可行', '落地页', '问卷', '访谈', '试点', '灰度', '验证方式'],
+  },
+  {
+    key: 'risk',
+    label: '风险与竞争',
+    patterns: ['风险', 'risk', '失败', '竞品', '竞争', '竞争对手', '政策', '法规', '合规', '监管', '市场变化', '技术变化', '团队风险'],
+  },
+  {
+    key: 'evidence',
+    label: '一手证据',
+    patterns: ['证据', 'evidence', '数据', 'data', '调研', '调查', '报告', '统计', '客户访谈', '一手资料', '二手资料', '来源', '引用'],
+  },
+]
+
+/**
+ * Scan recent chat + canvas text for dimension keyword hits.
+ * Returns Record<dimensionKey, matchCount> ordered from least- to
+ * most-covered so the prompt builder can sort naturally.
+ *
+ * Chat text: each message contributes once per dimension if any keyword
+ * matches (prevents one rambling message from distorting the heatmap).
+ * Canvas text: each node label/content contributes once per dimension.
+ *
+ * Dimensions with count=0 are "unexplored" — the coach is instructed to
+ * prioritise these.
+ */
+export function computeDimensionCoverage(
+  recentChat: Array<{ role: string; content: string }>,
+  canvasLabels: string[]
+): Record<string, number> {
+  const coverage: Record<string, number> = {}
+  for (const dim of DIMENSION_KEYWORDS) {
+    let count = 0
+    const lowerPatterns = dim.patterns.map((p) => p.toLowerCase())
+
+    // Chat: count messages that hit any keyword (cap at 1 per message)
+    for (const msg of recentChat) {
+      const lower = msg.content.toLowerCase()
+      if (lowerPatterns.some((p) => lower.includes(p))) {
+        count += 1
+      }
+    }
+
+    // Canvas: count nodes that hit any keyword (cap at 1 per node)
+    for (const label of canvasLabels) {
+      const lower = label.toLowerCase()
+      if (lowerPatterns.some((p) => lower.includes(p))) {
+        count += 1
+      }
+    }
+
+    coverage[dim.key] = count
+  }
+  return coverage
+}
 
 /**
  * Coach system prompt (Meflex philosophy).
@@ -23,10 +170,15 @@ import type { ReflectionRequest } from './schemas.js'
 export const COACH_SYSTEM_PROMPT = `You are a Meflex-style entrepreneurship coach for the Starlink Ideation Canvas.
 
 CRITICAL ROLE BOUNDARIES (Luo et al. 2026):
-1. You ASK ONE focused reflection question. You NEVER write content for the user.
+1. You ask ONE focused reflection question per response — but that question
+   MUST build on the user's previous answer, NOT restart from scratch.
+   Acknowledge what they said, then drill deeper.
 2. You scaffold the user's thinking; you DO NOT replace it.
 3. You DO NOT propose specific node content, copy, or answers.
-4. Output is in 中文 (zh-CN), 1–3 short paragraphs, Markdown allowed for *emphasis*.
+4. Output is in 中文 (zh-CN), 2–3 substantive paragraphs, Markdown allowed
+   for *emphasis*. You have up to ${COACH_CONTENT_MAX_CHARS} chars (~250-300 汉字) —
+   use the space to acknowledge their previous answer, then ask a deepening
+   follow-up.
 
 PICK ONE SCAFFOLD KIND for each response:
 - "why"             — challenge the user's reasoning / surface assumptions
@@ -34,6 +186,69 @@ PICK ONE SCAFFOLD KIND for each response:
 - "so-what"         — surface implications / falsifiability / consequences
 - "evidence-needed" — flag missing first-hand evidence
 - "meta"            — cross-node observation about coverage gaps
+
+DEPTH-FIRST THEN BREADTH (depth ladder):
+Do NOT treat each question as a fresh start. When the user answers a
+question about a topic, your NEXT question should CLIMB ONE RUNG on the
+SAME dimension before rotating to a new one. Follow this ladder:
+
+  1. SURFACE    — "what" / "which" — clarify the raw claim
+  2. SPECIFICS  — "how exactly" / "who specifically" / "when" / "at what scale"
+  3. EVIDENCE   — "what data / experience / observable facts support this?"
+  4. IMPLICATIONS — "so what?" / "what changes if you're wrong?" / second-order effects
+  5. CONNECTIONS — "how does this relate to dimension Y?" (bridge to NEW dimension)
+
+Each round, climb ONE rung. If the user gives a vague answer, go DOWN one
+rung ("help me be more specific") rather than sideways to a new dimension.
+Skip rungs only when the user voluntarily provides that level of detail.
+
+DIMENSION ROTATION RULES:
+- Stay on the SAME dimension for at most 3 rounds of deepening.
+- After 3 rounds (or when the dimension feels exhausted), ROTATE to a
+  different dimension. EXPLICITLY bridge: "刚才我们聊了 X，那 Y 方面呢？
+  这两者其实有联系..." — connect the old dimension to the new one.
+- Prefer dimensions with ZERO coverage in the ## 维度覆盖图 section.
+- ANTI-JUMPING: if the user just answered a question about revenue, do NOT
+  jump to an unrelated topic like partnerships — drill deeper on revenue first.
+
+DEFLECTION DETECTION & ANTI-HAMMERING (P15.6 · highest priority):
+Users sometimes give very short or off-topic answers when they're not ready
+to engage with a particular line of questioning. You MUST detect this and
+adapt immediately — do NOT keep asking the same thing.
+
+1. SHORT-ANSWER DETECTION: If the user's last response is < ${COACH_DEFLECTION_HINT_THRESHOLD} Chinese
+   characters OR clearly doesn't address the substance of your question,
+   treat it as DEFLECTION. Examples: "没有", "还行", "站得住脚", "听起来不做",
+   "你帮我生成提纲", "我打算这周谨行恶事" (changing the subject entirely).
+
+2. ON DEFLECTION: Do NOT re-ask the same question or rephrase it. Acknowledge
+   in ≤1 short sentence ("好的，这个问题先放一放"), then PIVOT to a
+   DIFFERENT dimension. Pick from the ⚠ 未探索 list in ## 维度覆盖图.
+   Your response should be SHORTER than normal (1 paragraph) — don't write
+   2-3 paragraphs when the user is clearly disengaged.
+
+3. ANTI-HAMMERING (硬限制): You may ask about the SAME concrete topic at
+   most TWICE (once with one scaffold, once with a different scaffold for
+   follow-up). After two attempts on the same topic, if the user hasn't
+   engaged substantively, you MUST pivot to a completely different
+   dimension. Never cycle back to a topic the user has already deflected
+   on twice — even if you switch scaffolds. Example: if you asked about
+   "水果配送定价" with scaffold='evidence-needed' and got deflection, then
+   asked again with scaffold='why' and got deflection again, the third
+   question MUST be about something totally different (e.g., "客户细分" or
+   "渠道通路"), NOT another angle on pricing.
+
+4. GRACEFUL CLOSURE: When the user says things like "站得住脚", "没问题",
+   "就这样", "我觉得可以", "这个方向没问题" — these often signal
+   satisfaction/closure, not deflection. Accept it briefly ("好的，这个方向
+   先确认下来") and BRIDGE to a new dimension: "那 [新维度] 方面你考虑过吗？
+   这两者其实有联系..."
+
+5. TOPIC TRACKING: In your internal reasoning (not shown to user), track
+   which concrete topics you've already asked about. If you asked about
+   topic X twice and got deflections both times, the third question MUST
+   be on a completely different subject — pick from ⚠ 未探索 dimensions.
+   Do NOT cycle back to X later in the conversation.
 
 IDEATION_NODE_KIND vocabulary (you'll see these in the canvas snapshot):
 - Pre-BMC ideation kinds (wizard 7-step):
@@ -80,11 +295,11 @@ Instead, USE the profile to deepen the question. Example:
 When profile is absent (empty userSkillBlock), discovery questions are appropriate — but only then.
 
 OUTPUT: a JSON object exactly like:
-  { "scaffold": "<one of the 5 kinds>", "content": "<your question, 1-3 short paragraphs>" }
+  { "scaffold": "<one of the 5 kinds>", "content": "<your question, 2-3 substantive paragraphs>" }
 
 Constraints:
-- content is at most 480 chars (~200 汉字)
-- one focused question, not a list
+- content is at most ${COACH_CONTENT_MAX_CHARS} chars (~250-300 汉字)
+- one focused question that builds on the user's last answer, not a list
 - Chinese only`
 
 /**
@@ -149,9 +364,23 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
     return `\n\n## 最近反思类型: ${last3.join(' → ')}（避免立刻重复同类型）`
   })()
 
+  // P15.6 · Deflection detection hint. When the last user message is very
+  // short (< hint threshold), inject an explicit signal so the LLM knows to pivot
+  // instead of hammering the same topic with a different scaffold.
+  const deflectionLine = (() => {
+    const lastUser = [...recentChat].reverse().find((m) => m.role === 'user')
+    if (!lastUser) return ''
+    const trimmed = lastUser.content.trim()
+    if (shouldHintCoachDeflection(trimmed)) {
+      return `\n\n## ⚠️ 偏转检测（重要）\n用户的上一条回复很短（${trimmed.length}字："${trimmed.slice(0, 40)}"），很可能是没有在认真回答你的上一个问题。**不要继续追问同一个话题**，即使用不同的 scaffold 也不行。做法：用 ≤1 句话简短确认，然后直接跳转到 ## 维度覆盖图 中标记为 ⚠ 未探索 的新维度提问。本次回答控制在 1 段以内（不要写 2-3 段）。`
+    }
+    return ''
+  })()
+
   // P10 fix D · turn-count graduation pressure. Early exploration should
-  // stay conversational; only introduce /wizard as an optional accelerator
-  // after several turns without canvas structure.
+  // stay conversational and switch to a clearer organizing question after
+  // several turns without canvas structure. The optional wizard remains a
+  // user-invoked command rather than an automatic Coach recommendation.
   // P11.18 fix · skip this entire suggestion if BMC cells already exist.
   // The "graduate to BMC" hint is meaningless once BMC has graduated; the
   // user just sees "canvas empty, run /wizard" while staring at 9 BMC
@@ -175,10 +404,10 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
     }
     const canvasIsSparse = canvas.nodes.length < 3
     if (turns >= 7 && canvasIsSparse) {
-      return `\n\n## 进阶提示（重要）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。优先保持探索感：告诉用户可以继续自由描述，你会边聊边归纳。可以把 \`/wizard\` 作为**可选加速器**轻轻带出：如果想更快补齐客户、价值、渠道、收入等关键维度，也可以输入 \`/wizard\`。不要表达成“你应该去 wizard”，也不要暗示用户探索方式不对。`
+      return `\n\n## 进阶提示（重要）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。保持探索感，不要推荐 \`/wizard\`。告诉用户你会继续边聊边归纳，并提出一个更容易回答的组织性问题，例如让用户从目标客户、核心价值、验证方式中选择一个先确认。`
     }
     if (turns >= 4 && canvasIsSparse) {
-      return `\n\n## 探索阶段提示（轻量）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。不要强推 \`/wizard\` 或 BMC；继续问一个能让想法更具体的问题。若需要 meta 视角，最多轻描淡写地说“你可以继续自由说，我会帮你整理”。`
+      return `\n\n## 探索阶段提示（轻量）\n用户已经说了 ${turns} 次但画布只有 ${canvas.nodes.length} 个节点。不要推荐 \`/wizard\` 或强推 BMC；继续问一个能让想法更具体的问题。若需要 meta 视角，最多轻描淡写地说“你可以继续自由说，我会帮你整理”。`
     }
     return ''
   })()
@@ -191,6 +420,30 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
         )
         .join('\n')
     : '  (no prior exchange)'
+
+  // ── Dimension coverage heatmap (P15 · depth+breadth) ──
+  // When the client provides dimensionCoverage, render a sorted heatmap
+  // so the LLM sees which BMC/ideation dimensions are unexplored (count=0)
+  // and prioritises them for rotation. Zero-coverage dims get a ⚠ marker.
+  const coverageLine = (() => {
+    const cov = input.dimensionCoverage
+    if (!cov || Object.keys(cov).length === 0) return ''
+    const entries = Object.entries(cov).sort(([, a], [, b]) => a - b)
+    const total = entries.length
+    const zeroCount = entries.filter(([, n]) => n === 0).length
+    const allLines = entries.map(([key, count]) => {
+      const dim = DIMENSION_KEYWORDS.find((d) => d.key === key)
+      const label = dim?.label ?? key
+      const marker =
+        count === 0
+          ? '⚠ 未探索 (优先)'
+          : count >= 3
+            ? `✓ 已覆盖 (${count}次)`
+            : ` 提及 ${count}次`
+      return `  - ${label}: ${marker}`
+    })
+    return `\n\n## 维度覆盖图（${total}个维度，${zeroCount}个未探索）\n**你的任务：本轮优先从未探索（⚠）维度中选一个提问。如果全都探索过，就对覆盖率最低的维度深入一轮。**\n${allLines.join('\n')}`
+  })()
 
   // Optional user-skill block: when the server has fetched durable traits
   // for this user, they're rendered here so the LLM can calibrate its
@@ -206,7 +459,7 @@ ${canvasSummary}
 ${nodeList}
 
 EVENT:
-${eventLine}${scaffoldHistoryLine}${graduationLine}${skillSection}
+${eventLine}${scaffoldHistoryLine}${deflectionLine}${graduationLine}${coverageLine}${skillSection}
 
 RECENT EXCHANGE (newest last):
 ${chatLines}

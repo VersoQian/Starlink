@@ -1066,6 +1066,37 @@ export class ConversationStore {
               })
             }
 
+            // P15.4 · extract evidence discovered by the agent during its
+            // ReAct session (web_search, url-fetch results). The BMC
+            // generator subgraph attaches these to node metadata so the
+            // frontend EvidenceDrawer can display the actual search result
+            // content instead of "原文不可见".
+            const nodeMetadata =
+              (node.data as { metadata?: Record<string, unknown> } | undefined)
+                ?.metadata ?? {}
+            const discoveredEvidence =
+              (nodeMetadata as { discoveredEvidence?: KnowledgeEvidence[] })
+                .discoveredEvidence ?? []
+            if (discoveredEvidence.length > 0) {
+              const existingIds = new Set(
+                (record.knowledgeEvidence ?? []).map((e) => e.docId)
+              )
+              const newEntries = discoveredEvidence.filter(
+                (e) => !existingIds.has(e.docId)
+              )
+              if (newEntries.length > 0) {
+                record.knowledgeEvidence = [
+                  ...(record.knowledgeEvidence ?? []),
+                  ...newEntries
+                ]
+                await publishEvent({
+                  type: 'evidence/updated',
+                  conversationId,
+                  payload: record.knowledgeEvidence
+                })
+              }
+            }
+
             const info = extractRuntimeInfo(node)
             if (!info) continue
 
@@ -1770,6 +1801,11 @@ function inferPhase(agentId: string, macraType?: string, title = '', content = '
   const corpus = `${title}\n${content}`
   if (agentId === 'Adversarial_Critic' || macraType === 'conflict-alert') {
     return 'review'
+  }
+  // P15-fix · Moderator node without explicit metadata.stage should default
+  // to 'decision' (the verdict is the final word on pipeline completion).
+  if (agentId === 'Moderator') {
+    return 'decision'
   }
   if (agentId === 'Orchestrator') {
     if (/规划|计划|路线|拆解|阶段|里程碑/.test(corpus)) {

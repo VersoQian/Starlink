@@ -178,6 +178,12 @@ async function start() {
   // error rate breaches AGENT_SLO_DEGRADED_THRESHOLD (default 30%).
   app.get('/health/agents', async (_req, res) => {
     const snapshots = getAllAgentSloSnapshots()
+    // Separate tool:* entries from real agent entries so the frontend
+    // can render per-tool SLO stats (latency p50/p95, invocation counts).
+    const agents = snapshots.filter((s) => !s.agentId.startsWith('tool:'))
+    const tools = snapshots
+      .filter((s) => s.agentId.startsWith('tool:'))
+      .map((s) => ({ ...s, agentId: s.agentId.slice(5) })) // strip "tool:" prefix
     const anyDegraded = snapshots.some((s) => s.degraded)
     // P15-fix #6 · surface cell-summarizer retry telemetry alongside
     // the per-agent SLO. Module imported lazily so the route handler
@@ -191,7 +197,8 @@ async function start() {
     }
     res.status(anyDegraded ? 503 : 200).json({
       degradedCount: snapshots.filter((s) => s.degraded).length,
-      agents: snapshots,
+      agents,
+      tools,
       cellSummarizer
     })
   })

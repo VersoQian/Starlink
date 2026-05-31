@@ -54,6 +54,6 @@ export function parseCoachReply(rawContent: string): ParsedCoachReply {
   }
   return {
     scaffold: obj.scaffold as ScaffoldKind,
-    content: obj.content.slice(0, 500)
+    content: obj.content.slice(0, 700)
   }
 }
