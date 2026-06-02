@@ -374,6 +374,7 @@ function walkJson(value: unknown, path: string, out: string[]): void {
 
 function collapseWhitespace(text: string): string {
   return text
+    .replace(/\x00/g, '')
     .replace(/\r\n?/g, '\n')
     .replace(/\t/g, ' ')
     .replace(/[  ]+/g, ' ')

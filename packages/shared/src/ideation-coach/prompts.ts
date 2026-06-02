@@ -33,89 +33,89 @@ export const DIMENSION_KEYWORDS: Array<{
   label: string
   patterns: string[]
 }> = [
-  // ── BMC 9 dimensions ──
-  {
-    key: 'customer-segments',
-    label: '客户细分',
-    patterns: ['客户细分', '客户群', '目标用户', '用户画像', '细分', 'target customer', 'ICP', 'ideal customer', '目标客户', '消费者', 'B2B', 'B2C', 'SMB', 'mid-market', 'enterprise', '用户类型', '客群'],
-  },
-  {
-    key: 'value-proposition',
-    label: '价值主张',
-    patterns: ['价值主张', '价值定位', 'value prop', 'unique value', '核心价值', '差异化', '竞争壁垒', '护城河', 'USP', 'unique selling', '为什么是你', '为什么选你', '解决什么', '定位', '价值点'],
-  },
-  {
-    key: 'channels',
-    label: '渠道通路',
-    patterns: ['渠道通路', '渠道', '通路', 'channel', '分销', '获客渠道', '线上', '线下', '直销', '代理商', '经销商', '平台', '广告投放', 'SEO', 'SEM', '引流', '触达', '推广方式'],
-  },
-  {
-    key: 'customer-relationships',
-    label: '客户关系',
-    patterns: ['客户关系', 'customer rel', '粘性', '留存', '复购', '续费率', 'NPS', '净推荐值', '客服', '售后', '社区', '会员', '订阅', '忠诚度', '流失', 'churn', 'LTV', '用户生命周期'],
-  },
-  {
-    key: 'revenue-streams',
-    label: '收入来源',
-    patterns: ['收入来源', '营收', '收入', 'revenue', '定价', '定价策略', '付费', '抽成', '佣金', '广告收入', 'license', 'SaaS', '一次性', '年费', '月费', 'freemium', '免费增值', 'ARR', 'MRR', '客单价'],
-  },
-  {
-    key: 'key-resources',
-    label: '核心资源',
-    patterns: ['核心资源', 'key resource', '资产', '技术壁垒', '专利', 'IP', '域名', '数据', '人才', '团队', '供应链', '生产能力', '品牌', '用户基础', '独家', '牌照', '资质'],
-  },
-  {
-    key: 'key-activities',
-    label: '关键业务',
-    patterns: ['关键业务', 'key activ', '日常运营', '核心流程', '生产', '研发', '开发', '交付', '运营', '维护', '迭代', '内容生产', '营销', '销售', 'BD', '商务拓展', '招聘', '融资', '路演'],
-  },
-  {
-    key: 'key-partnerships',
-    label: '重要合作',
-    patterns: ['重要合作', '合作', '伙伴', 'partner', '战略合作', '联盟', '供应商', '外包', '代工厂', '渠道合作', '技术合作', '联合', '生态', '上下游', '绑定', '独家合作', '互补'],
-  },
-  {
-    key: 'cost-structure',
-    label: '成本结构',
-    patterns: ['成本结构', '成本', 'cost', '固定成本', '可变成本', '烧钱', '利润率', '毛利', 'gross margin', '单位经济', 'unit eco', 'CAC', '获客成本', 'ROI', '回报周期', '盈亏', 'break even', '现金流', '预算', '资金'],
-  },
-  // ── Ideation dimensions (pre-BMC 7-step wizard) ──
-  {
-    key: 'core-idea',
-    label: '核心想法',
-    patterns: ['核心想法', '创意', '点子', '想法', 'core idea', '概念', '做什么', '产品', '服务', 'solution'],
-  },
-  {
-    key: 'customer-pain',
-    label: '客户痛点',
-    patterns: ['痛点', 'paint point', '问题', '需求', '困扰', '不便', '低效', '浪费', '想要', '期望'],
-  },
-  {
-    key: 'value-angle',
-    label: '价值切入',
-    patterns: ['价值切入', '价值角度', '独特价值', '为什么是你', 'value angle', '差异点', '替代方案', '更好在哪里'],
-  },
-  {
-    key: 'hypothesis',
-    label: '假设与验证',
-    patterns: ['假设', '验证', 'hypothesis', '实验', 'AB test', 'A/B', '可证伪', 'falsifiable', '猜测', '推测', '测试', '数据验证', '访谈'],
-  },
-  {
-    key: 'validation-channel',
-    label: '验证路径',
-    patterns: ['验证路径', '验证渠道', 'validation channel', 'MVP', '最小可行', '落地页', '问卷', '访谈', '试点', '灰度', '验证方式'],
-  },
-  {
-    key: 'risk',
-    label: '风险与竞争',
-    patterns: ['风险', 'risk', '失败', '竞品', '竞争', '竞争对手', '政策', '法规', '合规', '监管', '市场变化', '技术变化', '团队风险'],
-  },
-  {
-    key: 'evidence',
-    label: '一手证据',
-    patterns: ['证据', 'evidence', '数据', 'data', '调研', '调查', '报告', '统计', '客户访谈', '一手资料', '二手资料', '来源', '引用'],
-  },
-]
+    // ── BMC 9 dimensions ──
+    {
+      key: 'customer-segments',
+      label: '客户细分',
+      patterns: ['客户细分', '客户群', '目标用户', '用户画像', '细分', 'target customer', 'ICP', 'ideal customer', '目标客户', '消费者', 'B2B', 'B2C', 'SMB', 'mid-market', 'enterprise', '用户类型', '客群'],
+    },
+    {
+      key: 'value-proposition',
+      label: '价值主张',
+      patterns: ['价值主张', '价值定位', 'value prop', 'unique value', '核心价值', '差异化', '竞争壁垒', '护城河', 'USP', 'unique selling', '为什么是你', '为什么选你', '解决什么', '定位', '价值点'],
+    },
+    {
+      key: 'channels',
+      label: '渠道通路',
+      patterns: ['渠道通路', '渠道', '通路', 'channel', '分销', '获客渠道', '线上', '线下', '直销', '代理商', '经销商', '平台', '广告投放', 'SEO', 'SEM', '引流', '触达', '推广方式'],
+    },
+    {
+      key: 'customer-relationships',
+      label: '客户关系',
+      patterns: ['客户关系', 'customer rel', '粘性', '留存', '复购', '续费率', 'NPS', '净推荐值', '客服', '售后', '社区', '会员', '订阅', '忠诚度', '流失', 'churn', 'LTV', '用户生命周期'],
+    },
+    {
+      key: 'revenue-streams',
+      label: '收入来源',
+      patterns: ['收入来源', '营收', '收入', 'revenue', '定价', '定价策略', '付费', '抽成', '佣金', '广告收入', 'license', 'SaaS', '一次性', '年费', '月费', 'freemium', '免费增值', 'ARR', 'MRR', '客单价'],
+    },
+    {
+      key: 'key-resources',
+      label: '核心资源',
+      patterns: ['核心资源', 'key resource', '资产', '技术壁垒', '专利', 'IP', '域名', '数据', '人才', '团队', '供应链', '生产能力', '品牌', '用户基础', '独家', '牌照', '资质'],
+    },
+    {
+      key: 'key-activities',
+      label: '关键业务',
+      patterns: ['关键业务', 'key activ', '日常运营', '核心流程', '生产', '研发', '开发', '交付', '运营', '维护', '迭代', '内容生产', '营销', '销售', 'BD', '商务拓展', '招聘', '融资', '路演'],
+    },
+    {
+      key: 'key-partnerships',
+      label: '重要合作',
+      patterns: ['重要合作', '合作', '伙伴', 'partner', '战略合作', '联盟', '供应商', '外包', '代工厂', '渠道合作', '技术合作', '联合', '生态', '上下游', '绑定', '独家合作', '互补'],
+    },
+    {
+      key: 'cost-structure',
+      label: '成本结构',
+      patterns: ['成本结构', '成本', 'cost', '固定成本', '可变成本', '烧钱', '利润率', '毛利', 'gross margin', '单位经济', 'unit eco', 'CAC', '获客成本', 'ROI', '回报周期', '盈亏', 'break even', '现金流', '预算', '资金'],
+    },
+    // ── Ideation dimensions (pre-BMC 7-step wizard) ──
+    {
+      key: 'core-idea',
+      label: '核心想法',
+      patterns: ['核心想法', '创意', '点子', '想法', 'core idea', '概念', '做什么', '产品', '服务', 'solution'],
+    },
+    {
+      key: 'customer-pain',
+      label: '客户痛点',
+      patterns: ['痛点', 'paint point', '问题', '需求', '困扰', '不便', '低效', '浪费', '想要', '期望'],
+    },
+    {
+      key: 'value-angle',
+      label: '价值切入',
+      patterns: ['价值切入', '价值角度', '独特价值', '为什么是你', 'value angle', '差异点', '替代方案', '更好在哪里'],
+    },
+    {
+      key: 'hypothesis',
+      label: '假设与验证',
+      patterns: ['假设', '验证', 'hypothesis', '实验', 'AB test', 'A/B', '可证伪', 'falsifiable', '猜测', '推测', '测试', '数据验证', '访谈'],
+    },
+    {
+      key: 'validation-channel',
+      label: '验证路径',
+      patterns: ['验证路径', '验证渠道', 'validation channel', 'MVP', '最小可行', '落地页', '问卷', '访谈', '试点', '灰度', '验证方式'],
+    },
+    {
+      key: 'risk',
+      label: '风险与竞争',
+      patterns: ['风险', 'risk', '失败', '竞品', '竞争', '竞争对手', '政策', '法规', '合规', '监管', '市场变化', '技术变化', '团队风险'],
+    },
+    {
+      key: 'evidence',
+      label: '一手证据',
+      patterns: ['证据', 'evidence', '数据', 'data', '调研', '调查', '报告', '统计', '客户访谈', '一手资料', '二手资料', '来源', '引用'],
+    },
+  ]
 
 /**
  * Scan recent chat + canvas text for dimension keyword hits.
@@ -167,9 +167,9 @@ export function computeDimensionCoverage(
  * the system instructions live in English to keep DeepSeek's JSON mode
  * stable.
  */
-export const COACH_SYSTEM_PROMPT = `You are a Meflex-style entrepreneurship coach for the Starlink Ideation Canvas.
+export const COACH_SYSTEM_PROMPT = `You are a entrepreneurship coach for the Starlink Ideation Canvas.
 
-CRITICAL ROLE BOUNDARIES (Luo et al. 2026):
+CRITICAL ROLE BOUNDARIES :
 1. You ask ONE focused reflection question per response — but that question
    MUST build on the user's previous answer, NOT restart from scratch.
    Acknowledge what they said, then drill deeper.
@@ -222,8 +222,12 @@ adapt immediately — do NOT keep asking the same thing.
    "你帮我生成提纲", "我打算这周谨行恶事" (changing the subject entirely).
 
 2. ON DEFLECTION: Do NOT re-ask the same question or rephrase it. Acknowledge
-   in ≤1 short sentence ("好的，这个问题先放一放"), then PIVOT to a
-   DIFFERENT dimension. Pick from the ⚠ 未探索 list in ## 维度覆盖图.
+   in ≤1 short sentence and immediately PIVOT to a DIFFERENT, SPECIFIC dimension.
+   **禁止套话**：不要说"我们换个角度"、"你目前最不确定的是哪个方面"、
+   "有没有没聊到但你觉得重要的点"这类泛泛的开放问题。
+   **正确做法**：从 ⚠ 未探索维度中挑一个，给出 2-3 个具体选项让用户选。
+   示例："好，先不聊痛点。说获客：你觉得第一个客户会从哪来？社区居委介绍、
+   医院候诊搭话、还是子女微信群？"
    Your response should be SHORTER than normal (1 paragraph) — don't write
    2-3 paragraphs when the user is clearly disengaged.
 
@@ -322,14 +326,13 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
 
   const nodeList = canvas.nodes.length
     ? canvas.nodes
-        .slice(0, 20)
-        .map(
-          (n, i) =>
-            `  [${i + 1}] ${n.kind} · "${n.label}"${
-              n.content ? ` — ${n.content.slice(0, 160).replace(/\n+/g, ' ')}` : ''
-            }`
-        )
-        .join('\n')
+      .slice(0, 20)
+      .map(
+        (n, i) =>
+          `  [${i + 1}] ${n.kind} · "${n.label}"${n.content ? ` — ${n.content.slice(0, 160).replace(/\n+/g, ' ')}` : ''
+          }`
+      )
+      .join('\n')
     : '  (no nodes yet)'
 
   const eventLine = (() => {
@@ -414,11 +417,11 @@ export function buildCoachUserMessage(input: ReflectionRequest): string {
 
   const chatLines = recentChat.length
     ? recentChat
-        .map(
-          (m) =>
-            `  ${m.role.toUpperCase()}: ${m.content.slice(0, 240).replace(/\n+/g, ' ')}`
-        )
-        .join('\n')
+      .map(
+        (m) =>
+          `  ${m.role.toUpperCase()}: ${m.content.slice(0, 240).replace(/\n+/g, ' ')}`
+      )
+      .join('\n')
     : '  (no prior exchange)'
 
   // ── Dimension coverage heatmap (P15 · depth+breadth) ──

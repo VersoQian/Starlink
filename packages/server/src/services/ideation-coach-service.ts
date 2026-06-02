@@ -39,7 +39,8 @@ const DEEPSEEK_URL =
   process.env.DEEPSEEK_BASE_URL?.replace(/\/+$/, '') ?? 'https://api.deepseek.com/v1'
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? ''
 const DEEPSEEK_MODEL = process.env.LLM_MODEL ?? 'deepseek-chat'
-const TIMEOUT_MS = 12_000
+const TIMEOUT_MS = Number(process.env.DEEPSEEK_TIMEOUT_MS) || 30_000
+const MAX_TOKENS = Number(process.env.DEEPSEEK_MAX_TOKENS) || 2048
 
 interface DeepSeekChoice {
   message?: { content?: string | null }
@@ -74,6 +75,7 @@ async function callDeepSeek<T>(
           { role: 'user', content: userPrompt }
         ],
         response_format: { type: 'json_object' },
+        max_tokens: MAX_TOKENS,
         temperature: options.temperature ?? 0.7
       }),
       signal: ac.signal

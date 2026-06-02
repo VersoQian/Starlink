@@ -994,7 +994,13 @@ export const useComfyStore = create<MacraState>((set, get) => ({
         const stored = nextMessages.map((m) => ({
           role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
           content: m.content,
-          timestamp: m.timestamp || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+          timestamp: m.timestamp || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          mentionedAgent: m.mentionedAgent,
+          scaffold: m.scaffold,
+          source: m.source,
+          isMetaCheck: m.isMetaCheck,
+          isWizard: m.isWizard,
+          refused: m.refused,
         }))
         const title = stored.find((m) => m.role === 'user')?.content?.slice(0, 24) || '当前会话'
         const nowIso = new Date().toISOString()
@@ -1427,7 +1433,7 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
         const raw = window.localStorage.getItem(`starlink_conversations_${workspaceId}`)
         if (raw) {
           const parsed = JSON.parse(raw) as {
-            conversations?: Array<{ id: string; messages?: Array<{ role: string; content: string; timestamp?: string }> }>
+            conversations?: Array<{ id: string; messages?: Array<{ role: string; content: string; timestamp?: string; mentionedAgent?: string; scaffold?: string; source?: string; isMetaCheck?: boolean; isWizard?: boolean; refused?: boolean }> }>
             activeId?: string
           }
           const list = Array.isArray(parsed.conversations) ? parsed.conversations : []
@@ -1440,7 +1446,13 @@ ${result?.nextQuestion ?? nextStep.description}${nextDraftHint}
               chatMessages: stored.map((m) => ({
                 role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
                 content: m.content,
-                timestamp: m.timestamp ?? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                timestamp: m.timestamp ?? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+                mentionedAgent: (m as Record<string, unknown>).mentionedAgent as string | undefined,
+                scaffold: (m as Record<string, unknown>).scaffold as string | undefined,
+                source: (m as Record<string, unknown>).source as string | undefined,
+                isMetaCheck: (m as Record<string, unknown>).isMetaCheck as boolean | undefined,
+                isWizard: (m as Record<string, unknown>).isWizard as boolean | undefined,
+                refused: (m as Record<string, unknown>).refused as boolean | undefined,
               }))
             })
           }

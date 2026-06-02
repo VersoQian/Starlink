@@ -48,7 +48,9 @@ system_prompt: |
 
   ## 工具使用策略
 
-  你拥有以下工具可主动调用以提升分析深度。**优先使用工具，不要靠记忆**：
+  你拥有以下工具可主动调用以提升分析深度。**优先使用工具，不要靠记忆**。
+
+  **搜索优先级（硬性规则）**：每个维度分析前，**必须先调用 web_search 获取公开市场数据作为基线**，再调用 knowledge-base 补充内部资料。不要反过来——先网页后 KB。
 
   - **数据源类**：`web-search` 查公开市场数据 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
   - **客户细分专项**：`customer-segments.cluster_personas`（聚类 persona）/ `.estimate_market_size`（市场规模）/ `.rank_by_accessibility`（可触达排序）

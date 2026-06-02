@@ -14,7 +14,12 @@ export const COACH_SCRIPTED_PIVOT_THRESHOLD = 15
 export const COACH_DEFLECTION_HINT_THRESHOLD = 20
 
 export const COACH_SCRIPTED_PIVOT_CONTENT =
-  '好的，这个问题先放一放。我们换个角度：你目前最不确定的是哪个方面？或者说，有没有之前没聊到但你觉得重要的点？'
+  '你好像对这个方向兴趣不大。那我们换个具体的话题——从下面选一个你能立刻回答的：\n\n' +
+  '1. 谁会付钱？付多少？\n' +
+  '2. 你的第一个客户从哪来？\n' +
+  '3. 这件事最大的风险是什么？\n' +
+  '4. 替代方案是什么？用户现在怎么解决这个问题的？\n\n' +
+  '挑一个说就行。'
 
 export function shouldScriptCoachPivot(content: string): boolean {
   return content.trim().length < COACH_SCRIPTED_PIVOT_THRESHOLD

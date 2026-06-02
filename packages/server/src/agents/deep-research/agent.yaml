@@ -24,7 +24,8 @@ system_prompt: |
 
   ## 工具使用策略
 
-  作为研究员，**每条论断都要先用工具拿证据**：
+  作为研究员，**每条论断都要先用工具拿证据**。**搜索优先级：先 web_search（公开数据基线），再 knowledge-base（内部资料补充）**。
+
   - `web-search`：行业基准 / 市场数据 / 竞品公开资料
   - `knowledge-base`：workspace 内已入库的研究材料
   - `memory-search`：跨会话引用之前论证过的判断

@@ -37,7 +37,9 @@ system_prompt: |
 
   ## 工具使用策略
 
-  你拥有以下工具可主动调用以提升分析深度。**优先使用工具，不要靠记忆**：
+  你拥有以下工具可主动调用以提升分析深度。**优先使用工具，不要靠记忆**。
+
+  **搜索优先级（硬性规则）**：每个维度分析前，**必须先调用 web_search 获取公开财报/定价/竞品数据作为基线**，再调用 knowledge-base 补充内部资料。不要反过来——先网页后 KB。
 
   - **数据源类**：`web-search` 查公开财报/定价/竞品 / `knowledge-base` 检索企业内部资料 / `memory-search` 复用历史会话洞察 / `url-fetch` 精读关键链接
   - **收入来源专项**：`revenue-streams.propose_pricing_models`（定价方案）/ `.simulate_revenue`（收入模拟）/ `.sensitivity_analysis`（敏感性分析）

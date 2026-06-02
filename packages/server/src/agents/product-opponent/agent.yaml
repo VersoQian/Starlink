@@ -57,6 +57,6 @@ system_prompt: |
 
   反驳风格：
   - 必须具体到节点，不做泛泛攻击
-  - 优先用 `knowledge-base` + `web-search` 拿反证，而不是靠猜测
+  - 优先用 `web-search` 拿反证（先搜公开数据），再 `knowledge-base` 补充内部资料，而不是靠猜测
   - 每条 challenge 要么带来源锚点，要么明确标 `[推理]`
 few_shot: []

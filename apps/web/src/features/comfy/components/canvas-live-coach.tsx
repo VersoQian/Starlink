@@ -89,6 +89,10 @@ interface Props {
   onShowConflicts: () => void
   /** Open the chat dock. */
   onOpenChat: () => void
+  /** HITL: let agent auto-revise conflicts. */
+  onApproveAutoRevise?: () => void
+  /** HITL: accept current BMC as-is. */
+  onAcceptCurrent?: () => void
   /**
    * P11.18 anti-overlap · when the right-side citation/insight panel
    * (340px) is open, shift this floating column to the left of it
@@ -293,7 +297,13 @@ export function CanvasLiveCoach(props: Props) {
         headline: '有决策需要你确认',
         detail: '点开聊天，看 critic 提出的问题',
         actions: [
-          { label: '打开聊天', onClick: props.onOpenChat, severity: 'primary', icon: ArrowRight }
+          ...(props.onAcceptCurrent
+            ? [{ label: '接受当前', onClick: props.onAcceptCurrent, severity: 'info' as const, icon: ListChecks }]
+            : []),
+          ...(props.onApproveAutoRevise
+            ? [{ label: '让 Agent 修正', onClick: props.onApproveAutoRevise, severity: 'primary' as const, icon: Sparkles }]
+            : []),
+          { label: '打开聊天', onClick: props.onOpenChat, severity: 'info', icon: ArrowRight }
         ]
       }
     }
@@ -471,8 +481,8 @@ export function CanvasLiveCoach(props: Props) {
   // Citation panel width 340 + right-4 padding 16 + 16 gap = 372px
   // offset from the right edge.
   const positionClass = props.shiftLeftForPanel
-    ? 'absolute top-[88px] right-[372px] z-20 flex flex-col gap-2 items-end transition-[right] duration-200'
-    : 'absolute top-[88px] right-6 z-20 flex flex-col gap-2 items-end transition-[right] duration-200'
+    ? 'absolute top-[88px] right-[372px] z-30 flex flex-col gap-2 items-end transition-[right] duration-200'
+    : 'absolute top-[88px] right-6 z-30 flex flex-col gap-2 items-end transition-[right] duration-200'
 
   if (collapsed) {
     return (

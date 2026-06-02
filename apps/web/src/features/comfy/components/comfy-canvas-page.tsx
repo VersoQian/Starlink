@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Node, Edge } from 'reactflow'
 import { useComfyStore } from '../store'
 import { buildConflictEdges } from '../store/build-conflict-edges'
@@ -129,6 +129,9 @@ export function CanvasPage({
 
   // Citation highlight: Esc 键清除反向高亮 + 卡片高亮 className derivation
   useCitationHighlight()
+
+  // Track which HITL decision conversationId has already been written to chat
+  const hitlWrittenRef = useRef<string | null>(null)
 
   // 检测 HITL 决策请求
   const pendingDecisionRequest = useMemo(() => {
@@ -276,10 +279,16 @@ export function CanvasPage({
   useEffect(() => {
     if (pendingDecisionRequest) {
       setWorkflowStage('review', 'decision-requested')
-      // P15-fix · Auto-open chat dock when HITL triggers so the user
-      // immediately sees the critic's conflicts and decision context,
-      // rather than staring at a "点开聊天" button that does nothing.
       setChatOpen(true)
+      // Write critic's conflict into chat so the user can actually read it.
+      // Without this, "点开聊天，看 critic 提出的问题" shows an empty chat.
+      if (hitlWrittenRef.current !== pendingDecisionRequest.conversationId) {
+        hitlWrittenRef.current = pendingDecisionRequest.conversationId
+        useComfyStore.getState().appendChatMessage({
+          role: 'assistant',
+          content: `## ⚠️ 需要你拍板\n\nCritic 审查了 BMC 节点，发现以下问题：\n\n${pendingDecisionRequest.payload.decision}\n\n---\n请通过画布上的按钮选择：**接受当前结果** / **让 Agent 自行修正**，或在聊天框输入你的具体修正方向后发送。`,
+        })
+      }
       return
     }
 
@@ -628,7 +637,7 @@ export function CanvasPage({
 
   const handleApproveAutoRevise = useCallback(async () => {
     if (!pendingDecisionRequest) return
-    await approveDecision(pendingDecisionRequest.conversationId, 'auto_revise')
+    await approveDecision(pendingDecisionRequest.conversationId, '[EDIT_PLAN]:auto-revise')
     appendChatMessage({ role: 'assistant', content: '已指示 Agent 自行修正冲突。' })
   }, [appendChatMessage, approveDecision, pendingDecisionRequest])
 
@@ -641,7 +650,7 @@ export function CanvasPage({
 
   const handleAcceptCurrentDecision = useCallback(async () => {
     if (!pendingDecisionRequest) return
-    await approveDecision(pendingDecisionRequest.conversationId, 'accept_current')
+    await approveDecision(pendingDecisionRequest.conversationId, '[ACCEPTED]')
     appendChatMessage({ role: 'assistant', content: '已接受当前分析结果。' })
     setWorkflowStage('output', 'decision-accepted')
   }, [appendChatMessage, approveDecision, pendingDecisionRequest, setWorkflowStage])
@@ -924,11 +933,6 @@ export function CanvasPage({
             workspaceId={workspaceId}
             shiftLeftForPanel={citationOpen}
             onOpenWizard={() => {
-              // Primary path: in-chat wizard (one continuous thread,
-              // user sees BMC nodes appear as they answer). The
-              // side-drawer wizard is still available via its own
-              // floating button for users who prefer dedicated UI.
-              // Sprint 1.2 · KB pre-read enabled by default.
               const { startWizardInChat } = useComfyStore.getState()
               setChatOpen(true)
               void startWizardInChat(workspaceId, true)
@@ -937,14 +941,14 @@ export function CanvasPage({
             onOpenMemory={() => setMemoryOpen(true)}
             onShowConflicts={() => {
               setCitationOpen(true)
-              // Picking the first conflict id surfaces the review tab
-              // with that conflict expanded; null clears prior selection.
               const firstConflict = Array.from(macraNodes.values()).find(
                 (n) => n.type === 'conflict-alert'
               )
               setFocusedConflictId(firstConflict?.id ?? null)
             }}
             onOpenChat={() => setChatOpen(true)}
+            onApproveAutoRevise={handleApproveAutoRevise}
+            onAcceptCurrent={handleAcceptCurrentDecision}
           />
         ) : null}
       </div>

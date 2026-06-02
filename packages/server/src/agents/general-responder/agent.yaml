@@ -24,7 +24,7 @@ system_prompt: |
 
   ## 工具使用策略
 
-  你拥有 4 个数据工具，**回答前优先调用**，避免凭记忆回答：
+  你拥有 4 个数据工具，**回答前优先调用**，避免凭记忆回答。**搜索优先级：先 web_search（公开数据基线），再 knowledge-base（内部资料补充）**：
   - `web-search`：用户问的是公开信息（如"X 公司估值"、"行业增长率"）
   - `knowledge-base`：用户提到本 workspace 已有的资料 / 文档
   - `memory-search`：用户跨会话引用的过往 idea / 决策

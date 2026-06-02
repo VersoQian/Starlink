@@ -275,10 +275,29 @@ The model-tier column of Table 3-1 reflects a deliberate choice: latency-sensiti
 
 **Agent profile schema.** Each agent's behavior is determined by a declarative configuration that specifies the role's name, the language-model tier it uses, the system prompt, the set of tools and analytical capabilities it is bound to, and bounded resource limits. Among these fields, the capabilities list is the load-bearing one: it determines which dimensions of the canvas the agent is responsible for producing, and is the structural mechanism behind the Declarative Coverage principle below.
 
-**Tool registry and agent–tool bindings.** Agents do not call language models directly. Every agent is bound to a subset of a registry of thirty-eight tools — eleven generic tools plus twenty-seven dimension-actions (nine canvas dimensions × three action verbs: *analyze* / *generate* / *validate*). Figure 3-4 visualizes the bindings.
+**Tool registry and agent–tool bindings.** Agents do not call language models directly. Every agent is bound to a subset of a registry of thirty-eight tools. Fifteen are dimension-action tools scoped to one canvas dimension and one domain-specific operation. The remaining twenty-three are generic primitives for data access, retrieval, analysis, canvas output, and control flow. Figure 3-4 visualizes the bindings.
 
 ![Figure 3-4: Tool registry and agent-tool bindings](figures/fig3-4-toolreg.png)
-*Figure 3-4: Tool registry and agent–tool bindings. Three generator agents bind to disjoint dimension-action subsets — `market-agent` ⇢ CS/CH/CR, `product-agent` ⇢ VP/KR/KA/KP, `finance-agent` ⇢ RS/CO — over three action verbs (analyze, generate, validate).*
+*Figure 3-4: Tool registry and agent–tool bindings. Three generator agents bind to disjoint dimension-action subsets: `market-agent` covers CS/CH/CR, `product-agent` covers VP/KR/KA/KP, and `finance-agent` covers RS/CO. The remaining roles receive smaller shared-tool surfaces matched to their responsibilities.*
+
+**Table 3-3.** Runtime tool bindings of the twelve worker agents. The table lists tools exposed directly to each agent at invocation time. The complete registry also contains internal analysis, output, and control-flow primitives that are not exposed to every agent.
+
+| Agent | Shared tools exposed at runtime | Dimension-action tools |
+|-------|---------------------------------|------------------------|
+| `market-agent` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | `customer-segments.cluster_personas`; `customer-segments.estimate_market_size`; `customer-segments.rank_by_accessibility`; `channels.propose_acquisition_channels`; `customer-relationships.classify_relationship_type` |
+| `product-agent` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | `value-propositions.extract_jtbd`; `value-propositions.map_pain_to_gain`; `value-propositions.differentiation_score`; `key-resources.classify_resources`; `key-activities.identify_critical_activities`; `key-partnerships.propose_partner_categories` |
+| `finance-agent` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | `revenue-streams.propose_pricing_models`; `revenue-streams.sensitivity_analysis`; `revenue-streams.simulate_revenue`; `cost-structure.breakdown_cost_categories` |
+| `critic-agent` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | None |
+| `synthesizer` | `knowledge-base`; `memory-search` | None |
+| `market-opponent` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | None |
+| `product-opponent` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | None |
+| `finance-opponent` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | None |
+| `moderator` | None | None |
+| `general-responder` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | None |
+| `deep-research` | `web-search`; `knowledge-base`; `memory-search`; `url-fetch` | None |
+| `report-writer` | `knowledge-base`; `memory-search` | None |
+
+The binding table makes an important distinction explicit. Tool bindings limit the operations exposed to an agent at runtime, while dimension capabilities determine which blackboard slots a generator may update. A tool registered by the platform is not automatically visible to every agent.
 
 **Capability Registry.** The notion of an agent being bound to a typed set of tools follows the tool-learning literature surveyed by Qu et al. [42]. The generic tools fall into three functional groups: *data sources* that pull information into a reasoning step (knowledge-base retrieval, web search, URL fetch, file reading, outbound API and database access, and memory search); *analyses* that transform text into structured features (sentiment classification, keyword extraction, risk scoring, competitive comparison), and *control-output* primitives that emit canvas updates. Each tool is exposed as a typed function with a well-defined input and output schema, so that any tool can be invoked by any agent that is bound to it without further integration work.
 
@@ -336,9 +355,9 @@ This subsection covers the two mechanisms that protect the value of declarative 
 
 **Citation provenance and lifecycle.** The citation lifecycle exposes the audit surface of declarative coverage. A reader can confirm not only that a dimension was produced, but that each claim within it traces back either to retrievable documentary evidence or to a typed system-internal artifact (a critic note, a synthesizer insight, a structural link). Coverage is thereby verifiable in two directions: the blackboard slot witnesses that the dimension was filled, and the citation on each claim witnesses the source of what fills it.
 
-**Citation Taxonomy.** Table 3-3 lists the four classes of citation used in the system, organized by what produces them and how they are surfaced to the user. The taxonomy distinguishes documentary evidence (a retrieved knowledge-base chunk) from system-internal artifacts (a critic's conflict note, a synthesizer's cross-cell insight, a structural link between canvas cells). Each class is rendered as a typed interactive element on the canvas rather than as inline text, so the reader can distinguish a claim grounded in a source document from a claim grounded in the system's own reasoning.
+**Citation Taxonomy.** Table 3-4 lists the four classes of citation used in the system, organized by what produces them and how they are surfaced to the user. The taxonomy distinguishes documentary evidence (a retrieved knowledge-base chunk) from system-internal artifacts (a critic's conflict note, a synthesizer's cross-cell insight, a structural link between canvas cells). Each class is rendered as a typed interactive element on the canvas rather than as inline text, so the reader can distinguish a claim grounded in a source document from a claim grounded in the system's own reasoning.
 
-**Table 3-3.** Citation classes and their interaction destinations.
+**Table 3-4.** Citation classes and their interaction destinations.
 
 | Class               | Producer        | Frontend behavior                                |
 |---------------------|-----------------|--------------------------------------------------|
@@ -347,7 +366,7 @@ This subsection covers the two mechanisms that protect the value of declarative 
 | critique            | critic          | opens a review panel with the conflict detail   |
 | insight             | synthesizer     | opens the corresponding cross-cell insight node |
 
-![Table 3-3: Citation classes and their interaction destinations](figures/table3-3-citation-taxonomy.png)
+![Table 3-4: Citation classes and their interaction destinations](figures/table3-3-citation-taxonomy.png)
 
 The four classes above are the citation tokens rendered as interactive elements on the canvas. The report-writer agent extends this set with two report-internal markers used inside its eight-section narrative output: `[[bmc:dimension]]` for a name-based pointer to a populated canvas cell, and `[[no-ref]]` to flag a claim as the agent's own inference rather than retrieved evidence. These two markers are scoped to report output and do not appear on the canvas itself.
 
@@ -426,9 +445,9 @@ The pipeline invokes retrieval on every generator dispatch (Algorithm 1, step 5)
 
 Four ingestion paths are supported (text seed, URL fetch, file upload, administrative SQL). The URL path is guarded against SSRF and DNS-rebinding. The chunker is paragraph-first with a 600-character target and 80-character overlap. An ablation over {300, 600, 900, 1200} placed recall@5 maxima within 4 % of the 600 setting.
 
-**Embedding with deterministic fallback.** Three remote embedding providers are supported, plus a deterministic local fallback used only when the remote provider fails (Table 3-4). The `local-hash` fallback uses the same Unicode-class tokenization as the lexical channel of the next subsection, builds a sparse 1 536-dimensional bag-of-tokens vector, and L2-normalizes it so cosine similarity remains well defined. Its quality is by construction far below any real embedding model. Its role is *availability*, not quality.
+**Embedding with deterministic fallback.** Three remote embedding providers are supported, plus a deterministic local fallback used only when the remote provider fails (Table 3-5). The `local-hash` fallback uses the same Unicode-class tokenization as the lexical channel of the next subsection, builds a sparse 1 536-dimensional bag-of-tokens vector, and L2-normalizes it so cosine similarity remains well defined. Its quality is by construction far below any real embedding model. Its role is *availability*, not quality.
 
-**Table 3-4.** Supported embedding providers and their operating characteristics.
+**Table 3-5.** Supported embedding providers and their operating characteristics.
 
 | Provider               | Model                     | Dim   | Region notes                                     |
 |------------------------|---------------------------|------:|--------------------------------------------------|
@@ -437,7 +456,7 @@ Four ingestion paths are supported (text seed, URL fetch, file upload, administr
 | OpenAI                 | `text-embedding-3-small`  | 1 536 | Used in international deployments only           |
 | `local-hash` (offline) | deterministic hash-bag    | 1 536 | No network; lower retrieval quality; for availability|
 
-![Table 3-4: Supported embedding providers and their operating characteristics](figures/table3-4-embedding-providers.png)
+![Table 3-5: Supported embedding providers and their operating characteristics](figures/table3-4-embedding-providers.png)
 
 #### 3.3.2 Bilingual Tokenization and Rank Fusion
 
@@ -720,7 +739,7 @@ Once the canvas is populated, a session-summary card on the viewport surfaces th
 ![Figure 4-3e: Report drawer with typed citation chips](figures/screenshot-report-drawer.png)
 *Figure 4-3e: Report drawer surfacing the full report-writer output. The left rail is the section TOC; the right pane renders each section with the typed citation tokens of Figure 4-3k inline.*
 
-The report body uses five typed-citation token classes inline (Figure 4-3k): the four canonical classes of Table 3-3 — `[[ref:docId#chunkId]]` for documentary evidence, `[[bmc:dimension]]` for structural references to populated canvas cells, `[[critic:conflictId]]` for critic-flagged conflicts, and `[[insight:nodeId]]` for synthesizer insights — plus a fifth report-internal marker, `[[no-ref]]`, used to flag claims the agent is offering as its own inference rather than retrieved evidence. The first four resolve to interactive chips that route the click into the corresponding canvas element through the chip-click mechanism described later. The `[[no-ref]]` marker renders as a non-interactive grey footnote, making the agent's epistemic posture legible without forcing every claim into a fictitious citation. The typed-citation taxonomy of Table 3-3 therefore ends up on the page as actual content rather than as an abstract claim.
+The report body uses five typed-citation token classes inline (Figure 4-3k): the four canonical classes of Table 3-4 — `[[ref:docId#chunkId]]` for documentary evidence, `[[bmc:dimension]]` for structural references to populated canvas cells, `[[critic:conflictId]]` for critic-flagged conflicts, and `[[insight:nodeId]]` for synthesizer insights — plus a fifth report-internal marker, `[[no-ref]]`, used to flag claims the agent is offering as its own inference rather than retrieved evidence. The first four resolve to interactive chips that route the click into the corresponding canvas element through the chip-click mechanism described later. The `[[no-ref]]` marker renders as a non-interactive grey footnote, making the agent's epistemic posture legible without forcing every claim into a fictitious citation. The typed-citation taxonomy of Table 3-4 therefore ends up on the page as actual content rather than as an abstract claim.
 
 ![Figure 4-3k: Typed citation tokens in the rendered report](figures/screenshot-citation-tokens.png)
 *Figure 4-3k: Typed citation tokens (`[[bmc:...]]`, `[[insight:...]]`, `[[ref:...]]`) rendered as clickable chips inline in the report body — the user-visible side of the typed-citation taxonomy.*

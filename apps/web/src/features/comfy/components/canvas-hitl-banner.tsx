@@ -24,7 +24,7 @@ export function CanvasHitlBanner({ visible, onAutoRevise, onAcceptCurrent }: Pro
 
   return (
     <div
-      className="absolute top-4 left-1/2 -translate-x-1/2 z-20 max-w-[640px] w-[min(640px,calc(100%-380px))] pointer-events-auto"
+      className="absolute top-4 left-1/2 -translate-x-1/2 z-30 max-w-[640px] w-[min(640px,calc(100%-380px))] pointer-events-auto"
       role="alertdialog"
       aria-label="Decision Required"
     >
