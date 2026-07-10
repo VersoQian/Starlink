@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * ConversationRail — left-side ChatGPT-style conversation list.
+ * ConversationRail — left-side conversation list.
  *
  * - Brand mark + "New chat" button at top
  * - Scrollable list of conversations grouped by recency (today / past 7d / older)

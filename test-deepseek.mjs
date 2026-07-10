@@ -3,11 +3,16 @@
  * 官方文档: https://api-docs.deepseek.com/
  */
 
-const API_KEY = 'sk-ndnzpqisdhqdzithfspzzvgciufhtqvvfxxvsnpmwdhmkipu'
+const API_KEY = process.env.DEEPSEEK_API_KEY
 const BASE_URL = 'https://api.deepseek.com'
 const MODEL = 'deepseek-chat'
 
 async function testDeepSeek() {
+  if (!API_KEY) {
+    console.error('❌ Missing DEEPSEEK_API_KEY')
+    process.exit(1)
+  }
+
   console.log('🧪 测试 DeepSeek API...\n')
   console.log(`📍 Base URL: ${BASE_URL}`)
   console.log(`🤖 Model: ${MODEL}`)

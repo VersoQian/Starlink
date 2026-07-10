@@ -2,11 +2,16 @@
  * 快速测试 LLM API 是否可用
  */
 
-const API_KEY = 'sk-9K6pQ8oOSCJUQc7MF5B82bCbA4944a8eBe5d0596B87448A8'
+const API_KEY = process.env.APIFLOW_API_KEY
 const BASE_URL = 'https://apiflow.cc/v1'
 const MODEL = 'Qwen/Qwen3-235B-A22B-Instruct-2507'
 
 async function testLLM() {
+  if (!API_KEY) {
+    console.error('❌ Missing APIFLOW_API_KEY')
+    process.exit(1)
+  }
+
   console.log('🧪 测试 LLM API...\n')
   console.log(`📍 Base URL: ${BASE_URL}`)
   console.log(`🤖 Model: ${MODEL}`)

@@ -1,5 +1,5 @@
 /**
- * Tier A YC-and-extended dataset registry.
+ * Tier A YC dataset registry.
  *
  * Add new cases by importing them here. The benchmark CLI auto-loads
  * everything from this index. Cases are exported as raw `YcCompanyCase`
@@ -18,7 +18,7 @@ import { ycStripeCase } from './yc-stripe.js'
 import { ycAirbnbCase } from './yc-airbnb.js'
 import { ycReplitCase } from './yc-replit.js'
 import { ycPebbleCase } from './yc-pebble.js'
-import { ycCourseraCase } from './yc-coursera.js'
+import { ycSpeakCase } from './yc-speak.js'
 import { ycNotionCase } from './yc-notion.js'
 import { ycCoinbaseCase } from './yc-coinbase.js'
 import { ycDoorDashCase } from './yc-doordash.js'
@@ -32,7 +32,7 @@ const SEED_CASES: YcCompanyCase[] = [
   ycAirbnbCase,
   ycReplitCase,
   ycPebbleCase,
-  ycCourseraCase,
+  ycSpeakCase,
   ycNotionCase,
   ycCoinbaseCase,
   ycDoorDashCase,

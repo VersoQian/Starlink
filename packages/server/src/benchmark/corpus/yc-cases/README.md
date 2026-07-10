@@ -1,4 +1,4 @@
-# Tier A Benchmark — YC + extended cases
+# Tier A Benchmark — YC cases
 
 Real-startup benchmark dataset for Starlink's BMC pipeline. Replaces the
 synthetic / authored-probe cases under `corpus/cases/` with public,
@@ -19,7 +19,7 @@ verifiable startup info + hand-authored ground-truth BMCs.
 | `yc-airbnb-2024` | marketplace | public | Two-sided marketplace pattern |
 | `yc-replit-2024` | devtools | active | Multi-segment freemium + AI-cost-heavy |
 | `yc-pebble-2016` | hardware | shut-down | Negative example — tests outcome-conditioned BMCs |
-| `extended-coursera-2024` | edtech | public | NOT YC (extended sector representative) |
+| `yc-speak-2024` | edtech | active | AI language-learning subscription |
 | `yc-notion-2024` | consumer-saas | active | Bottom-up cross-segment SaaS, blocks model |
 | `yc-coinbase-2021` | fintech | public | Regulated marketplace, compliance-heavy cost |
 | `yc-doordash-2020` | logistics | public | Three-sided gig marketplace, courier-pay dominates cost |
@@ -30,7 +30,7 @@ verifiable startup info + hand-authored ground-truth BMCs.
 
 **Sector coverage at N=12** (sectors / 12): fintech ×3, marketplace, devtools, hardware, edtech, consumer-saas, logistics, gaming, b2b-saas, media — 10 of 15 enum values represented.
 
-**Outcome coverage at N=12**: active ×5, public ×4, acquired ×2, shut-down ×1 — all 4 enum values represented.
+**Outcome coverage at N=12**: active ×6, public ×3, acquired ×2, shut-down ×1 — all 4 enum values represented.
 
 ## Schema
 
@@ -80,8 +80,6 @@ in Stage J.4.
 - YC company info is public on `ycombinator.com/companies` — we cite via
   `source_url`, do **not** redistribute YC's content. Each case stores
   only the verbatim public profile + our own annotations.
-- Coursera (the extended case) profile sourced from `about.coursera.org`,
-  also public.
 - Our annotations + scoring scripts are part of this repo (whatever
   license the repo carries).
 

@@ -99,3 +99,6 @@ prisma/dev.db-journal
 
 # Benchmark report artifacts (regenerated; not source)
 packages/server/benchmark/reports/
+
+# Presentation/output artifacts (generated builds)
+/outputs/

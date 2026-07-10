@@ -80,7 +80,7 @@ async function callOpenAICompatible(
 }
 
 /**
- * 调用 Anthropic Claude API
+ * 调用 Anthropic Messages API
  */
 async function callAnthropic(
   config: LLMConfig,

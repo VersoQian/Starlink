@@ -134,7 +134,7 @@ export const ycTEMPLATECase: YcCompanyCase = {
  *   - marketplace (1)    : Airbnb (public)
  *   - devtools (1)       : Replit (active)
  *   - hardware (1)       : Pebble (shut-down)
- *   - edtech (1)         : Coursera (public, NOT YC)
+ *   - edtech (1)         : Speak (W17, active)
  *
  * Recommended next 25 to fill out the matrix:
  *

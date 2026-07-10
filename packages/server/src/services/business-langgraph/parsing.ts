@@ -150,7 +150,7 @@ function extractBalancedObject(src: string, start: number): string | null {
  *
  * Without this, a single SyntaxError at position N inside cell 2 would
  * zero out cells 1, 2, AND 3 — a single point of failure for 3 BMC
- * dimensions. Observed on Notion + Coursera in N=12 evals where
+ * dimensions. Observed on Notion + Speak in N=12 evals where
  * market-agent's verbose JSON occasionally trips on Chinese punctuation.
  */
 function partialRecoveryParseObjects(

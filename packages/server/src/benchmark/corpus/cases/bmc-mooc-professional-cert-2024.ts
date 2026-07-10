@@ -14,7 +14,7 @@ export const bmcMoocProfessionalCert2024: BenchmarkCase = {
       {
         doc_id: 'reskill-market-2024',
         title: '中期职业转型市场',
-        content: '2024 年全球中期职业转型培训 $47B；"转技术"类占 22%；雇主侧 30% 对 Coursera-Stanford 等品牌 signaling 加分。'
+        content: '2024 年全球中期职业转型培训 $47B；"转技术"类占 22%；雇主侧 30% 对 edX-MIT 等品牌 signaling 加分。'
       },
       {
         doc_id: 'cohort-vs-self-paced',

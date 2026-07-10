@@ -1,5 +1,5 @@
 /**
- * Agent Executor — implements the Claude Code-style while(toolCall) loop.
+ * Agent Executor — implements a tool-calling while(toolCall) loop.
  * An Agent node uses this to autonomously decide which tools to call.
  */
 

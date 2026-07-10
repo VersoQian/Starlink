@@ -15,7 +15,7 @@ const SCAFFOLD_LABEL = {
 } as const
 
 /**
- * Reflection node — AI-generated prompts that nudge the user to deepen their
+ * Reflection node — system-generated prompts that nudge the user to deepen their
  * thinking. Visually muted (the user's nodes should dominate the canvas), but
  * with a clear "acknowledged" state so the user can mark prompts as handled.
  */
